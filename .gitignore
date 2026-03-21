@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.local
+
+# Logs
+*.log
+brain.log
+output.log
+startup.log
+
+# Audio files (Test data)
+*.wav
+*.aiff
+*.mp3
+*.flac
+*.m4a
+*.ogg
+test_speech.aiff
+
+# Packaging & Build
+dist/
+build/
+*.egg-info/
+.hatch/
+.eggs/
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Other Caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
