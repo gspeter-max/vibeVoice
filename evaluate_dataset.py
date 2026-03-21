@@ -3,7 +3,7 @@ import re
 import string
 import io
 import librosa
-from datasets import load_dataset
+from datasets import load_dataset, Audio
 from faster_whisper import WhisperModel
 import jiwer
 import numpy as np
@@ -16,40 +16,52 @@ warnings.filterwarnings("ignore")
 NUM_SAMPLES = 50
 
 print(f"Loading first {NUM_SAMPLES} samples from LibriSpeech (test-clean)...")
-# We load the dataset with streaming=True and without automatic decoding to be safe
-dataset = load_dataset("librispeech_asr", "clean", split="test", streaming=True)
+try:
+    # Load dataset with streaming
+    dataset = load_dataset("librispeech_asr", "clean", split="test", streaming=True)
+    
+    # CRITICAL: Cast the audio column to NOT decode automatically. 
+    # This bypasses the torchcodec/ImportError issue.
+    dataset = dataset.cast_column("audio", Audio(decode=False))
+except Exception as e:
+    print(f"Error initializing dataset: {e}")
+    exit(1)
 
 # Fetch and decode samples into memory
 samples = []
-print("Fetching and decoding samples...")
-for i, sample in enumerate(dataset):
-    if i >= NUM_SAMPLES:
-        break
-    
-    # The 'audio' field usually contains 'bytes' if not decoded, or 'array' if decoded.
-    # If automatic decoding failed, we try to decode the bytes ourselves.
-    audio_data = sample["audio"]
-    
-    if isinstance(audio_data, dict) and "array" in audio_data:
-        # Already decoded (hopefully)
-        audio_array = audio_data["array"].astype(np.float32)
-        samplerate = audio_data.get("sampling_rate", 16000)
-    elif isinstance(audio_data, dict) and "bytes" in audio_data:
-        # Manual decode from bytes using librosa
-        audio_bytes = io.BytesIO(audio_data["bytes"])
-        audio_array, samplerate = librosa.load(audio_bytes, sr=16000)
-    else:
-        print(f"Warning: Sample {i} has unexpected format: {type(audio_data)}")
-        continue
+print("Fetching and decoding samples manually...")
+try:
+    for i, sample in enumerate(dataset):
+        if i >= NUM_SAMPLES:
+            break
         
-    # LibriSpeech text is uppercase with no punctuation, let's normalize to lowercase
-    reference_text = sample["text"].lower()
-    
-    samples.append({
-        "audio": audio_array,
-        "reference": reference_text,
-        "duration": len(audio_array) / float(samplerate)
-    })
+        audio_data = sample["audio"]
+        
+        # Since decode=False, audio_data['bytes'] contains the raw file content (WAV/FLAC/etc)
+        if isinstance(audio_data, dict) and "bytes" in audio_data:
+            audio_bytes = io.BytesIO(audio_data["bytes"])
+            # librosa.load is very robust for various formats
+            audio_array, samplerate = librosa.load(audio_bytes, sr=16000)
+        else:
+            # Fallback if casting didn't work as expected
+            print(f"Warning: Sample {i} did not provide raw bytes as expected.")
+            continue
+            
+        # LibriSpeech text is uppercase with no punctuation, let's normalize to lowercase
+        reference_text = sample["text"].lower()
+        
+        samples.append({
+            "audio": audio_array,
+            "reference": reference_text,
+            "duration": len(audio_array) / float(samplerate)
+        })
+except Exception as e:
+    print(f"Error during sample fetching: {e}")
+    exit(1)
+
+if not samples:
+    print("No samples were loaded. Check connection or dataset accessibility.")
+    exit(1)
 
 total_audio_duration = sum(s["duration"] for s in samples)
 print(f"Loaded {len(samples)} samples. Total audio duration: {total_audio_duration:.2f} seconds.")
@@ -66,7 +78,7 @@ def evaluate_model(model_name):
     print(f"Evaluating Model: {model_name}")
     print(f"{'='*60}")
     
-    # Initialize model with Mac-optimized settings we discovered
+    # Initialize model with Mac-optimized settings
     model = WhisperModel(model_name, device="cpu", compute_type="default", cpu_threads=4)
     
     # Warmup
@@ -90,12 +102,11 @@ def evaluate_model(model_name):
     wer = jiwer.wer(references, predictions)
     
     # Calculate Real-Time Factor (RTF)
-    # RTF = processing_time / audio_duration
     rtf = inference_time / total_audio_duration
     
     print(f"Processed {len(samples)} samples.")
     print(f"Total Inference Time: {inference_time:.2f}s")
-    print(f"Real-Time Factor (RTF): {rtf:.3f}x (lower is faster, < 1.0 is faster than real-time)")
+    print(f"Real-Time Factor (RTF): {rtf:.3f}x (lower is faster)")
     print(f"Word Error Rate (WER): {wer * 100:.2f}% (lower is better)")
     
     return {
@@ -114,6 +125,10 @@ for m in models_to_test:
         results.append(res)
     except Exception as e:
         print(f"Error evaluating {m}: {e}")
+
+if not results:
+    print("No models were successfully evaluated.")
+    exit(1)
 
 print("\n\n" + "╔" + "═"*78 + "╗")
 print("║" + " "*30 + "FINAL BENCHMARK SUMMARY" + " "*25 + "║")
