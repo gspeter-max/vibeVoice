@@ -1,2 +1,3 @@
 # vibeVoice
-<img width="980" height="527" alt="image" src="https://github.com/user-attachments/assets/3280f97e-eedc-4415-9455-876d7eb40cbe" />
+<img width="2752" height="1536" alt="Gemini_Generated_Image_o99mqio99mqio99m" src="https://github.com/user-attachments/assets/f7911baf-2c25-4d58-a07c-84050f2e85c2" />
+
