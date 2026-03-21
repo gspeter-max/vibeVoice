@@ -18,6 +18,7 @@ import math
 import select
 import termios
 import tty
+import numpy as np
 from pynput import keyboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -166,21 +167,65 @@ class BrainOutputTailer(threading.Thread):
         self._stop.set()
 
 
+def select_mic(p):
+    """Interactive menu to select the microphone."""
+    print("\n🎤  SELECT YOUR MICROPHONE:")
+    print("─" * 30)
+    
+    devices = []
+    default_device = p.get_default_input_device_info()
+    default_index = default_device.get("index")
+    
+    for i in range(p.get_device_count()):
+        info = p.get_device_info_by_index(i)
+        if info.get("maxInputChannels") > 0:
+            name = info.get("name")
+            is_default = " (DEFAULT)" if i == default_index else ""
+            print(f" [{i}] {name}{is_default}")
+            devices.append(i)
+            
+    print("─" * 30)
+    
+    while True:
+        try:
+            choice = input(f"Select Mic Index [default {default_index}]: ").strip()
+            if not choice:
+                return default_index
+            idx = int(choice)
+            if idx in devices:
+                return idx
+            else:
+                print("❌ Invalid index. Please choose from the list above.")
+        except ValueError:
+            print("❌ Please enter a valid number.")
+
 # ── Main ear class ─────────────────────────────────────────────────────────────
 class Ear:
-    def __init__(self):
+    def __init__(self, input_device_index=None):
         self.p            = pyaudio.PyAudio()
         self.stream       = None
         self.frames       = []
         self.is_recording = False
         self._lock        = threading.Lock()
         self.last_rms     = 0.0
+        
+        if input_device_index is None:
+             self.input_device_index = self.p.get_default_input_device_info().get("index")
+        else:
+             self.input_device_index = input_device_index
+             
+        self.active_mic_name = self.p.get_device_info_by_index(self.input_device_index).get("name")
+        self.gain_multiplier = 2.0  # Boost volume by 2x
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
             if self.is_recording:
-                self.frames.append(in_data)
-                self.last_rms = get_rms(in_data)
+                # Apply digital gain boost
+                audio_data = np.frombuffer(in_data, dtype=np.int16)
+                boosted_audio = (audio_data.astype(np.float32) * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
+                
+                self.frames.append(boosted_audio.tobytes())
+                self.last_rms = get_rms(boosted_audio.tobytes())
         return (None, pyaudio.paContinue)
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
@@ -195,7 +240,7 @@ class Ear:
             self.last_rms = 0.0
 
         print("\r\n" + "─" * 50, flush=True)
-        print("\r🎙️  RECORDING — release key to stop", flush=True)
+        print(f"\r🎙️  RECORDING ({self.active_mic_name}) — release key to stop", flush=True)
 
         try:
             self.stream = self.p.open(
@@ -203,6 +248,7 @@ class Ear:
                 channels=CHANNELS,
                 rate=RATE,
                 input=True,
+                input_device_index=self.input_device_index,
                 frames_per_buffer=CHUNK,
                 stream_callback=self._audio_callback
             )
@@ -283,6 +329,11 @@ class Ear:
 def start_ear():
     log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brain.log")
 
+    # Interactive Mic Selection
+    p_temp = pyaudio.PyAudio()
+    selected_mic_index = select_mic(p_temp)
+    p_temp.terminate()
+
     # Start brain log tailer in background
     tailer = BrainOutputTailer(log_path)
     tailer.start()
@@ -291,7 +342,7 @@ def start_ear():
     menu = TerminalMenu()
     menu.start()
 
-    ear = Ear()
+    ear = Ear(input_device_index=selected_mic_index)
     listener = keyboard.Listener(on_press=ear.on_press, on_release=ear.on_release)
     listener.start()
 
