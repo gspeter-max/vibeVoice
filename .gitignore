@@ -53,3 +53,7 @@ Thumbs.db
 .mypy_cache/
 .coverage
 htmlcov/
+
+# Git Worktrees
+/.worktrees/
+
