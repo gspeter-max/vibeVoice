@@ -79,11 +79,19 @@ def evaluate_model(model_name):
     print(f"{'='*60}")
     
     import multiprocessing
-    # Initialize model with Mac-optimized settings for Intel CPU
-    model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=multiprocessing.cpu_count())
+    if "parakeet-tdt" in model_name:
+        import backend_parakeet
+        model = backend_parakeet.load_model(model_name)
+    else:
+        # Initialize model with Mac-optimized settings for Intel CPU
+        model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=multiprocessing.cpu_count())
     
     # Warmup
-    model.transcribe(samples[0]["audio"], language="en", vad_filter=True)
+    if "parakeet-tdt" in model_name:
+        import backend_parakeet
+        backend_parakeet.transcribe(model, samples[0]["audio"])
+    else:
+        model.transcribe(samples[0]["audio"], language="en", vad_filter=True)
     
     predictions = []
     references = [s["reference"] for s in samples]
@@ -91,9 +99,13 @@ def evaluate_model(model_name):
     start_time = time.time()
     
     for i, sample in enumerate(samples):
-        # We use beam_size=5 for consistency with standard faster-whisper benchmarks
-        segments, _ = model.transcribe(sample["audio"], language="en", vad_filter=True, beam_size=5)
-        pred_text = " ".join([seg.text for seg in segments])
+        if "parakeet-tdt" in model_name:
+            import backend_parakeet
+            pred_text = backend_parakeet.transcribe(model, sample["audio"])
+        else:
+            # We use beam_size=5 for consistency with standard faster-whisper benchmarks
+            segments, _ = model.transcribe(sample["audio"], language="en", vad_filter=True, beam_size=5)
+            pred_text = " ".join([seg.text for seg in segments])
         predictions.append(normalize_text(pred_text))
         
     end_time = time.time()
@@ -125,7 +137,9 @@ models_to_test = [
     "large-v2",
     "large-v3",
     "Systran/faster-distil-whisper-large-v3",
-    "deepdml/faster-whisper-large-v3-turbo-ct2"
+    "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "parakeet-tdt-0.6b-v2",
+    "parakeet-tdt-0.6b-v3"
 ]
 results = []
 

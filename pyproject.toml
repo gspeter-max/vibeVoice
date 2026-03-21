@@ -22,6 +22,8 @@ dependencies = [
 # Install with: uv pip install -e ".[dev]"
 dev = [
     "rich>=13.0.0",   # nicer terminal output during development
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
 ]
 
 

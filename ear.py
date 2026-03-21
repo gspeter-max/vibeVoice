@@ -38,7 +38,9 @@ MODELS = [
     "medium.en",
     "large-v2",
     "large-v3",
-    "deepdml/faster-whisper-large-v3-turbo-ct2"
+    "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "parakeet-tdt-0.6b-v2",
+    "parakeet-tdt-0.6b-v3"
 ]
 
 # ── Volume RMS helper ──────────────────────────────────────────────────────────
@@ -61,6 +63,22 @@ def send_switch_command(model_name):
         client.close()
     except Exception as e:
         print(f"\n❌ Failed to send switch command: {e}\n", end="", flush=True)
+
+def run_self_test():
+    """Sends a synthetic 440Hz sine wave to the Brain to verify the pipe."""
+    print("\n🧪 Running SELF-TEST (synthetic audio)...\n", end="", flush=True)
+    import numpy as np
+    
+    # 1 second of 440Hz sine wave at 16kHz
+    duration = 1.0
+    frequency = 440.0
+    t = np.linspace(0, duration, int(RATE * duration), endpoint=False)
+    audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16).tobytes()
+    
+    # Borrow Ear's _send_to_brain logic but with custom data
+    temp_ear = Ear()
+    temp_ear.frames = [audio_data]
+    temp_ear._send_to_brain()
 
 # ── Terminal Menu Thread ───────────────────────────────────────────────────────
 class TerminalMenu(threading.Thread):
@@ -95,6 +113,12 @@ class TerminalMenu(threading.Thread):
                         send_switch_command(MODELS[6])
                     elif c == '8':
                         send_switch_command(MODELS[7])
+                    elif c == '9':
+                        send_switch_command(MODELS[8])
+                    elif c == '0':
+                        send_switch_command(MODELS[9])
+                    elif c.lower() == 't':
+                        threading.Thread(target=run_self_test, daemon=True).start()
                     elif c == '\x03': # Ctrl+C
                         os.kill(os.getpid(), 2) # send SIGINT
                         break
@@ -290,6 +314,8 @@ def start_ear():
     print(" Press [6] large-v2     (Very High Accuracy)")
     print(" Press [7] large-v3     (Max Accuracy)")
     print(" Press [8] turbo        (Ultra-Fast Max)")
+    print(" Press [9] Parakeet v2  (Vibe Coding English)")
+    print(" Press [0] Parakeet v3  (Multilingual TDT)")
     print("─" * 52)
     print(" Brain output will appear below as you speak.\n")
     print("─" * 52)

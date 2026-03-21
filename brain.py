@@ -25,27 +25,33 @@ keyboard = Controller()
 # ── Backend selection ──────────────────────────────────────────────────────────
 BACKEND = os.environ.get("BACKEND", "faster_whisper").lower().strip()
 
-def load_backend():
+def load_backend(model_name="base.en"):
+    if "parakeet-tdt" in model_name:
+        print(f"[Brain] Backend: NVIDIA Parakeet-TDT (via sherpa-onnx)")
+        import backend_parakeet as backend
+        model = backend.load_model(model_name)
+        return backend, model
+
     if BACKEND == "openvino":
         print("[Brain] Backend: whisper.cpp + OpenVINO (Intel iGPU)")
         try:
             import backend_openvino as backend
-            model = backend.load_model()
+            model = backend.load_model(model_name)
             return backend, model
         except RuntimeError as e:
             print(f"[Brain] ⚠️  OpenVINO unavailable: {e}")
             print("[Brain] ↩️  Falling back to faster-whisper...")
 
     # Default: faster-whisper
-    print("[Brain] Backend: faster-whisper + distil-large-v3 + INT8 (CPU)")
+    print(f"[Brain] Backend: faster-whisper + {model_name} + INT8 (CPU)")
     import backend_faster_whisper as backend
-    model = backend.load_model()
+    model = backend.load_model(model_name)
     return backend, model
 
 
 # ── Socket server ──────────────────────────────────────────────────────────────
 def start_server():
-    backend, model = load_backend()
+    backend, model = load_backend("base.en")
 
     # Clean up any stale socket
     if os.path.exists(SOCKET_PATH):
@@ -91,7 +97,8 @@ def start_server():
                             model = None
                             gc.collect()
 
-                            model = backend.load_model(new_model_name)
+                            # Re-load backend dynamically to allow switching between Whisper and Parakeet
+                            backend, model = load_backend(new_model_name)
                             print(f"[Brain] ✅ Successfully switched to {new_model_name}")
                         except Exception as e:
                             print(f"[Brain] ❌ Failed to switch model: {e}")

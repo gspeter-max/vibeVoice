@@ -13,7 +13,7 @@ It is highly optimized for low-latency inference on CPU, specifically for macOS 
 
 - **Push-to-Talk**: Hold **RIGHT CMD** to record, release to transcribe.
 - **Auto-Type Output**: Transcriptions are typed into your active cursor position automatically.
-- **Interactive Model Toggling**: Switch between different Whisper models (Tiny, Base, Small, Medium, Large, Turbo, etc.) instantly while the app is running using number keys **1-8**.
+- **Interactive Model Toggling**: Switch between different Whisper and Parakeet models instantly while the app is running using number keys **1-9** and **0**.
 - **Privacy First**: Everything runs 100% locally. No audio or text ever leaves your machine.
 - **Mac Optimized**: Uses a non-blocking CoreAudio callback and architecture-aware thread scheduling for maximum responsiveness.
 
@@ -33,6 +33,8 @@ We evaluated the performance using the **LibriSpeech (test-clean)** research dat
 | **[6]** | `large-v2` | ~0.60% | ~2.500x | ~25.0 seconds| Pre-2024 standard; heavy on CPU. |
 | **[7]** | `large-v3` | ~0.55% | ~2.500x | ~25.0 seconds| Maximum theoretical accuracy; heavy delay. |
 | **[8]** | **`turbo`** | **~0.60%** | **~0.800x** | **~8.0 seconds** | **Best High-End! large-v3 accuracy, 3x faster.** |
+| **[9]** | **`Parakeet v2`** | **0.31%** | **0.164x** | **~1.6 seconds** | **KING of Accuracy! Best for Vibe Coding.** |
+| **[0]** | `Parakeet v3` | 1.24% | 0.171x | ~1.7 seconds | Fast Multilingual support. |
 
 * *WER: Word Error Rate (Lower is better).*
 * *RTF: Real-Time Factor (Lower is faster, e.g. 0.1 means 10s of audio takes 1s to transcribe).*
@@ -78,7 +80,7 @@ Simply run the startup script:
 
 - **Hold Right Command (⌘)**: Start speaking.
 - **Release Right Command**: Text will be typed into your active app.
-- **Press 1 through 8**: Switch models instantly in the terminal.
+- **Press 1 through 0**: Switch models instantly in the terminal.
 
 ---
 
