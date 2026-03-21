@@ -1,0 +1,33 @@
+[project]
+name = "parakeet-flow"
+version = "2.0.0"
+description = "Push-to-talk voice-to-text that auto-types into any app — Wispr Flow style, local, private."
+requires-python = ">=3.11"
+
+dependencies = [
+    # Core STT backend (primary)
+    "faster-whisper>=1.1.0",
+
+    # Audio input
+    "pyaudio>=0.2.14",
+
+    # Keyboard control (auto-type output)
+    "pynput>=1.7.7",
+
+    # Numerics (used for audio processing)
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+# Install with: uv pip install -e ".[dev]"
+dev = [
+    "rich>=13.0.0",   # nicer terminal output during development
+]
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
