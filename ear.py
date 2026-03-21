@@ -34,7 +34,11 @@ MODELS = [
     "tiny.en",
     "base.en",
     "small.en",
-    "Systran/faster-distil-whisper-large-v3"
+    "Systran/faster-distil-whisper-large-v3",
+    "medium.en",
+    "large-v2",
+    "large-v3",
+    "deepdml/faster-whisper-large-v3-turbo-ct2"
 ]
 
 # ── Volume RMS helper ──────────────────────────────────────────────────────────
@@ -83,6 +87,14 @@ class TerminalMenu(threading.Thread):
                         send_switch_command(MODELS[2])
                     elif c == '4':
                         send_switch_command(MODELS[3])
+                    elif c == '5':
+                        send_switch_command(MODELS[4])
+                    elif c == '6':
+                        send_switch_command(MODELS[5])
+                    elif c == '7':
+                        send_switch_command(MODELS[6])
+                    elif c == '8':
+                        send_switch_command(MODELS[7])
                     elif c == '\x03': # Ctrl+C
                         os.kill(os.getpid(), 2) # send SIGINT
                         break
@@ -223,7 +235,7 @@ class Ear:
                 continue
             try:
                 client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                client.settimeout(10)
+                client.settimeout(120)
                 client.connect(SOCKET_PATH)
                 client.sendall(audio_data)
                 client.shutdown(socket.SHUT_WR)
@@ -270,10 +282,14 @@ def start_ear():
     print(f"║  Backend : {backend_label:<38}║")
     print(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
     print("╚══════════════════════════════════════════════════╝")
-    print(" Press [1] tiny.en      (Fastest, ~1s)")
-    print(" Press [2] base.en      (Default, ~1.5s)")
-    print(" Press [3] small.en     (Accurate, ~4.5s)")
-    print(" Press [4] large-v3     (Best, ~18s)")
+    print(" Press [1] tiny.en      (Fastest)")
+    print(" Press [2] base.en      (Default)")
+    print(" Press [3] small.en     (Accurate)")
+    print(" Press [4] distil-large (Fast Max Accuracy)")
+    print(" Press [5] medium.en    (High Accuracy)")
+    print(" Press [6] large-v2     (Very High Accuracy)")
+    print(" Press [7] large-v3     (Max Accuracy)")
+    print(" Press [8] turbo        (Ultra-Fast Max)")
     print("─" * 52)
     print(" Brain output will appear below as you speak.\n")
     print("─" * 52)

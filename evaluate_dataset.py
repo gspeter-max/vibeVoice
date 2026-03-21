@@ -13,7 +13,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Number of samples to evaluate
-NUM_SAMPLES = 50
+NUM_SAMPLES = 15
 
 print(f"Loading first {NUM_SAMPLES} samples from LibriSpeech (test-clean)...")
 try:
@@ -78,8 +78,9 @@ def evaluate_model(model_name):
     print(f"Evaluating Model: {model_name}")
     print(f"{'='*60}")
     
-    # Initialize model with Mac-optimized settings
-    model = WhisperModel(model_name, device="cpu", compute_type="default", cpu_threads=4)
+    import multiprocessing
+    # Initialize model with Mac-optimized settings for Intel CPU
+    model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=multiprocessing.cpu_count())
     
     # Warmup
     model.transcribe(samples[0]["audio"], language="en", vad_filter=True)
@@ -116,7 +117,16 @@ def evaluate_model(model_name):
         "time": inference_time
     }
 
-models_to_test = ["tiny.en", "base.en", "small.en"]
+models_to_test = [
+    "tiny.en",
+    "base.en",
+    "small.en",
+    "medium.en",
+    "large-v2",
+    "large-v3",
+    "Systran/faster-distil-whisper-large-v3",
+    "deepdml/faster-whisper-large-v3-turbo-ct2"
+]
 results = []
 
 for m in models_to_test:

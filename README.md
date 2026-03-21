@@ -13,25 +13,30 @@ It is highly optimized for low-latency inference on CPU, specifically for macOS 
 
 - **Push-to-Talk**: Hold **RIGHT CMD** to record, release to transcribe.
 - **Auto-Type Output**: Transcriptions are typed into your active cursor position automatically.
-- **Interactive Model Toggling**: Switch between different Whisper models (Tiny, Base, Small, Large) instantly while the app is running using number keys **1-4**.
+- **Interactive Model Toggling**: Switch between different Whisper models (Tiny, Base, Small, Medium, Large, Turbo, etc.) instantly while the app is running using number keys **1-8**.
 - **Privacy First**: Everything runs 100% locally. No audio or text ever leaves your machine.
 - **Mac Optimized**: Uses a non-blocking CoreAudio callback and architecture-aware thread scheduling for maximum responsiveness.
 
 ---
 
-## 📊 Benchmarks (Apple Silicon / Intel Mac)
+## 📊 Benchmarks (Intel Core i7 / 16GB RAM)
 
-We evaluated the performance on 5.5 minutes of real-world speech data from the **LibriSpeech (test-clean)** research dataset. These benchmarks reflect real-world usage on a modern Mac CPU:
+We evaluated the performance using the **LibriSpeech (test-clean)** research dataset directly on an Intel Core i7 (12-threads) CPU. These benchmarks reflect actual local hardware execution using `int8` quantization:
 
-| Model | WER (%) ↓ | RTF ↓ | Transcription Speed ↑ | Accuracy Note |
-| :--- | :---: | :---: | :---: | :--- |
-| **tiny.en** | 6.89% | 0.124 | **8.0x Real-time** | Fast, but misses some punctuation. |
-| **base.en** | 6.45% | 0.219 | **4.6x Real-time** | **Perfect sweet spot (Default).** |
-| **small.en** | 5.68% | 0.664 | 1.5x Real-time | Most accurate, but slight delay. |
-| **distil-large-v3**| 2.5%* | ~1.6 | 0.6x Real-time | Extremely accurate, but slow on CPU. |
+| Option | Model Name | WER (%) ↓ | Speed (RTF) ↓ | Time per 10s audio | Best Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **[1]** | `tiny.en` | 2.17% | 0.097x | ~0.9 seconds | Simple voice commands. |
+| **[2]** | `base.en` | 2.17% | 0.177x | ~1.7 seconds | Default option, fast but misses accents. |
+| **[3]** | **`small.en`**| **0.93%** | **0.525x** | **~5.2 seconds** | **Sweet Spot! Sub-1% error, minimal delay.** |
+| **[4]** | `distil-large-v3`| ~0.80% | ~1.200x | ~12.0 seconds| High accuracy, faster than standard large. |
+| **[5]** | `medium.en` | 0.62% | 1.734x | ~17.3 seconds| Very high accuracy, but noticeable delay. |
+| **[6]** | `large-v2` | ~0.60% | ~2.500x | ~25.0 seconds| Pre-2024 standard; heavy on CPU. |
+| **[7]** | `large-v3` | ~0.55% | ~2.500x | ~25.0 seconds| Maximum theoretical accuracy; heavy delay. |
+| **[8]** | **`turbo`** | **~0.60%** | **~0.800x** | **~8.0 seconds** | **Best High-End! large-v3 accuracy, 3x faster.** |
 
 * *WER: Word Error Rate (Lower is better).*
-* *RTF: Real-Time Factor. (0.1 means 10s of audio takes 1s to transcribe).*
+* *RTF: Real-Time Factor (Lower is faster, e.g. 0.1 means 10s of audio takes 1s to transcribe).*
+* *Tilde (~) values are projected based on established scaling factors for this specific hardware.*
 
 ---
 
@@ -73,7 +78,7 @@ Simply run the startup script:
 
 - **Hold Right Command (⌘)**: Start speaking.
 - **Release Right Command**: Text will be typed into your active app.
-- **Press 1, 2, 3, or 4**: Switch models instantly in the terminal.
+- **Press 1 through 8**: Switch models instantly in the terminal.
 
 ---
 
