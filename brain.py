@@ -67,71 +67,98 @@ def worker():
     while True:
         try:
             item = audio_queue.get()
-            if item is None: break # Shutdown signal
+            if item is None:
+                break
 
             t_start = time.perf_counter()
             data, is_command = item
 
-            with backend_lock:
-                backend = backend_info["backend"]
-                model = backend_info["model"]
-
-                if is_command:
-                    command = data.decode("utf-8").strip()
-                    if command.startswith("CMD_SWITCH_MODEL:"):
-                        new_model_name = command.split(":", 1)[1]
-                        print(f"\n[Brain] 🔄 Switch model requested: {new_model_name}")
+            if is_command:
+                command = data.decode("utf-8").strip()
+                if command.startswith("CMD_SWITCH_MODEL:"):
+                    new_model_name = command.split(":", 1)[1]
+                    print(f"\n[Brain] 🔄 Switch model requested: {new_model_name}")
+                    sys.stdout.flush()
+                    with backend_lock:
                         try:
                             import gc
                             backend_info["model"] = None
                             gc.collect()
-                            
-                            # Re-load backend dynamically
                             new_backend, new_model = load_backend(new_model_name)
                             backend_info["backend"] = new_backend
                             backend_info["model"] = new_model
-                            print(f"[Brain] ✅ Successfully switched to {new_model_name}")
+                            print(f"[Brain] ✅ Switched to {new_model_name}")
                         except Exception as e:
-                            print(f"[Brain] ❌ Failed to switch model: {e}")
-                    audio_queue.task_done()
-                    continue
+                            print(f"[Brain] ❌ Failed: {e}")
+                            print(f"[Brain] ↩️  Falling back to base.en...")
+                            try:
+                                fb_backend, fb_model = load_backend("base.en")
+                                backend_info["backend"] = fb_backend
+                                backend_info["model"] = fb_model
+                                print(f"[Brain] ✅ Fallback to base.en OK")
+                            except Exception as e2:
+                                print(f"[Brain] 💥 Fallback failed: {e2}")
+                        sys.stdout.flush()
+                audio_queue.task_done()
+                continue
 
-                # Process Audio
-                try:
-                    audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-                except Exception as e:
-                    print(f"[Brain] ❌ Audio error: {e}")
-                    audio_queue.task_done()
-                    send_hud("hide")
-                    continue
+            # ── Process audio ──────────────────────────────────────────
+            # Grab backend reference under lock (fast)
+            with backend_lock:
+                backend = backend_info["backend"]
+                model = backend_info["model"]
 
-                if len(audio_array) < 4800:
-                    print("[Brain] ⚠️  Audio too short — skipped")
-                    audio_queue.task_done()
-                    send_hud("hide")
-                    continue
+            if backend is None or model is None:
+                print("[Brain] ⚠️  No model loaded — skipping")
+                audio_queue.task_done()
+                send_hud("hide")
+                continue
 
-                duration_sec = len(audio_array) / 16000.0
-                print(f"[Brain] 🎙️  Processing: {duration_sec:.1f}s...")
-                sys.stdout.flush()
+            try:
+                audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            except Exception as e:
+                print(f"[Brain] ❌ Audio decode error: {e}")
+                audio_queue.task_done()
+                send_hud("hide")
+                continue
 
-                # Actual Transcription
+            if len(audio_array) < 4800:
+                print("[Brain] ⚠️  Audio too short — skipped")
+                audio_queue.task_done()
+                send_hud("hide")
+                continue
+
+            duration_sec = len(audio_array) / 16000.0
+            print(f"[Brain] 🎙️  Processing: {duration_sec:.1f}s...")
+            sys.stdout.flush()
+            send_hud("process")
+
+            # Transcribe WITHOUT holding the lock (so commands aren't blocked)
+            try:
                 text = backend.transcribe(model, audio_array)
-                t_elapsed = time.perf_counter() - t_start
+            except Exception as e:
+                print(f"[Brain] ❌ Transcription error: {e}")
+                audio_queue.task_done()
+                send_hud("hide")
+                continue
 
-                if text:
-                    print(f"[Brain] 📝 [{t_elapsed:.2f}s] → \"{text}\"")
-                    keyboard.type(text + " ")
-                    send_hud("done")
-                else:
-                    print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
-                    send_hud("hide")
-                
+            t_elapsed = time.perf_counter() - t_start
+
+            if text:
+                print(f"[Brain] 📝 [{t_elapsed:.2f}s] → \"{text}\"")
                 sys.stdout.flush()
-            
+                keyboard.type(text + " ")
+                send_hud("done")
+            else:
+                print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
+                send_hud("hide")
+
+            sys.stdout.flush()
             audio_queue.task_done()
+
         except Exception as e:
             print(f"[Brain] 💥 Worker error: {e}")
+            sys.stdout.flush()
             send_hud("hide")
 
 # ── Socket server ──────────────────────────────────────────────────────────────

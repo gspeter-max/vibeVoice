@@ -88,18 +88,23 @@ def send_switch_command(model_name):
 def run_self_test():
     """Sends a synthetic 440Hz sine wave to the Brain to verify the pipe."""
     print("\n🧪 Running SELF-TEST (synthetic audio)...\n", end="", flush=True)
-    import numpy as np
-    
-    # 1 second of 440Hz sine wave at 16kHz
+
     duration = 1.0
     frequency = 440.0
     t = np.linspace(0, duration, int(RATE * duration), endpoint=False)
     audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16).tobytes()
-    
-    # Borrow Ear's _send_to_brain logic but with custom data
-    temp_ear = Ear()
-    temp_ear.frames = [audio_data]
-    temp_ear._send_to_brain()
+
+    # Send directly to brain — do NOT create a new Ear instance
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(120)
+        client.connect(SOCKET_PATH)
+        client.sendall(audio_data)
+        client.shutdown(socket.SHUT_WR)
+        client.close()
+        print("\r✅ Self-test audio sent to Brain\n", end="", flush=True)
+    except Exception as e:
+        print(f"\r❌ Self-test failed: {e}\n", end="", flush=True)
 
 # ── Terminal Menu Thread ───────────────────────────────────────────────────────
 class TerminalMenu(threading.Thread):
@@ -411,7 +416,7 @@ class Ear:
                 client.shutdown(socket.SHUT_WR)
                 client.close()
                 print("\r✅ Sent to Brain — waiting for transcription...\n", end="", flush=True)
-                # We don't hide here! Brain will send "done" when finished.
+                self._send_hud("process")  # Show processing animation
                 return
             except ConnectionRefusedError:
                 print(f"\r❌ Brain refused connection (attempt {attempt+1}/3) — is it running?\n", end="", flush=True)

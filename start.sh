@@ -9,6 +9,16 @@
 
 set -euo pipefail
 
+cleanup() {
+    echo ""
+    echo "  Cleaning up..."
+    [ -f /tmp/parakeet-brain.pid ] && kill "$(cat /tmp/parakeet-brain.pid)" 2>/dev/null; kill -9 "$(cat /tmp/parakeet-brain.pid)" 2>/dev/null; rm -f /tmp/parakeet-brain.pid || true
+    [ -f /tmp/parakeet-hud.pid ] && kill "$(cat /tmp/parakeet-hud.pid)" 2>/dev/null; kill -9 "$(cat /tmp/parakeet-hud.pid)" 2>/dev/null; rm -f /tmp/parakeet-hud.pid || true
+    rm -f /tmp/parakeet.sock
+    echo "  Done. Goodbye."
+}
+trap cleanup EXIT INT TERM
+
 export BACKEND="${BACKEND:-faster_whisper}"
 # Fix: ctranslate2 and residual torch/NeMo both bundle libiomp5.dylib — allow coexistence
 export KMP_DUPLICATE_LIB_OK=TRUE
@@ -100,14 +110,3 @@ sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
 
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
 BACKEND="$BACKEND" "$VENV_PYTHON" ear.py
-
-# ── Cleanup when Ear exits ───────────────────────────────────────
-echo ""
-echo "  Stopping Brain (PID $BRAIN_PID)..."
-kill "$BRAIN_PID" 2>/dev/null || true
-rm -f /tmp/parakeet-brain.pid /tmp/parakeet.sock
-
-echo "  Stopping HUD (PID $HUD_PID)..."
-kill "$HUD_PID" 2>/dev/null || true
-rm -f /tmp/parakeet-hud.pid
-echo "  Done. Goodbye."
