@@ -56,10 +56,10 @@ rm -f /tmp/parakeet.sock
 
 # ── Start Brain in background ────────────────────────────────────
 echo "  Starting Brain..."
-BACKEND="$BACKEND" "$VENV_PYTHON" brain.py > brain.log 2>&1 &
+BACKEND="$BACKEND" "$VENV_PYTHON" src/brain.py > logs/brain.log 2>&1 &
 BRAIN_PID=$!
 echo $BRAIN_PID > /tmp/parakeet-brain.pid
-echo "  Brain PID: $BRAIN_PID  |  log: brain.log"
+echo "  Brain PID: $BRAIN_PID  |  log: logs/brain.log"
 
 # ── Wait for socket (up to 120s for first-run model download) ───
 echo ""
@@ -76,14 +76,14 @@ while [ ! -S /tmp/parakeet.sock ]; do
         echo ""
         echo "❌ Brain crashed on startup. Last log:"
         echo "─────────────────────────────────────"
-        tail -30 brain.log
+        tail -30 logs/brain.log
         echo "─────────────────────────────────────"
         exit 1
     fi
 
     if [ $WAIT -ge $MAX_WAIT ]; then
         echo ""
-        echo "❌ Timed out waiting for Brain. Check brain.log"
+        echo "❌ Timed out waiting for Brain. Check logs/brain.log"
         exit 1
     fi
 done
@@ -102,11 +102,11 @@ echo ""
 echo "  Starting HUD..."
 # Kill anything stale still holding the IPC port
 lsof -ti :57234 | xargs kill -9 2>/dev/null || true
-"$VENV_PYTHON" hud.py > hud.log 2>&1 &
+"$VENV_PYTHON" src/hud.py > logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID > /tmp/parakeet-hud.pid
-echo "  HUD   PID: $HUD_PID  |  log: hud.log"
+echo "  HUD   PID: $HUD_PID  |  log: logs/hud.log"
 sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
 
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
-BACKEND="$BACKEND" "$VENV_PYTHON" ear.py
+BACKEND="$BACKEND" "$VENV_PYTHON" src/ear.py

@@ -114,9 +114,10 @@ class VolumeListener(QThread):
 
 # ── Sound effects (using provided external files) ─────────────────────────────
 def _init_sounds():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    listen_path = os.path.join(base_dir, "ui-alert-synth-beep-epic-stock-media-1-00-00.mp3")
-    done_path   = os.path.join(base_dir, "mixkit-tile-game-reveal-960.wav")
+    # Use repo root as base for assets/
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    listen_path = os.path.join(base_dir, "assets", "ui-alert-synth-beep-epic-stock-media-1-00-00.mp3")
+    done_path   = os.path.join(base_dir, "assets", "mixkit-tile-game-reveal-960.wav")
     return listen_path, done_path
 
 

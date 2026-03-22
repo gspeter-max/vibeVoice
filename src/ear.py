@@ -396,7 +396,9 @@ class Ear:
 
 
 def start_ear():
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brain.log")
+    # Use repo root as base for logs/
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_path = os.path.join(base_dir, "logs", "brain.log")
 
     p_temp = pyaudio.PyAudio()
     selected_mic_index = select_mic(p_temp)
