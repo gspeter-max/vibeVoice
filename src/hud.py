@@ -6,11 +6,12 @@ Dark rounded-rectangle capsule with animated white vertical bars.
 States:
   - hidden     : small idle pill outline (always on-screen)
   - listening  : pill EXPANDS, bars animate with real mic volume
-  - processing : bars do a slow sweep/pulse
+  - thinking   : bars turn BLUE, indicates VAD detected end-of-speech
+  - processing : bars do a slow sweep/pulse (White)
   - done       : brief flash then back to idle outline
 
 IPC:
-  TCP 57234 → "listen" | "process" | "done" | "hide"
+  TCP 57234 → "listen" | "thinking" | "process" | "done" | "hide"
   UDP 57235 → "vol:0.XXX"
 
 Test:  python hud.py --demo
@@ -54,6 +55,7 @@ VOL_PORT = 57235
 
 HIDDEN     = "hidden"
 LISTENING  = "listening"
+THINKING   = "thinking"
 PROCESSING = "processing"
 DONE       = "done"
 
@@ -150,11 +152,6 @@ class PillHUD(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
         # ★ FIX 1 — THE KEY FIX
-        # macOS hides ALL Tool windows the moment your app loses focus
-        # (i.e. you click on Safari, VS Code, etc.). This attribute
-        # tells macOS: "keep this Tool window visible even when the
-        # app is inactive."  Without this one line, the pill vanishes
-        # as soon as you interact with anything else.
         try:
             self.setAttribute(
                 Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True
@@ -169,7 +166,7 @@ class PillHUD(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move(
             screen.center().x() - WINDOW_W // 2,
-            screen.bottom() - WINDOW_H - 4,   # was - 20
+            screen.bottom() - WINDOW_H - 4,
         )
 
         self._state        = HIDDEN
@@ -203,10 +200,7 @@ class PillHUD(QWidget):
         self._vol.volume.connect(self._on_volume)
         self._vol.start()
 
-        # ★ FIX 2 — KEEPALIVE TIMER (safety net)
-        # Every 3 seconds, re-assert visibility.  If macOS somehow
-        # hid the window (Exposé, space switch, etc.) this brings
-        # it back.  Cheap — just a show()+raise_(), no repainting.
+        # Keepalive timer
         self._keepalive = QTimer(self)
         self._keepalive.setInterval(3000)
         self._keepalive.timeout.connect(self._ensure_visible)
@@ -216,15 +210,11 @@ class PillHUD(QWidget):
         self.setWindowOpacity(1.0)
         self.show()
 
-        # ★ FIX 4 — NATIVE macOS WINDOW LEVEL (optional, best fix)
-        # If pyobjc is installed, set the Cocoa window level to
-        # NSFloatingWindowLevel so it truly floats above everything,
-        # and join all Spaces so it's visible on every desktop.
+        # Native macOS window level
         QTimer.singleShot(300, self._set_native_level)
 
         print("[HUD] Pill HUD ready ✓", flush=True)
 
-    # ── Visibility helpers ─────────────────────────────────────────────────
     def _ensure_visible(self):
         """Re-assert visibility WITHOUT stealing focus."""
         if not self.isVisible():
@@ -245,7 +235,6 @@ class PillHUD(QWidget):
                 )
             print("[HUD] Native macOS window level set ✓", flush=True)
         except ImportError:
-            # pyobjc not installed — Qt flags + keepalive still work fine
             pass
         except Exception as e:
             print(f"[HUD] Native level failed (non-critical): {e}", flush=True)
@@ -254,6 +243,9 @@ class PillHUD(QWidget):
     def show_listening(self):
         _play_sound(self._snd_listen)
         self._enter(LISTENING)
+
+    def show_thinking(self):
+        self._enter(THINKING)
 
     def show_processing(self):
         self._enter(PROCESSING)
@@ -264,14 +256,12 @@ class PillHUD(QWidget):
         QTimer.singleShot(900, self._return_to_idle)
 
     def hide_hud(self):
-        """Shrink back to idle outline (pill stays visible, never fully hidden)."""
         self._return_to_idle()
 
     def _return_to_idle(self):
         self._state    = HIDDEN
         self._fade_dir = 0
         self._bar_h    = [BAR_MIN_H] * NUM_BARS
-        # Start timer so the shrink animation plays smoothly
         if not self._timer.isActive():
             self._timer.start()
         self.update()
@@ -280,10 +270,11 @@ class PillHUD(QWidget):
     def _on_command(self, cmd):
         c = cmd.strip().lower()
         print(f"[HUD] ← {c}", flush=True)
-        if   c == "listen":  self.show_listening()
-        elif c == "process": self.show_processing()
-        elif c == "done":    self.show_done()
-        elif c == "hide":    self.hide_hud()
+        if   c == "listen":    self.show_listening()
+        elif c == "thinking":  self.show_thinking()
+        elif c == "process":   self.show_processing()
+        elif c == "done":      self.show_done()
+        elif c == "hide":      self.hide_hud()
 
     def _on_volume(self, val):
         self._voice_raw  = min(1.0, val * 6.0)
@@ -302,8 +293,8 @@ class PillHUD(QWidget):
         self._t = time.time() - self._t0
 
         # Animate pill size (smooth lerp)
-        target_w = PILL_W_ACTIVE if self._state in (LISTENING, PROCESSING) else PILL_W_IDLE
-        target_h = PILL_H_ACTIVE if self._state in (LISTENING, PROCESSING) else PILL_H_IDLE
+        target_w = PILL_W_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_W_IDLE
+        target_h = PILL_H_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_H_IDLE
 
         self._cur_w += (target_w - self._cur_w) * 0.18
         self._cur_h += (target_h - self._cur_h) * 0.18
@@ -334,17 +325,16 @@ class PillHUD(QWidget):
                 idle  = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * 0.15
                 tgt   = idle + (BAR_MAX_H * wave * centre_w - idle) * min(1.0, v * 2.2)
 
+            elif self._state == THINKING:
+                # Oscillating blue bars
+                wave = (math.sin(t * 5.0 + i * 0.8) + 1.0) / 2.0
+                tgt  = BAR_MIN_H + (BAR_MAX_H * 0.5) * wave
+
             elif self._state == PROCESSING:
-                # Sweep position: sin gives smooth back-and-forth, 0→NUM_BARS-1
                 sweep = (math.sin(t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
                 dist  = abs(i - sweep)
-
-                # Glow falls off sharply from sweep centre (gaussian-like)
                 glow  = math.exp(-dist * dist * 0.7)
-
-                # Dim breath underneath so bars never go fully dead
                 breath = 0.12 + 0.06 * math.sin(t * 1.6 + i * 0.5)
-
                 tgt = BAR_MIN_H + (BAR_MAX_H * 0.72) * max(glow, breath)
 
             elif self._state == DONE:
@@ -359,7 +349,6 @@ class PillHUD(QWidget):
 
         self.update()
 
-        # Stop animation timer once idle and shrink is done (saves CPU)
         if self._state == HIDDEN and abs(self._cur_w - PILL_W_IDLE) < 0.3:
             self._timer.stop()
 
@@ -375,29 +364,20 @@ class PillHUD(QWidget):
         cy = WINDOW_H / 2
         r  = ph / 2
 
-        # Pill shape
         pill = QPainterPath()
         pill.addRoundedRect(QRectF(px, py, pw, ph), r, r)
 
-        # ★ FIX 5 — SUBTLE IDLE FILL
-        # Old code used fill_alpha=0 for idle → completely transparent.
-        # macOS can optimize away fully-transparent window regions.
-        # alpha=50 gives a subtle dark tint so the pill is always
-        # visible and the compositor never discards it.
         fill_alpha = 50 if self._state == HIDDEN else 240
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(16, 16, 18, fill_alpha)))
         p.drawPath(pill)
 
-        # Border — always visible
         p.setPen(QPen(QColor(90, 90, 95, 200), 1.2))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(pill)
 
-        # Bars — only when not idle
         if self._state != HIDDEN:
             p.setClipPath(pill)
-
             total_w = (NUM_BARS - 1) * BAR_GAP + BAR_W
             start_x = cx - total_w / 2
 
@@ -405,98 +385,35 @@ class PillHUD(QWidget):
                 bx = start_x + i * BAR_GAP
                 bh = max(BAR_MIN_H, self._bar_h[i])
                 by = cy - bh / 2
-
                 mid_val = (NUM_BARS - 1) / 2.0
                 cf    = 1.0 - abs(i - mid_val) / mid_val * 0.18
 
-                # Boosts the glow bar to near-white during processing
-                if self._state == PROCESSING:
+                if self._state == THINKING:
+                    color = QColor(64, 156, 255, int(225 * cf)) # Brighter blue
+                elif self._state == PROCESSING:
                     sweep = (math.sin(self._t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
                     glow_cf = math.exp(-abs(i - sweep) ** 2 * 0.7)
-                    alpha = int((160 + 95 * glow_cf) * cf)
+                    color = QColor(255, 255, 255, int((160 + 95 * glow_cf) * cf))
                 else:
-                    alpha = int(225 * cf)
+                    color = QColor(255, 255, 255, int(225 * cf))
 
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(QColor(255, 255, 255, alpha)))
+                p.setBrush(QBrush(color))
                 p.drawRoundedRect(
                     QRectF(bx - BAR_W / 2, by, BAR_W, bh), BAR_R, BAR_R
                 )
 
             p.setClipping(False)
-
         p.end()
-
-
-def send_command(cmd: str):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1.0)
-        s.connect(("127.0.0.1", IPC_PORT))
-        s.sendall(cmd.encode())
-        s.close()
-    except Exception as e:
-        print(f"HUD send failed: {e}")
-
-
-def _demo(hud: PillHUD):
-    print("[HUD] Demo starting...", flush=True)
-    t0 = [time.time()]
-
-    def voice_pulse():
-        t = time.time() - t0[0]
-        if t < 1.0:
-            hud._voice_raw = 0.02
-        elif t < 5.5:
-            hud._voice_raw  = max(0, min(1,
-                0.55 + 0.28 * math.sin(t * 4.5) +
-                0.18 * math.sin(t * 9.8) +
-                0.10 * math.sin(t * 17.0)))
-            hud._last_vol_t = time.time()
-        elif t < 6.5:
-            hud._voice_raw = 0.02
-        elif t < 10.0:
-            hud._voice_raw  = max(0, min(1,
-                0.45 + 0.32 * math.sin(t * 5.5) +
-                0.20 * math.sin(t * 11.5)))
-            hud._last_vol_t = time.time()
-        else:
-            vt.stop()
-
-    vt = QTimer()
-    vt.setInterval(30)
-    vt.timeout.connect(voice_pulse)
-
-    QTimer.singleShot(300,   hud.show_listening)
-    QTimer.singleShot(350,   vt.start)
-    QTimer.singleShot(6000,  hud.hide_hud)
-    QTimer.singleShot(7500,  hud.show_listening)
-    QTimer.singleShot(11000, hud.show_processing)
-    QTimer.singleShot(12500, hud.show_done)
-    QTimer.singleShot(14000, lambda: (print("[HUD] Demo done."), sys.exit(0)))
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-
-    # ★ FIX 6 — HIDE DOCK ICON
-    # Without this, running hud.py spawns a Python icon in the Dock.
-    # Setting activation policy to "Accessory" removes it.
     try:
         from AppKit import NSApp, NSApplicationActivationPolicyAccessory
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-        print("[HUD] Dock icon hidden ✓", flush=True)
-    except ImportError:
-        pass  # pyobjc not installed — dock icon will show (cosmetic only)
     except Exception:
         pass
 
     hud = PillHUD()
-
-    if "--demo" in sys.argv:
-        _demo(hud)
-    else:
-        print("[HUD] Waiting for IPC: listen / process / done / hide", flush=True)
-
     sys.exit(app.exec())

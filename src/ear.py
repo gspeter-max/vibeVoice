@@ -21,6 +21,25 @@ import tty
 import numpy as np
 from pynput import keyboard
 
+# ── macOS Voice Isolation ──────────────────────────────────────────────────────
+_VOICE_ISOLATION_ACTIVE = False
+try:
+    import AVFoundation
+    def _enable_macos_voice_isolation():
+        global _VOICE_ISOLATION_ACTIVE
+        try:
+            engine = AVFoundation.AVAudioEngine.alloc().init()
+            input_node = engine.inputNode()
+            if hasattr(input_node, 'setVoiceProcessingEnabled_error_'):
+                success, error = input_node.setVoiceProcessingEnabled_error_(True, None)
+                if success:
+                    _VOICE_ISOLATION_ACTIVE = True
+        except Exception:
+            pass
+except ImportError:
+    def _enable_macos_voice_isolation():
+        pass
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
@@ -184,8 +203,11 @@ class Ear:
         self.is_recording = False
         self._lock = threading.Lock()
         self.last_rms = 0.0
-        self.gain_multiplier = 2.0
+        self.gain_multiplier = 1.1 # Reduced from 2.0; let the brain normalize
         self._total_frames = 0
+
+        # Enable macOS Voice Isolation if possible
+        _enable_macos_voice_isolation()
 
         if input_device_index is None:
             self.input_device_index = self.p.get_default_input_device_info().get("index")
@@ -202,14 +224,10 @@ class Ear:
         self._brain_sock = None
         self._brain_sock_lock = threading.Lock()
 
-        # Pre-open mic stream
-        self.stream = self.p.open(
-            format=FORMAT, channels=CHANNELS, rate=RATE,
-            input=True, input_device_index=self.input_device_index,
-            frames_per_buffer=CHUNK,
-            stream_callback=self._audio_callback
-        )
-        print(f"[Ear] Mic pre-opened: {self.active_mic_name} ✓", flush=True)
+        # ★ DON'T pre-open stream — open fresh each time
+        # This avoids the stale-callback problem
+        self.stream = None
+        print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
 
     def _send_hud(self, cmd):
         try:
@@ -263,6 +281,14 @@ class Ear:
                 return
             try:
                 self._brain_sock.sendall(chunk_bytes)
+            except (BrokenPipeError, ConnectionResetError):
+                # Brain closed early — stop streaming silently
+                print(f"\r⚠️  Brain disconnected — will transcribe on release\n", flush=True)
+                try:
+                    self._brain_sock.close()
+                except Exception:
+                    pass
+                self._brain_sock = None
             except Exception as e:
                 print(f"\r❌ Stream send error: {e}\n", flush=True)
                 try:
@@ -284,6 +310,9 @@ class Ear:
             self._brain_sock = None
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
+        if status:
+            print(f"[Ear] ⚠️ PyAudio status: {status}", flush=True)
+
         with self._lock:
             if self.is_recording:
                 audio_data = np.frombuffer(in_data, dtype=np.int16)
@@ -296,6 +325,36 @@ class Ear:
                 self._stream_chunk_to_brain(chunk_bytes)
 
         return (None, pyaudio.paContinue)
+
+    def _open_mic_stream(self):
+        """Open a FRESH mic stream each recording session."""
+        if self.stream is not None:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+
+        self.stream = self.p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            input_device_index=self.input_device_index,
+            frames_per_buffer=CHUNK,
+            stream_callback=self._audio_callback
+        )
+        print(f"[Ear] 🎤 Mic stream opened", flush=True)
+
+    def _close_mic_stream(self):
+        """Close mic stream after recording."""
+        if self.stream is not None:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
 
     def on_press(self, key):
         if not _is_right_cmd(key):
@@ -314,6 +373,9 @@ class Ear:
         if not self._open_brain_stream():
             return
 
+        # ★ Open FRESH mic stream
+        self._open_mic_stream()
+
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0
@@ -324,13 +386,6 @@ class Ear:
         print(f"\r🎙️  RECORDING+STREAMING ({self.active_mic_name})", flush=True)
 
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
-
-        try:
-            if not self.stream.is_active():
-                self.stream.start_stream()
-        except Exception as e:
-            print(f"\r❌ Mic start error: {e}", flush=True)
-
         self._start_volume_sender()
 
     def on_release(self, key):
@@ -359,14 +414,11 @@ class Ear:
             self.is_recording = False
             total = self._total_frames
 
-        try:
-            if self.stream and self.stream.is_active():
-                self.stream.stop_stream()
-        except Exception:
-            pass
+        # ★ Close mic FIRST, then close brain socket
+        self._close_mic_stream()
 
         duration = (total * CHUNK) / RATE
-        print(f"\r\n⏹️  Streamed {duration:.1f}s — Brain transcribing...\n", end="", flush=True)
+        print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
 
         threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
 
@@ -386,12 +438,7 @@ class Ear:
 
     def cleanup(self):
         self._close_brain_stream()
-        if self.stream:
-            try:
-                self.stream.stop_stream()
-                self.stream.close()
-            except Exception:
-                pass
+        self._close_mic_stream()
         self.p.terminate()
 
 
@@ -419,10 +466,13 @@ def start_ear():
         "openvino":       "whisper.cpp + OpenVINO (Intel iGPU)",
     }.get(BACKEND, BACKEND)
 
+    mic_mode = "Voice Isolation (macOS)" if _VOICE_ISOLATION_ACTIVE else "Standard"
+
     print()
     print("╔══════════════════════════════════════════════════╗")
     print("║      🎙️  PARAKEET FLOW v2 — STREAMING MODE       ║")
     print(f"║  Backend : {backend_label:<38}║")
+    print(f"║  Mic Mode: {mic_mode:<38}║")
     print(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
     print("╚══════════════════════════════════════════════════╝")
     print(" Press [1] tiny.en      [2] base.en     [3] small.en")

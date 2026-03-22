@@ -42,17 +42,10 @@ if [ ! -f "$VENV_PYTHON" ]; then
 fi
 
 # ── Kill any stale processes ─────────────────────────────────────
-if [ -f /tmp/parakeet-brain.pid ]; then
-    OLD_PID=$(cat /tmp/parakeet-brain.pid)
-    kill "$OLD_PID" 2>/dev/null && echo "  Stopped old Brain (PID $OLD_PID)" || true
-    rm -f /tmp/parakeet-brain.pid
-fi
-if [ -f /tmp/parakeet-hud.pid ]; then
-    OLD_HUD=$(cat /tmp/parakeet-hud.pid)
-    kill "$OLD_HUD" 2>/dev/null || true
-    rm -f /tmp/parakeet-hud.pid
-fi
-rm -f /tmp/parakeet.sock
+echo "  Cleaning up old processes..."
+kill $(cat /tmp/parakeet-brain.pid 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/parakeet-hud.pid 2>/dev/null) 2>/dev/null || true
+rm -f /tmp/parakeet.sock /tmp/parakeet-brain.pid /tmp/parakeet-hud.pid
 
 # ── Start Brain in background ────────────────────────────────────
 echo "  Starting Brain..."
