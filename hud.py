@@ -31,10 +31,10 @@ from PySide6.QtGui import (
 )
 
 # ── Pill dimensions ───────────────────────────────────────────────────────────
-PILL_W_IDLE   = 80     # small idle outline
-PILL_H_IDLE   = 26
-PILL_W_ACTIVE = 160    # bigger when listening
-PILL_H_ACTIVE = 44
+PILL_W_IDLE   = 60     # was 80
+PILL_H_IDLE   = 20     # was 26
+PILL_W_ACTIVE = 120    # was 160
+PILL_H_ACTIVE = 32     # was 44
 
 PADDING  = 20
 WINDOW_W = PILL_W_ACTIVE + PADDING * 2
@@ -145,7 +145,7 @@ class PillHUD(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move(
             screen.center().x() - WINDOW_W // 2,
-            screen.bottom() - WINDOW_H - 20,
+            screen.bottom() - WINDOW_H - 4,   # was - 20
         )
 
         self._state        = HIDDEN
