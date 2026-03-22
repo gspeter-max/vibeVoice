@@ -21,8 +21,6 @@ import os
 import math
 import time
 import socket
-import wave
-import struct
 import subprocess
 
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
@@ -114,53 +112,18 @@ class VolumeListener(QThread):
             sock.close()
 
 
-# ── Sound effects (generated in-memory, no external files) ────────────────────
-def _make_wav(path, freqs, duration=0.12, volume=0.3, sample_rate=44100):
-    """Generate a tiny WAV beep file. freqs = list of (freq, start, end) tuples."""
-    n_samples = int(sample_rate * duration)
-    samples = []
-    for i in range(n_samples):
-        t = i / sample_rate
-        val = 0.0
-        for freq, t_start, t_end in freqs:
-            if t_start <= t <= t_end:
-                # Fade in/out envelope
-                seg_dur = t_end - t_start
-                seg_t = (t - t_start) / seg_dur
-                envelope = min(1.0, seg_t * 15) * min(1.0, (1.0 - seg_t) * 15)
-                val += math.sin(2 * math.pi * freq * t) * envelope
-        val = max(-1.0, min(1.0, val * volume))
-        samples.append(int(val * 32767))
-
-    with wave.open(path, "w") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(struct.pack(f"<{len(samples)}h", *samples))
-
-
+# ── Sound effects (using provided external files) ─────────────────────────────
 def _init_sounds():
-    """Create two small sound files in /tmp."""
-    listen_path = "/tmp/parakeet_listen.wav"
-    done_path   = "/tmp/parakeet_done.wav"
-
-    # Listen sound: soft rising double-blip (like iOS dictation start)
-    _make_wav(listen_path, [
-        (880,  0.00, 0.07),   # first blip  — A5
-        (1175, 0.06, 0.13),   # second blip — D6 (rising)
-    ], duration=0.15, volume=0.25)
-
-    # Done sound: gentle falling confirmation tone
-    _make_wav(done_path, [
-        (1175, 0.00, 0.08),   # high note — D6
-        (880,  0.07, 0.15),   # low note  — A5 (falling = "done")
-    ], duration=0.17, volume=0.25)
-
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    listen_path = os.path.join(base_dir, "ui-alert-synth-beep-epic-stock-media-1-00-00.mp3")
+    done_path   = os.path.join(base_dir, "mixkit-tile-game-reveal-960.wav")
     return listen_path, done_path
 
 
 def _play_sound(path):
-    """Play a WAV file without blocking, without stealing focus."""
+    """Play a sound file without blocking, without stealing focus."""
+    if not os.path.exists(path):
+        return
     try:
         subprocess.Popen(
             ["afplay", path],
@@ -371,8 +334,17 @@ class PillHUD(QWidget):
                 tgt   = idle + (BAR_MAX_H * wave * centre_w - idle) * min(1.0, v * 2.2)
 
             elif self._state == PROCESSING:
-                wave = 0.5 + 0.5 * math.sin(t * 3.2 - i * 0.58)
-                tgt  = BAR_MIN_H + (BAR_MAX_H * 0.45 - BAR_MIN_H) * wave
+                # Sweep position: sin gives smooth back-and-forth, 0→NUM_BARS-1
+                sweep = (math.sin(t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
+                dist  = abs(i - sweep)
+
+                # Glow falls off sharply from sweep centre (gaussian-like)
+                glow  = math.exp(-dist * dist * 0.7)
+
+                # Dim breath underneath so bars never go fully dead
+                breath = 0.12 + 0.06 * math.sin(t * 1.6 + i * 0.5)
+
+                tgt = BAR_MIN_H + (BAR_MAX_H * 0.72) * max(glow, breath)
 
             elif self._state == DONE:
                 prog = min(1.0, self._t * 5.0)
@@ -435,7 +407,14 @@ class PillHUD(QWidget):
 
                 mid_val = (NUM_BARS - 1) / 2.0
                 cf    = 1.0 - abs(i - mid_val) / mid_val * 0.18
-                alpha = int(225 * cf)
+
+                # Boosts the glow bar to near-white during processing
+                if self._state == PROCESSING:
+                    sweep = (math.sin(self._t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
+                    glow_cf = math.exp(-abs(i - sweep) ** 2 * 0.7)
+                    alpha = int((160 + 95 * glow_cf) * cf)
+                else:
+                    alpha = int(225 * cf)
 
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(QColor(255, 255, 255, alpha)))
