@@ -1,26 +1,21 @@
 """
-brain.py — Parakeet Flow v2 (Multi-threaded Edition)
-====================================================
-Receives audio via Unix socket, queues it, and transcribes in a background thread.
-This prevents "Connection Refused" errors when sending audio rapidly.
+brain.py — Parakeet Flow v2 (Streaming Edition)
+=================================================
+Receives streamed audio chunks in real-time via Unix socket.
+Accumulates until the connection closes, then transcribes immediately.
+No more waiting for the entire blob to arrive after recording stops.
 """
 
 import os
 import sys
 import socket
 import time
-import queue
 import threading
 import numpy as np
 from pynput.keyboard import Controller
 
-# ── Socket config ──────────────────────────────────────────────────────────────
 SOCKET_PATH = "/tmp/parakeet.sock"
-
-# ── Keyboard ───────────────────────────────────────────────────────────────────
 keyboard = Controller()
-
-# ── Backend selection ──────────────────────────────────────────────────────────
 BACKEND = os.environ.get("BACKEND", "faster_whisper").lower().strip()
 
 def load_backend(model_name="base.en"):
@@ -40,17 +35,16 @@ def load_backend(model_name="base.en"):
             print(f"[Brain] ⚠️  OpenVINO unavailable: {e}")
             print("[Brain] ↩️  Falling back to faster-whisper...")
 
-    # Default: faster-whisper
     print(f"[Brain] Backend: faster-whisper + {model_name} + INT8 (CPU)")
     import backend_faster_whisper as backend
     model = backend.load_model(model_name)
     return backend, model
 
 
-# ── Global State ──────────────────────────────────────────────────────────────
-audio_queue = queue.Queue()
+# Global state
 backend_info = {"backend": None, "model": None}
 backend_lock = threading.Lock()
+
 
 def send_hud(cmd: str):
     try:
@@ -62,149 +56,150 @@ def send_hud(cmd: str):
     except Exception:
         pass
 
-def worker():
-    """Background thread that pulls from queue and transcribes."""
-    while True:
-        try:
-            item = audio_queue.get()
-            if item is None:
+
+def handle_connection(conn):
+    """Handle one streaming connection: accumulate chunks → transcribe."""
+    t_connect = time.perf_counter()
+    chunks = []
+    total_bytes = 0
+
+    try:
+        while True:
+            data = conn.recv(65536)
+            if not data:
                 break
+            chunks.append(data)
+            total_bytes += len(data)
+    except Exception as e:
+        print(f"[Brain] ⚠️  Recv error: {e}")
+    finally:
+        conn.close()
 
-            t_start = time.perf_counter()
-            data, is_command = item
+    t_received = time.perf_counter()
 
-            if is_command:
-                command = data.decode("utf-8").strip()
-                if command.startswith("CMD_SWITCH_MODEL:"):
-                    new_model_name = command.split(":", 1)[1]
-                    print(f"\n[Brain] 🔄 Switch model requested: {new_model_name}")
-                    sys.stdout.flush()
-                    with backend_lock:
-                        try:
-                            import gc
-                            backend_info["model"] = None
-                            gc.collect()
-                            new_backend, new_model = load_backend(new_model_name)
-                            backend_info["backend"] = new_backend
-                            backend_info["model"] = new_model
-                            print(f"[Brain] ✅ Switched to {new_model_name}")
-                        except Exception as e:
-                            print(f"[Brain] ❌ Failed: {e}")
-                            print(f"[Brain] ↩️  Falling back to base.en...")
-                            try:
-                                fb_backend, fb_model = load_backend("base.en")
-                                backend_info["backend"] = fb_backend
-                                backend_info["model"] = fb_model
-                                print(f"[Brain] ✅ Fallback to base.en OK")
-                            except Exception as e2:
-                                print(f"[Brain] 💥 Fallback failed: {e2}")
-                        sys.stdout.flush()
-                audio_queue.task_done()
-                continue
+    if total_bytes == 0:
+        return
 
-            # ── Process audio ──────────────────────────────────────────
-            # Grab backend reference under lock (fast)
-            with backend_lock:
-                backend = backend_info["backend"]
-                model = backend_info["model"]
+    raw = b"".join(chunks)
 
-            if backend is None or model is None:
-                print("[Brain] ⚠️  No model loaded — skipping")
-                audio_queue.task_done()
-                send_hud("hide")
-                continue
-
-            try:
-                audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-            except Exception as e:
-                print(f"[Brain] ❌ Audio decode error: {e}")
-                audio_queue.task_done()
-                send_hud("hide")
-                continue
-
-            if len(audio_array) < 4800:
-                print("[Brain] ⚠️  Audio too short — skipped")
-                audio_queue.task_done()
-                send_hud("hide")
-                continue
-
-            duration_sec = len(audio_array) / 16000.0
-            print(f"[Brain] 🎙️  Processing: {duration_sec:.1f}s...")
-            sys.stdout.flush()
-            send_hud("process")
-
-            # Transcribe WITHOUT holding the lock (so commands aren't blocked)
-            try:
-                text = backend.transcribe(model, audio_array)
-            except Exception as e:
-                print(f"[Brain] ❌ Transcription error: {e}")
-                audio_queue.task_done()
-                send_hud("hide")
-                continue
-
-            t_elapsed = time.perf_counter() - t_start
-
-            if text:
-                print(f"[Brain] 📝 [{t_elapsed:.2f}s] → \"{text}\"")
+    # Check if it's a command
+    if total_bytes < 256:
+        try:
+            text = raw.decode("utf-8").strip()
+            if text.startswith("CMD_SWITCH_MODEL:"):
+                new_model = text.split(":", 1)[1]
+                print(f"\n[Brain] 🔄 Switch model: {new_model}")
                 sys.stdout.flush()
-                keyboard.type(text + " ")
-                send_hud("done")
-            else:
-                print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
-                send_hud("hide")
+                with backend_lock:
+                    try:
+                        import gc
+                        backend_info["model"] = None
+                        gc.collect()
+                        nb, nm = load_backend(new_model)
+                        backend_info["backend"] = nb
+                        backend_info["model"] = nm
+                        print(f"[Brain] ✅ Switched to {new_model}")
+                    except Exception as e:
+                        print(f"[Brain] ❌ Failed: {e}, falling back to base.en")
+                        try:
+                            nb, nm = load_backend("base.en")
+                            backend_info["backend"] = nb
+                            backend_info["model"] = nm
+                            print(f"[Brain] ✅ Fallback OK")
+                        except Exception as e2:
+                            print(f"[Brain] 💥 Fallback failed: {e2}")
+                    sys.stdout.flush()
+                return
+        except UnicodeDecodeError:
+            pass  # Not a command, treat as audio
 
-            sys.stdout.flush()
-            audio_queue.task_done()
+    # ── Process audio ──────────────────────────────────────────────
+    with backend_lock:
+        be = backend_info["backend"]
+        mo = backend_info["model"]
 
-        except Exception as e:
-            print(f"[Brain] 💥 Worker error: {e}")
-            sys.stdout.flush()
-            send_hud("hide")
+    if be is None or mo is None:
+        print("[Brain] ⚠️  No model loaded — skipping")
+        send_hud("hide")
+        return
 
-# ── Socket server ──────────────────────────────────────────────────────────────
+    try:
+        audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    except Exception as e:
+        print(f"[Brain] ❌ Audio decode error: {e}")
+        send_hud("hide")
+        return
+
+    if len(audio) < 4800:
+        print("[Brain] ⚠️  Audio too short — skipped")
+        send_hud("hide")
+        return
+
+    duration = len(audio) / 16000.0
+    stream_time = (t_received - t_connect) * 1000
+    print(f"[Brain] 🎙️  {duration:.1f}s audio (streamed in {stream_time:.0f}ms)")
+    sys.stdout.flush()
+    send_hud("process")
+
+    t_start = time.perf_counter()
+
+    try:
+        text = be.transcribe(mo, audio)
+    except Exception as e:
+        print(f"[Brain] ❌ Transcription error: {e}")
+        send_hud("hide")
+        return
+
+    t_elapsed = time.perf_counter() - t_start
+    total_latency = time.perf_counter() - t_connect
+
+    if text:
+        print(f"[Brain] 📝 [{t_elapsed:.2f}s transcribe | {total_latency:.2f}s total] → \"{text}\"")
+        sys.stdout.flush()
+        keyboard.type(text + " ")
+        send_hud("done")
+    else:
+        print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
+        send_hud("hide")
+
+    sys.stdout.flush()
+
+
 def start_server():
-    # Initial load
+    # Load model
     initial_backend, initial_model = load_backend("base.en")
     backend_info["backend"] = initial_backend
     backend_info["model"] = initial_model
 
-    # Start worker thread
-    t = threading.Thread(target=worker, daemon=True)
-    t.start()
+    # ★ WARM UP — first inference is always slow
+    print("[Brain] Warming up model...")
+    dummy = np.zeros(8000, dtype=np.float32)
+    try:
+        initial_backend.transcribe(initial_model, dummy)
+    except Exception:
+        pass
+    print("[Brain] Warm-up done ✓")
 
-    # Clean up any stale socket
+    # Clean up stale socket
     if os.path.exists(SOCKET_PATH):
         os.remove(SOCKET_PATH)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(SOCKET_PATH)
-    server.listen(10) # Increased backlog
+    server.listen(10)
 
-    print(f"[Brain] ✅ Multi-threaded Socket ready at {SOCKET_PATH}")
-    print("[Brain] Ready to receive audio...")
+    print(f"[Brain] ✅ Streaming server ready at {SOCKET_PATH}")
+    print("[Brain] Audio streams in real-time — transcription starts on disconnect")
     sys.stdout.flush()
 
     try:
         while True:
             conn, _ = server.accept()
-            
-            # Read all audio data immediately
-            data = b""
-            while True:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
-            conn.close() # Close immediately so Ear can move on
 
-            if not data:
-                continue
-
-            # Identify if it's a command or audio
-            is_command = (len(data) < 256)
-            
-            # Put into queue for the worker to process
-            audio_queue.put((data, is_command))
+            # ★ Each connection handled in its own thread
+            # So brain can accept the NEXT recording while still transcribing
+            t = threading.Thread(target=handle_connection, args=(conn,), daemon=True)
+            t.start()
 
     except KeyboardInterrupt:
         print("\n[Brain] Shutting down...")
