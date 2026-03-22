@@ -3,7 +3,7 @@ import pytest
 import os
 import socket
 from unittest.mock import MagicMock, patch, call
-from brain import start_server
+from brain import start_server, worker, audio_queue, backend_info
 
 # Mock data and classes
 class MockConn:
@@ -32,24 +32,21 @@ def test_brain_server_logic(mock_remove, mock_exists, mock_socket_class, mock_ke
     mock_model = MagicMock()
     mock_load_backend.return_value = (mock_backend, mock_model)
     
-    mock_server_socket = MagicMock()
-    mock_socket_class.return_value = mock_server_socket
-    
-    # Simulate receiving audio data once and then raising KeyboardInterrupt to exit loop
-    mock_conn = MockConn(sample_audio_bytes)
-    mock_server_socket.accept.side_effect = [(mock_conn, None), KeyboardInterrupt]
+    # Initialize backend_info manually for the worker
+    backend_info["backend"] = mock_backend
+    backend_info["model"] = mock_model
     
     mock_backend.transcribe.return_value = "hello world"
     
-    # Run server (should raise KeyboardInterrupt eventually)
-    with patch('sys.stdout', new=MagicMock()): # suppress output
-        start_server()
-        
-    # Verify load_backend was called
-    mock_load_backend.assert_called_once()
+    # Put item in queue and a stop signal
+    audio_queue.put((sample_audio_bytes, False))
+    audio_queue.put(None)
     
+    # Run worker directly
+    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
+        worker()
+        
     # Verify transcription was called with converted audio
-    # audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
     mock_backend.transcribe.assert_called_once()
     args, _ = mock_backend.transcribe.call_args
     assert args[0] == mock_model
@@ -68,19 +65,19 @@ def test_brain_switch_model_command(mock_socket_class, mock_keyboard, mock_load_
     mock_model = MagicMock()
     mock_load_backend.return_value = (mock_backend, mock_model)
     
-    mock_server_socket = MagicMock()
-    mock_socket_class.return_value = mock_server_socket
+    backend_info["backend"] = mock_backend
+    backend_info["model"] = mock_model
     
     # Send a command instead of audio
     command = "CMD_SWITCH_MODEL:tiny.en"
-    mock_conn = MockConn(command.encode('utf-8'))
-    mock_server_socket.accept.side_effect = [(mock_conn, None), KeyboardInterrupt]
+    audio_queue.put((command.encode('utf-8'), True))
+    audio_queue.put(None)
     
-    with patch('sys.stdout', new=MagicMock()):
-        start_server()
+    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
+        worker()
         
-    # Verify load_model was called again for the switch
-    mock_backend.load_model.assert_called_once_with("tiny.en")
+    # Verify load_backend was called again for the switch
+    mock_load_backend.assert_called_once_with("tiny.en")
 
 @patch('brain.load_backend')
 @patch('brain.keyboard')
@@ -91,16 +88,16 @@ def test_brain_too_short_audio(mock_socket_class, mock_keyboard, mock_load_backe
     mock_model = MagicMock()
     mock_load_backend.return_value = (mock_backend, mock_model)
     
-    mock_server_socket = MagicMock()
-    mock_socket_class.return_value = mock_server_socket
+    backend_info["backend"] = mock_backend
+    backend_info["model"] = mock_model
     
     # 0.1s of audio is too short (less than 4800 samples)
     short_audio = b'\x00\x00' * 1600
-    mock_conn = MockConn(short_audio)
-    mock_server_socket.accept.side_effect = [(mock_conn, None), KeyboardInterrupt]
+    audio_queue.put((short_audio, False))
+    audio_queue.put(None)
     
-    with patch('sys.stdout', new=MagicMock()):
-        start_server()
+    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
+        worker()
         
     # Transcribe should NOT be called
     mock_backend.transcribe.assert_not_called()

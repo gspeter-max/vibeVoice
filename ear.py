@@ -22,9 +22,10 @@ import numpy as np
 from pynput import keyboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-SOCKET_PATH = "/tmp/parakeet.sock"
-HOTKEY      = keyboard.Key.cmd_r   # Right Command key — change if needed
-BACKEND     = os.environ.get("BACKEND", "faster_whisper")
+SOCKET_PATH     = "/tmp/parakeet.sock"
+HOTKEY_PRIMARY  = keyboard.Key.cmd_r  # Right Command (preferred)
+HOTKEY_FALLBACK = keyboard.Key.cmd    # Fallback: some pynput versions report cmd for both sides
+BACKEND         = os.environ.get("BACKEND", "faster_whisper")
 
 FORMAT   = pyaudio.paInt16
 CHANNELS = 1
@@ -216,6 +217,20 @@ class Ear:
              
         self.active_mic_name = self.p.get_device_info_by_index(self.input_device_index).get("name")
         self.gain_multiplier = 2.0  # Boost volume by 2x
+        # HUD is managed by start.sh — no subprocess here.
+        self.hud_proc = None
+
+
+
+    def _send_hud(self, cmd):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.2)
+            s.connect(('127.0.0.1', 57234))
+            s.sendall(cmd.encode())
+            s.close()
+        except Exception:
+            pass
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
@@ -230,7 +245,7 @@ class Ear:
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
     def on_press(self, key):
-        if key != HOTKEY:
+        if key not in (HOTKEY_PRIMARY, HOTKEY_FALLBACK):
             return
         with self._lock:
             if self.is_recording:
@@ -241,6 +256,7 @@ class Ear:
 
         print("\r\n" + "─" * 50, flush=True)
         print(f"\r🎙️  RECORDING ({self.active_mic_name}) — release key to stop", flush=True)
+        self._send_hud("listen")
 
         try:
             self.stream = self.p.open(
@@ -259,7 +275,7 @@ class Ear:
                 self.is_recording = False
 
     def on_release(self, key):
-        if key != HOTKEY:
+        if key not in (HOTKEY_PRIMARY, HOTKEY_FALLBACK):
             return
         with self._lock:
             if not self.is_recording:
@@ -274,6 +290,7 @@ class Ear:
         n_frames = len(self.frames)
         duration  = (n_frames * CHUNK) / RATE
         print(f"\r\n⏹️  Recorded {duration:.1f}s — sending to Brain...\n", end="", flush=True)
+        self._send_hud("process")
 
         threading.Thread(target=self._send_to_brain, daemon=True).start()
 
@@ -293,6 +310,7 @@ class Ear:
     def _send_to_brain(self):
         if not self.frames:
             print("\r⚠️  No audio captured\n", end="", flush=True)
+            self._send_hud("hide")
             return
 
         audio_data = b"".join(self.frames)
@@ -311,15 +329,18 @@ class Ear:
                 client.shutdown(socket.SHUT_WR)
                 client.close()
                 print("\r✅ Sent to Brain — waiting for transcription...\n", end="", flush=True)
+                # We don't hide here! Brain will send "done" when finished.
                 return
             except ConnectionRefusedError:
                 print(f"\r❌ Brain refused connection (attempt {attempt+1}/3) — is it running?\n", end="", flush=True)
                 time.sleep(1)
             except Exception as e:
                 print(f"\r❌ Socket error: {e}\n", end="", flush=True)
+                self._send_hud("hide")
                 return
 
         print("\r❌ Could not reach Brain after 3 attempts. Run ./start.sh to restart.\n", end="", flush=True)
+        self._send_hud("hide")
 
     def cleanup(self):
         self.p.terminate()
@@ -337,14 +358,15 @@ def start_ear():
     # Start brain log tailer in background
     tailer = BrainOutputTailer(log_path)
     tailer.start()
-    
-    # Start terminal input menu
+
+    # Start terminal input menu (calls tty.setcbreak)
     menu = TerminalMenu()
     menu.start()
 
     ear = Ear(input_device_index=selected_mic_index)
     listener = keyboard.Listener(on_press=ear.on_press, on_release=ear.on_release)
     listener.start()
+
 
     backend_label = {
         "faster_whisper": "faster-whisper + distil-large-v3 (INT8)",

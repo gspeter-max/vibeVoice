@@ -12,6 +12,8 @@ set -euo pipefail
 export BACKEND="${BACKEND:-faster_whisper}"
 # Fix: ctranslate2 and residual torch/NeMo both bundle libiomp5.dylib — allow coexistence
 export KMP_DUPLICATE_LIB_OK=TRUE
+# Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this
+export QT_MAC_WANTS_LAYER=1
 VENV_PYTHON="./.venv/bin/python"
 
 echo ""
@@ -29,11 +31,16 @@ if [ ! -f "$VENV_PYTHON" ]; then
     exit 1
 fi
 
-# ── Kill any stale brain ─────────────────────────────────────────
+# ── Kill any stale processes ─────────────────────────────────────
 if [ -f /tmp/parakeet-brain.pid ]; then
     OLD_PID=$(cat /tmp/parakeet-brain.pid)
     kill "$OLD_PID" 2>/dev/null && echo "  Stopped old Brain (PID $OLD_PID)" || true
     rm -f /tmp/parakeet-brain.pid
+fi
+if [ -f /tmp/parakeet-hud.pid ]; then
+    OLD_HUD=$(cat /tmp/parakeet-hud.pid)
+    kill "$OLD_HUD" 2>/dev/null || true
+    rm -f /tmp/parakeet-hud.pid
 fi
 rm -f /tmp/parakeet.sock
 
@@ -53,10 +60,8 @@ while [ ! -S /tmp/parakeet.sock ]; do
     sleep 1
     WAIT=$((WAIT + 1))
 
-    # Show progress dots
     printf "."
 
-    # Check if brain died
     if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
         echo ""
         echo "❌ Brain crashed on startup. Last log:"
@@ -79,6 +84,20 @@ echo "  ✅ Brain is Online!"
 echo "══════════════════════════════════════════════════"
 echo ""
 
+# ── Start HUD in background ──────────────────────────────────────
+# CRITICAL: must be launched directly from the shell here, NOT as a
+# subprocess of ear.py.  When Qt/PySide6 is spawned too deep in a
+# subprocess chain, macOS WindowServer rejects the GUI memory allocation
+# with SIGABRT (vm_map_enter failure).  Shell-level launch fixes this.
+echo "  Starting HUD..."
+# Kill anything stale still holding the IPC port
+lsof -ti :57234 | xargs kill -9 2>/dev/null || true
+"$VENV_PYTHON" hud.py > hud.log 2>&1 &
+HUD_PID=$!
+echo $HUD_PID > /tmp/parakeet-hud.pid
+echo "  HUD   PID: $HUD_PID  |  log: hud.log"
+sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
+
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
 BACKEND="$BACKEND" "$VENV_PYTHON" ear.py
 
@@ -87,4 +106,8 @@ echo ""
 echo "  Stopping Brain (PID $BRAIN_PID)..."
 kill "$BRAIN_PID" 2>/dev/null || true
 rm -f /tmp/parakeet-brain.pid /tmp/parakeet.sock
+
+echo "  Stopping HUD (PID $HUD_PID)..."
+kill "$HUD_PID" 2>/dev/null || true
+rm -f /tmp/parakeet-hud.pid
 echo "  Done. Goodbye."

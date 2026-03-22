@@ -52,6 +52,16 @@ audio_queue = queue.Queue()
 backend_info = {"backend": None, "model": None}
 backend_lock = threading.Lock()
 
+def send_hud(cmd: str):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.2)
+        s.connect(('127.0.0.1', 57234))
+        s.sendall(cmd.encode())
+        s.close()
+    except Exception:
+        pass
+
 def worker():
     """Background thread that pulls from queue and transcribes."""
     while True:
@@ -92,11 +102,13 @@ def worker():
                 except Exception as e:
                     print(f"[Brain] ❌ Audio error: {e}")
                     audio_queue.task_done()
+                    send_hud("hide")
                     continue
 
                 if len(audio_array) < 4800:
                     print("[Brain] ⚠️  Audio too short — skipped")
                     audio_queue.task_done()
+                    send_hud("hide")
                     continue
 
                 duration_sec = len(audio_array) / 16000.0
@@ -110,14 +122,17 @@ def worker():
                 if text:
                     print(f"[Brain] 📝 [{t_elapsed:.2f}s] → \"{text}\"")
                     keyboard.type(text + " ")
+                    send_hud("done")
                 else:
                     print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
+                    send_hud("hide")
                 
                 sys.stdout.flush()
             
             audio_queue.task_done()
         except Exception as e:
             print(f"[Brain] 💥 Worker error: {e}")
+            send_hud("hide")
 
 # ── Socket server ──────────────────────────────────────────────────────────────
 def start_server():
