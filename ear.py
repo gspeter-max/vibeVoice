@@ -243,6 +243,19 @@ class Ear:
         self._cmd_press_time = 0.0
         self._toggle_active  = False  # True while toggle mode recording is live
 
+        # ★ PRE-OPEN mic stream so recording starts instantly on keypress
+        self.stream = self.p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            input_device_index=self.input_device_index,
+            frames_per_buffer=CHUNK,
+            stream_callback=self._audio_callback
+        )
+        self.stream.start_stream()
+        print(f"[Ear] Mic pre-opened: {self.active_mic_name} ✓", flush=True)
+
 
 
     def _send_hud(self, cmd):
@@ -293,7 +306,7 @@ class Ear:
         # Second tap in toggle mode → stop recording, send to brain
         if self._toggle_active:
             self._toggle_active = False
-            self._stop_and_send()             # stop mic + send audio to brain
+            self._stop_and_send()
             return
 
         with self._lock:
@@ -306,24 +319,10 @@ class Ear:
         self._cmd_press_time = time.time()
         print("\r\n" + "─" * 50, flush=True)
         print(f"\r🎙️  RECORDING ({self.active_mic_name}) — release key to stop", flush=True)
-        self._send_hud("listen")
 
-        try:
-            self.stream = self.p.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                input_device_index=self.input_device_index,
-                frames_per_buffer=CHUNK,
-                stream_callback=self._audio_callback
-            )
-            self.stream.start_stream()
-            self._start_volume_sender()  # send mic RMS to HUD in background
-        except Exception as e:
-            print(f"\r❌ Mic error: {e}", flush=True)
-            with self._lock:
-                self.is_recording = False
+        # Send HUD command in background so it doesn't block recording
+        threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
+        self._start_volume_sender()
 
     def on_release(self, key):
         if not _is_right_cmd(key):
@@ -348,22 +347,19 @@ class Ear:
             print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
 
     def _stop_and_send(self):
-        """Stop the mic stream and dispatch audio to brain. Called by both modes."""
+        """Stop saving frames and dispatch audio to brain. Mic stream stays open."""
         with self._lock:
             if not self.is_recording:
                 return
             self.is_recording = False
 
-        if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-            self.stream = None
+        # DON'T close self.stream — keep it running for next press
 
         n_frames = len(self.frames)
         duration  = (n_frames * CHUNK) / RATE
         print(f"\r\n⏹️  Recorded {duration:.1f}s — sending to Brain...\n", end="", flush=True)
-        self._send_hud("hide")
 
+        threading.Thread(target=self._send_hud, args=("hide",), daemon=True).start()
         threading.Thread(target=self._send_to_brain, daemon=True).start()
 
     # ── Audio capture loop ─────────────────────────────────────────────────────
@@ -415,6 +411,9 @@ class Ear:
         self._send_hud("hide")
 
     def cleanup(self):
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
         self.p.terminate()
 
 

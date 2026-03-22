@@ -21,6 +21,9 @@ import os
 import math
 import time
 import socket
+import wave
+import struct
+import subprocess
 
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
@@ -111,6 +114,63 @@ class VolumeListener(QThread):
             sock.close()
 
 
+# ── Sound effects (generated in-memory, no external files) ────────────────────
+def _make_wav(path, freqs, duration=0.12, volume=0.3, sample_rate=44100):
+    """Generate a tiny WAV beep file. freqs = list of (freq, start, end) tuples."""
+    n_samples = int(sample_rate * duration)
+    samples = []
+    for i in range(n_samples):
+        t = i / sample_rate
+        val = 0.0
+        for freq, t_start, t_end in freqs:
+            if t_start <= t <= t_end:
+                # Fade in/out envelope
+                seg_dur = t_end - t_start
+                seg_t = (t - t_start) / seg_dur
+                envelope = min(1.0, seg_t * 15) * min(1.0, (1.0 - seg_t) * 15)
+                val += math.sin(2 * math.pi * freq * t) * envelope
+        val = max(-1.0, min(1.0, val * volume))
+        samples.append(int(val * 32767))
+
+    with wave.open(path, "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(struct.pack(f"<{len(samples)}h", *samples))
+
+
+def _init_sounds():
+    """Create two small sound files in /tmp."""
+    listen_path = "/tmp/parakeet_listen.wav"
+    done_path   = "/tmp/parakeet_done.wav"
+
+    # Listen sound: soft rising double-blip (like iOS dictation start)
+    _make_wav(listen_path, [
+        (880,  0.00, 0.07),   # first blip  — A5
+        (1175, 0.06, 0.13),   # second blip — D6 (rising)
+    ], duration=0.15, volume=0.25)
+
+    # Done sound: gentle falling confirmation tone
+    _make_wav(done_path, [
+        (1175, 0.00, 0.08),   # high note — D6
+        (880,  0.07, 0.15),   # low note  — A5 (falling = "done")
+    ], duration=0.17, volume=0.25)
+
+    return listen_path, done_path
+
+
+def _play_sound(path):
+    """Play a WAV file without blocking, without stealing focus."""
+    try:
+        subprocess.Popen(
+            ["afplay", path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 # ── Main HUD widget ────────────────────────────────────────────────────────
 class PillHUD(QWidget):
 
@@ -163,6 +223,7 @@ class PillHUD(QWidget):
 
         self._cur_w = float(PILL_W_IDLE)
         self._cur_h = float(PILL_H_IDLE)
+        self._snd_listen, self._snd_done = _init_sounds()
 
         # 60 fps animation timer (only runs when animating)
         self._timer = QTimer(self)
@@ -227,12 +288,14 @@ class PillHUD(QWidget):
 
     # ── Public state transitions ───────────────────────────────────────────
     def show_listening(self):
+        _play_sound(self._snd_listen)
         self._enter(LISTENING)
 
     def show_processing(self):
         self._enter(PROCESSING)
 
     def show_done(self):
+        _play_sound(self._snd_done)
         self._enter(DONE)
         QTimer.singleShot(900, self._return_to_idle)
 
