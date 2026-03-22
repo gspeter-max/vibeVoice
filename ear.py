@@ -23,9 +23,28 @@ from pynput import keyboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
-HOTKEY_PRIMARY  = keyboard.Key.cmd_r  # Right Command (preferred)
-HOTKEY_FALLBACK = keyboard.Key.cmd    # Fallback: some pynput versions report cmd for both sides
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
+VOL_PORT        = 57235               # UDP port for sending mic RMS to HUD
+HOLD_THRESHOLD  = 0.4                 # seconds — above this = hold mode, below = toggle mode
+
+# macOS / pynput key matching ———————————————————————————————————————
+# pynput may report Right CMD as Key.cmd_r, or as a KeyCode with name='cmd_r',
+# or vk=55. We match ALL of these and explicitly reject anything that looks like
+# Left CMD (Key.cmd, name='cmd', vk=None-ambiguous) so Left CMD never fires.
+_RCMD_VK = 54  # macOS virtual key code for Right CMD (Left CMD = 55)
+
+def _is_right_cmd(key) -> bool:
+    """Return True ONLY if key is Right CMD, never Left CMD."""
+    # Direct enum match (pynput 1.7+)
+    if key == keyboard.Key.cmd_r:
+        return True
+    # Some pynput versions return a KeyCode for special keys
+    if hasattr(key, 'name') and getattr(key, 'name', None) == 'cmd_r':
+        return True
+    # vk code match (most reliable on macOS)
+    if hasattr(key, 'vk') and getattr(key, 'vk', None) == _RCMD_VK:
+        return True
+    return False
 
 FORMAT   = pyaudio.paInt16
 CHANNELS = 1
@@ -209,16 +228,20 @@ class Ear:
         self.is_recording = False
         self._lock        = threading.Lock()
         self.last_rms     = 0.0
-        
+
         if input_device_index is None:
              self.input_device_index = self.p.get_default_input_device_info().get("index")
         else:
              self.input_device_index = input_device_index
-             
+
         self.active_mic_name = self.p.get_device_info_by_index(self.input_device_index).get("name")
         self.gain_multiplier = 2.0  # Boost volume by 2x
         # HUD is managed by start.sh — no subprocess here.
         self.hud_proc = None
+
+        # Hold vs toggle mode tracking
+        self._cmd_press_time = 0.0
+        self._toggle_active  = False  # True while toggle mode recording is live
 
 
 
@@ -231,6 +254,25 @@ class Ear:
             s.close()
         except Exception:
             pass
+
+    def _start_volume_sender(self):
+        """Send mic RMS to HUD via UDP at ~25fps while recording."""
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        def _sender():
+            while True:
+                with self._lock:
+                    if not self.is_recording:
+                        break
+                    rms = self.last_rms
+                try:
+                    udp.sendto(f"vol:{rms:.4f}".encode(), ('127.0.0.1', VOL_PORT))
+                except Exception:
+                    pass
+                time.sleep(0.04)
+            udp.close()
+
+        threading.Thread(target=_sender, daemon=True).start()
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
@@ -245,8 +287,15 @@ class Ear:
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
     def on_press(self, key):
-        if key not in (HOTKEY_PRIMARY, HOTKEY_FALLBACK):
+        if not _is_right_cmd(key):
             return
+
+        # Second tap in toggle mode → stop recording, send to brain
+        if self._toggle_active:
+            self._toggle_active = False
+            self._stop_and_send()             # stop mic + send audio to brain
+            return
+
         with self._lock:
             if self.is_recording:
                 return
@@ -254,6 +303,7 @@ class Ear:
             self.frames = []
             self.last_rms = 0.0
 
+        self._cmd_press_time = time.time()
         print("\r\n" + "─" * 50, flush=True)
         print(f"\r🎙️  RECORDING ({self.active_mic_name}) — release key to stop", flush=True)
         self._send_hud("listen")
@@ -269,14 +319,36 @@ class Ear:
                 stream_callback=self._audio_callback
             )
             self.stream.start_stream()
+            self._start_volume_sender()  # send mic RMS to HUD in background
         except Exception as e:
             print(f"\r❌ Mic error: {e}", flush=True)
             with self._lock:
                 self.is_recording = False
 
     def on_release(self, key):
-        if key not in (HOTKEY_PRIMARY, HOTKEY_FALLBACK):
+        if not _is_right_cmd(key):
             return
+
+        # Ignore release if already handled by second-tap logic
+        if self._toggle_active:
+            return
+
+        with self._lock:
+            if not self.is_recording:
+                return
+
+        held = time.time() - self._cmd_press_time
+
+        if held >= HOLD_THRESHOLD:
+            # ── HOLD MODE: stop now and send immediately ───────────────────
+            self._stop_and_send()
+        else:
+            # TOGGLE MODE: keep recording silently
+            self._toggle_active = True
+            print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
+
+    def _stop_and_send(self):
+        """Stop the mic stream and dispatch audio to brain. Called by both modes."""
         with self._lock:
             if not self.is_recording:
                 return
@@ -290,7 +362,7 @@ class Ear:
         n_frames = len(self.frames)
         duration  = (n_frames * CHUNK) / RATE
         print(f"\r\n⏹️  Recorded {duration:.1f}s — sending to Brain...\n", end="", flush=True)
-        self._send_hud("process")
+        self._send_hud("hide")
 
         threading.Thread(target=self._send_to_brain, daemon=True).start()
 
