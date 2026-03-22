@@ -228,9 +228,9 @@ class Ear:
         self._brain_sock = None
         self._brain_sock_lock = threading.Lock()
 
-        # ★ DON'T pre-open stream — open fresh each time
-        # This avoids the stale-callback problem
+        # ★ ALWAYS LISTENING MODE: Open stream once at startup
         self.stream = None
+        self._open_mic_stream()
         print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
 
     def _send_hud(self, cmd):
@@ -315,18 +315,20 @@ class Ear:
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         if status:
-            print(f"[Ear] ⚠️ PyAudio status: {status}", flush=True)
+            pass # Suppress status printing in always-listening mode to avoid spam
 
         with self._lock:
-            if self.is_recording:
-                audio_data = np.frombuffer(in_data, dtype=np.int16)
-                boosted = (audio_data.astype(np.float32) * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
-                chunk_bytes = boosted.tobytes()
-                self.last_rms = get_rms(chunk_bytes)
-                self._total_frames += 1
+            if not self.is_recording:
+                return (None, pyaudio.paContinue)
+                
+            audio_data = np.frombuffer(in_data, dtype=np.int16)
+            boosted = (audio_data.astype(np.float32) * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
+            chunk_bytes = boosted.tobytes()
+            self.last_rms = get_rms(chunk_bytes)
+            self._total_frames += 1
 
-                # ★ STREAMING: send each chunk immediately
-                self._stream_chunk_to_brain(chunk_bytes)
+            # ★ STREAMING: send each chunk immediately
+            self._stream_chunk_to_brain(chunk_bytes)
 
         return (None, pyaudio.paContinue)
 
@@ -377,9 +379,6 @@ class Ear:
         if not self._open_brain_stream():
             return
 
-        # ★ Open FRESH mic stream
-        self._open_mic_stream()
-
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0
@@ -417,9 +416,6 @@ class Ear:
                 return
             self.is_recording = False
             total = self._total_frames
-
-        # ★ Close mic FIRST, then close brain socket
-        self._close_mic_stream()
 
         duration = (total * CHUNK) / RATE
         print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
