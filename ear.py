@@ -378,7 +378,7 @@ class Ear:
         duration  = (n_frames * CHUNK) / RATE
         print(f"\r\n⏹️  Recorded {duration:.1f}s — sending to Brain...\n", end="", flush=True)
 
-        threading.Thread(target=self._send_hud, args=("hide",), daemon=True).start()
+        threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
         threading.Thread(target=self._send_to_brain, daemon=True).start()
 
     # ── Audio capture loop ─────────────────────────────────────────────────────

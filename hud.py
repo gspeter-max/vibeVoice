@@ -301,8 +301,8 @@ class PillHUD(QWidget):
         self._t = time.time() - self._t0
 
         # Animate pill size (smooth lerp)
-        target_w = PILL_W_ACTIVE if self._state == LISTENING else PILL_W_IDLE
-        target_h = PILL_H_ACTIVE if self._state == LISTENING else PILL_H_IDLE
+        target_w = PILL_W_ACTIVE if self._state in (LISTENING, PROCESSING) else PILL_W_IDLE
+        target_h = PILL_H_ACTIVE if self._state in (LISTENING, PROCESSING) else PILL_H_IDLE
 
         self._cur_w += (target_w - self._cur_w) * 0.18
         self._cur_h += (target_h - self._cur_h) * 0.18
