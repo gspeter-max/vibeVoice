@@ -253,7 +253,7 @@ class Ear:
             frames_per_buffer=CHUNK,
             stream_callback=self._audio_callback
         )
-        self.stream.start_stream()
+        # We don't start_stream() here to avoid macOS AUHAL spam and the orange "mic active" dot
         print(f"[Ear] Mic pre-opened: {self.active_mic_name} ✓", flush=True)
 
 
@@ -322,6 +322,13 @@ class Ear:
 
         # Send HUD command in background so it doesn't block recording
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
+
+        try:
+            if not self.stream.is_active():
+                self.stream.start_stream()
+        except Exception as e:
+            print(f"\r❌ Mic start error: {e}", flush=True)
+
         self._start_volume_sender()
 
     def on_release(self, key):
@@ -352,6 +359,13 @@ class Ear:
             if not self.is_recording:
                 return
             self.is_recording = False
+
+        # Stop hardware stream to prevent AUHAL errors and remove orange dot
+        try:
+            if self.stream and self.stream.is_active():
+                self.stream.stop_stream()
+        except Exception:
+            pass
 
         # DON'T close self.stream — keep it running for next press
 
