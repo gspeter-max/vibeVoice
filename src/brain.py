@@ -242,7 +242,7 @@ def handle_connection(conn):
         max_val = np.max(np.abs(audio))
         rms_val = np.sqrt(np.mean(audio ** 2))
         nonzero = np.count_nonzero(audio)
-        print(f"[Brain] 📊 max={max_val:.4f} rms={rms_val:.4f} nonzero={nonzero}/{len(audio)}")
+        # print(f"[Brain] 📊 max={max_val:.4f} rms={rms_val:.4f} nonzero={nonzero}/{len(audio)}")
 
         if max_val < 0.005:
             print("[Brain] ⚠️  Audio is silence — mic not capturing")

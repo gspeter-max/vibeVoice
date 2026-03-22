@@ -34,11 +34,15 @@ try:
                 success, error = input_node.setVoiceProcessingEnabled_error_(True, None)
                 if success:
                     _VOICE_ISOLATION_ACTIVE = True
-        except Exception:
-            pass
+                else:
+                    print(f"[Ear] Voice processing not enabled: {error}", flush=True)
+            else:
+                print("[Ear] inputNode does not support setVoiceProcessingEnabled_error_", flush=True)
+        except Exception as e:
+            print(f"[Ear] Voice isolation init failed: {e}", flush=True)
 except ImportError:
     def _enable_macos_voice_isolation():
-        pass
+        print("[Ear] AVFoundation not available", flush=True)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
@@ -433,7 +437,7 @@ class Ear:
                 recording = self.is_recording
                 rms = self.last_rms
             if recording:
-                meter = "█" * min(int(rms * 120), 50)
+                meter = "█" * min(int(rms * 500), 50)
                 print(f"\r  Level: [{meter:<50}]", end="", flush=True)
 
     def cleanup(self):
