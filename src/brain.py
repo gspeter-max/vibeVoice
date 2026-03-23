@@ -142,6 +142,41 @@ def send_hud(cmd: str):
         pass
 
 
+import subprocess
+
+def paste_instantly(text: str):
+    """
+    Pastes text instantly by injecting it into the macOS clipboard and simulating Cmd+V.
+    Restores the original clipboard contents immediately afterward.
+    """
+    try:
+        # 1. Save current clipboard contents (if any)
+        try:
+            old_clipboard = subprocess.check_output(['pbpaste'], stderr=subprocess.DEVNULL).decode('utf-8')
+        except Exception:
+            old_clipboard = ""
+
+        # 2. Put the new text into the clipboard
+        process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+        process.communicate(input=text.encode('utf-8'))
+
+        # 3. Simulate Cmd+V using AppleScript
+        applescript = 'tell application "System Events" to keystroke "v" using command down'
+        subprocess.run(['osascript', '-e', applescript], check=True)
+
+        # 4. Give the OS a tiny moment to process the paste, then restore the old clipboard
+        time.sleep(0.05)
+        if old_clipboard:
+            process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+            process.communicate(input=old_clipboard.encode('utf-8'))
+        else:
+            # If clipboard was empty, clear it
+            subprocess.run(['pbcopy'], stdin=subprocess.PIPE).communicate(input=b'')
+            
+    except Exception as e:
+        print(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
+        keyboard.type(text)
+
 def handle_connection(conn):
     """Handle one streaming connection: accumulate → transcribe when ear closes."""
     t_connect = time.perf_counter()
@@ -291,7 +326,8 @@ def handle_connection(conn):
     if text:
         print(f"[Brain] 📝 [{t_elapsed:.2f}s | {total_latency:.2f}s total] → \"{text}\"")
         sys.stdout.flush()
-        keyboard.type(text + " ")
+        # Add a trailing space to separate dictated phrases, just like the old behavior
+        paste_instantly(text + " ")
         send_hud("done")
     else:
         print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
