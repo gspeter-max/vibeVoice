@@ -5,6 +5,9 @@
 # ║  Backend toggle (set before running):                        ║
 # ║    BACKEND=faster_whisper ./start.sh   ← default             ║
 # ║    BACKEND=openvino       ./start.sh   ← Intel iGPU          ║
+# ║                                                              ║
+# ║  Voice Isolation toggle (for macOS):                         ║
+# ║    VOICE_ISOLATION=1 ./start.sh   ← enable (default off)     ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
@@ -20,6 +23,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 export BACKEND="${BACKEND:-faster_whisper}"
+export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 # Fix: ctranslate2 and residual torch/NeMo both bundle libiomp5.dylib — allow coexistence
 export KMP_DUPLICATE_LIB_OK=TRUE
 # Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this

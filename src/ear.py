@@ -24,7 +24,7 @@ from pynput import keyboard
 # ── macOS Voice Isolation ──────────────────────────────────────────────────────
 _VOICE_ISOLATION_ACTIVE = False
 try:
-    import AVFoundation
+    import AVFoundation 
     def _enable_macos_voice_isolation():
         global _VOICE_ISOLATION_ACTIVE
         try:
@@ -207,11 +207,14 @@ class Ear:
         self.is_recording = False
         self._lock = threading.Lock()
         self.last_rms = 0.0
-        self.gain_multiplier = 1.1 # Reduced from 2.0; let the brain normalize
+        self.gain_multiplier = 2.5 # Increased from 1.1 to fix quiet mic issues
         self._total_frames = 0
 
-        # Enable macOS Voice Isolation if possible
-        _enable_macos_voice_isolation()
+        # Enable macOS Voice Isolation if requested
+        if os.environ.get("VOICE_ISOLATION", "0") == "1":
+            _enable_macos_voice_isolation()
+        else:
+            print("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)", flush=True)
 
         if input_device_index is None:
             self.input_device_index = self.p.get_default_input_device_info().get("index")
@@ -466,7 +469,7 @@ def start_ear():
         "openvino":       "whisper.cpp + OpenVINO (Intel iGPU)",
     }.get(BACKEND, BACKEND)
 
-    mic_mode = "Voice Isolation (macOS)" if _VOICE_ISOLATION_ACTIVE else "Standard"
+    mic_mode = "Voice Isolation (macOS)" if os.environ.get("VOICE_ISOLATION", "0") == "1" else "Standard (Raw Audio)"
 
     print()
     print("╔══════════════════════════════════════════════════╗")

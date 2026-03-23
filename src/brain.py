@@ -41,10 +41,20 @@ class SileroVAD:
             # v5 — single state tensor
             self._version = 5
             # Find state shape from model metadata
+            state_shape = None
             for inp in self.session.get_inputs():
                 if inp.name == 'state':
-                    state_shape = inp.shape  # e.g. [2, 1, 128]
+                    # Handle dynamic axes (None or str) by defaulting to 1
+                    state_shape = [
+                        dim if isinstance(dim, int) else 1 
+                        for dim in inp.shape
+                    ]
                     break
+            
+            if state_shape is None:
+                # Fallback to standard Silero VAD v5 state shape if lookup fails
+                state_shape = [2, 1, 128]
+                
             self._state = np.zeros(state_shape, dtype=np.float32)
         else:
             # v3/v4 — separate h and c
@@ -244,7 +254,7 @@ def handle_connection(conn):
         nonzero = np.count_nonzero(audio)
         # print(f"[Brain] 📊 max={max_val:.4f} rms={rms_val:.4f} nonzero={nonzero}/{len(audio)}")
 
-        if max_val < 0.005:
+        if max_val < 0.001:
             print("[Brain] ⚠️  Audio is silence — mic not capturing")
             send_hud("hide")
             return
