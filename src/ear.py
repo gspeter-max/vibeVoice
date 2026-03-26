@@ -101,16 +101,46 @@ def run_self_test():
     frequency = 440.0
     t = np.linspace(0, duration, int(RATE * duration), endpoint=False)
     audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16).tobytes()
-    try:
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(120)
-        client.connect(SOCKET_PATH)
-        client.sendall(audio_data)
-        client.shutdown(socket.SHUT_WR)
-        client.close()
-        print("\r✅ Self-test audio sent to Brain\n", end="", flush=True)
-    except Exception as e:
-        print(f"\r❌ Self-test failed: {e}\n", end="", flush=True)
+
+    # Retry logic for more robust connection
+    max_retries = 3
+    retry_delay = 1  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(5)  # Shorter timeout for retries
+
+            # Check if socket exists first
+            if not os.path.exists(SOCKET_PATH):
+                if attempt < max_retries - 1:
+                    print(f"\r⏳ Socket not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n", end="", flush=True)
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print(f"\r❌ Self-test failed: Socket not found at {SOCKET_PATH}\n", end="", flush=True)
+                    print("   Is Brain running? Check logs/brain.log\n", end="", flush=True)
+                    return
+
+            client.connect(SOCKET_PATH)
+            client.sendall(audio_data)
+            client.shutdown(socket.SHUT_WR)
+            client.close()
+
+            print("\r✅ Self-test audio sent to Brain\n", end="", flush=True)
+            return
+
+        except ConnectionRefusedError:
+            if attempt < max_retries - 1:
+                print(f"\r⏳ Brain busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n", end="", flush=True)
+                time.sleep(retry_delay)
+            else:
+                print(f"\r❌ Self-test failed: Brain not accepting connections\n", end="", flush=True)
+                print("   Brain might be loading model. Check logs/brain.log\n", end="", flush=True)
+
+        except Exception as e:
+            print(f"\r❌ Self-test failed: {e}\n", end="", flush=True)
+            break
 
 
 class TerminalMenu(threading.Thread):

@@ -170,8 +170,7 @@ def paste_instantly(text: str):
             process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
             process.communicate(input=old_clipboard.encode('utf-8'))
         else:
-            # If clipboard was empty, clear it
-            subprocess.run(['pbcopy'], stdin=subprocess.PIPE).communicate(input=b'')
+            pass 
             
     except Exception as e:
         print(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")

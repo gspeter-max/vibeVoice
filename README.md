@@ -50,6 +50,7 @@ We achieved a **12x speed improvement** over standard Whisper by implementing th
 2.  **CTranslate2 Backend**: Powered by `faster-whisper`, which is up to 4x faster than OpenAI's original implementation with lower memory usage.
 3.  **Callback Audio Pipeline**: Uses a non-blocking PyAudio callback to ensure the audio stream never drops or hangs during hotkey transitions.
 4.  **Zero-Latency Switching**: Models are swapped in memory using Python's `gc` (garbage collection) to prevent memory leaks while allowing instant transitions between speed and accuracy.
+5.  **Configurable Threading**: Parakeet models support adjustable thread counts via `PARAKEET_THREADS` for CPU optimization.
 
 ---
 
@@ -81,6 +82,26 @@ Simply run the startup script:
 - **Hold Right Command (⌘)**: Start speaking.
 - **Release Right Command**: Text will be typed into your active app.
 - **Press 1 through 0**: Switch models instantly in the terminal.
+
+### 4. Advanced Configuration
+
+#### Thread Count Tuning
+For Parakeet models, you can manually configure the number of threads used for transcription:
+
+```bash
+# Use specific number of threads (2, 4, 6, or 12)
+PARAKEET_THREADS=6 ./start.sh
+
+# Let system auto-detect (default, uses all cores)
+./start.sh
+```
+
+**Recommended values for Intel i7 (6 cores, 12 threads):**
+- `PARAKEET_THREADS=6` - Use physical cores only (recommended)
+- `PARAKEET_THREADS=12` - Use all logical threads (may have overhead)
+- `PARAKEET_THREADS=2` or `4` - For systems with fewer cores
+
+Test different values to find the optimal setting for your hardware. The thread count is displayed at startup and in the brain log.
 
 ---
 

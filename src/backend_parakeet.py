@@ -28,8 +28,17 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
 
     print(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_dir}...", flush=True)
 
-    # Use all available cores for max performance on Intel i7
-    num_threads = multiprocessing.cpu_count()
+    # Use PARAKEET_THREADS env var, or default to all cores
+    # NOTE: os.environ.get() returns empty string if var is set but empty
+    # We must check the string BEFORE converting to int
+    thread_env = os.environ.get("PARAKEET_THREADS")
+
+    if thread_env:  # Check if string has a value (not empty/None)
+        num_threads = int(thread_env)  # Only then convert to int
+    else:
+        num_threads = multiprocessing.cpu_count()  # Use default
+
+    print(f"[sherpa-onnx] Using {num_threads} threads", flush=True)
 
     # Use the from_transducer factory method which is available in the Python API
     recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  Parakeet Flow v2 — start.sh                                ║
+# ║  Parakeet Flow v2 — start.sh                                 ║
 # ║                                                              ║
 # ║  Backend toggle (set before running):                        ║
 # ║    BACKEND=faster_whisper ./start.sh   ← default             ║
 # ║    BACKEND=openvino       ./start.sh   ← Intel iGPU          ║
+# ║  Thread count for Parakeet (for testing/benchmarking):       ║
+# ║    PARAKEET_THREADS=2 ./start.sh   ← Use 2 threads           ║
+# ║    PARAKEET_THREADS=4 ./start.sh   ← Use 4 threads           ║
+# ║    PARAKEET_THREADS=6 ./start.sh   ← Use 6 threads           ║
+# ║    PARAKEET_THREADS=12 ./start.sh  ← Use 12 threads          ║
 # ║                                                              ║
 # ║  Voice Isolation toggle (for macOS):                         ║
 # ║    VOICE_ISOLATION=1 ./start.sh   ← enable (default off)     ║
@@ -28,6 +33,7 @@ export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export KMP_DUPLICATE_LIB_OK=TRUE
 # Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this
 export QT_MAC_WANTS_LAYER=1
+export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
 VENV_PYTHON="./.venv/bin/python"
 
 echo ""
@@ -36,6 +42,7 @@ echo "║        🎙️  PARAKEET FLOW  v2                      ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 echo "  Backend  : $BACKEND"
+echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
 echo ""
 
@@ -107,3 +114,4 @@ sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
 
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
 BACKEND="$BACKEND" "$VENV_PYTHON" src/ear.py
+
