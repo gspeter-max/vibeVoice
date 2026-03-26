@@ -61,6 +61,8 @@ We achieved a **12x speed improvement** over standard Whisper by implementing th
 - macOS (CoreAudio supported)
 - PortAudio (Install via Homebrew: `brew install portaudio`)
 
+**Note on Parakeet Models:** The Parakeet v2/v3 models (options 9/0) provide the highest accuracy but require the `sherpa-onnx` package. This is installed automatically with the project dependencies. If you encounter import errors, run: `uv pip install sherpa-onnx`
+
 ### 2. Installation
 ```bash
 # Clone and enter the repo

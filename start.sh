@@ -70,14 +70,25 @@ echo "  Brain PID: $BRAIN_PID  |  log: logs/brain.log"
 
 # ── Wait for socket (up to 120s for first-run model download) ───
 echo ""
-echo "  Waiting for Brain to be ready (first run downloads model)..."
+echo "  Waiting for Brain to be ready..."
+if [ ! -d ~/.cache/parakeet-flow/models/deepdml ]; then
+    echo "  ⚠️  First run: Downloading model (~1.5 GB)..."
+    echo "  This may take 5-10 minutes depending on your internet speed."
+    echo "  Subsequent starts will be much faster!"
+    echo ""
+fi
 WAIT=0
-MAX_WAIT=120
+MAX_WAIT=300  # Increased to 5 minutes for first download
 while [ ! -S /tmp/parakeet.sock ]; do
     sleep 1
     WAIT=$((WAIT + 1))
 
-    printf "."
+    # Show progress indicator with time
+    if [ $((WAIT % 10)) -eq 0 ]; then
+        printf ". [%02ds/%02ds]\n" "$WAIT" "$MAX_WAIT"
+    else
+        printf "."
+    fi
 
     if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
         echo ""
