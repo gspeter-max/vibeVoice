@@ -58,6 +58,9 @@ kill $(cat /tmp/parakeet-brain.pid 2>/dev/null) 2>/dev/null || true
 kill $(cat /tmp/parakeet-hud.pid 2>/dev/null) 2>/dev/null || true
 rm -f /tmp/parakeet.sock /tmp/parakeet-brain.pid /tmp/parakeet-hud.pid
 
+# ── Ensure logs directory exists ─────────────────────────────────
+mkdir -p logs
+
 # ── Start Brain in background ────────────────────────────────────
 echo "  Starting Brain..."
 BACKEND="$BACKEND" "$VENV_PYTHON" src/brain.py > logs/brain.log 2>&1 &
@@ -78,10 +81,20 @@ while [ ! -S /tmp/parakeet.sock ]; do
 
     if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
         echo ""
-        echo "❌ Brain crashed on startup. Last log:"
-        echo "─────────────────────────────────────"
-        tail -30 logs/brain.log
-        echo "─────────────────────────────────────"
+        echo "❌ Brain crashed on startup."
+        if [ -f "logs/brain.log" ]; then
+            echo "Last log:"
+            echo "─────────────────────────────────────"
+            tail -30 logs/brain.log
+            echo "─────────────────────────────────────"
+        else
+            echo "No log file found. Possible issues:"
+            echo "  - logs/ directory doesn't exist"
+            echo "  - Brain crashed before logging could start"
+            echo "  - Python import error (missing dependencies)"
+            echo ""
+            echo "Try running: src/brain.py manually to see the error"
+        fi
         exit 1
     fi
 
