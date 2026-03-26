@@ -1,4 +1,0 @@
-import objc
-from ApplicationServices import AXUIElementCreateSystemWide, kAXFocusedUIElementAttribute, kAXSelectedTextAttribute, AXUIElementCopyAttributeValue, AXUIElementSetAttributeValue
-
-print("Imports worked")
