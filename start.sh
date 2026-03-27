@@ -86,10 +86,49 @@ get_theme_selection() {
     esac
 }
 
-# Theme selection menu
-show_theme_menu
-get_theme_selection
-echo ""
+load_saved_theme() {
+    local saved_theme
+    saved_theme=$("$VENV_PYTHON" -c "from src.theme_config import load_theme_preference; print(load_theme_preference())" 2>/dev/null || echo "0")
+
+    if [ -n "$saved_theme" ] && [ "$saved_theme" != "0" ]; then
+        echo ""
+        echo "🎨 Found saved theme preference: $saved_theme"
+        local theme_name=$("$VENV_PYTHON" -c "from src.theme_manager import ThemeManager; print(ThemeManager.theme_name($saved_theme))" 2>/dev/null || echo "Unknown")
+        echo "   ($theme_name)"
+        echo ""
+        echo -n "Use saved theme? [Y/n]: "
+        read use_saved
+
+        if [[ "$use_saved" =~ ^[Yy]*$ ]] || [ -z "$use_saved" ]; then
+            export HUD_THEME="$saved_theme"
+            echo "✓ Using saved theme $saved_theme"
+            echo ""
+            return 0
+        fi
+    fi
+    return 1
+}
+
+save_theme_preference() {
+    "$VENV_PYTHON" -c "from src.theme_config import save_theme_preference; save_theme_preference($HUD_THEME)"
+}
+
+# Check for saved theme preference
+if ! load_saved_theme; then
+    # No saved preference or user declined, show menu
+    show_theme_menu
+    get_theme_selection
+
+    # Ask to save preference
+    echo ""
+    echo -n "Save this theme preference for future sessions? [y/N]: "
+    read save_pref
+    if [[ "$save_pref" =~ ^[Yy]$ ]]; then
+        save_theme_preference
+        echo "✓ Theme preference saved to ~/.config/parakeet-flow/theme.conf"
+    fi
+    echo ""
+fi
 
 # ── Sanity check ────────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
