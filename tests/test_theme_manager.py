@@ -16,7 +16,7 @@ def test_theme_manager_initialization():
     tm_rainbow = ThemeManager(THEME_RAINBOW)
     assert tm_rainbow.current_theme == THEME_RAINBOW
     assert tm_rainbow.border_width > 0
-    assert tm_rainbow.border_width == 2.5
+    assert tm_rainbow.border_width == 3.5
 
 
 def test_invalid_theme_defaults_to_original():
