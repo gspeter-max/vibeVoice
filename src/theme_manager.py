@@ -93,30 +93,17 @@ class ThemeManager:
         Returns:
             QColor for the bar (rainbow gradient based on position)
         """
-        # Calculate position from center (0.0 = center, 1.0 = edge)
+        # Rainbow gradient across bars using HSV
+        # Map bar position to hue (pink at center to cyan at edges)
         mid = (total_bars - 1) / 2.0
         pos_from_center = abs(bar_index - mid) / mid if mid > 0 else 0
 
-        # Full opacity - bars always visible
-        alpha = 255
+        # Pink/Magenta at center (hue ~0.85) to Cyan at edges (hue ~0.5)
+        # Reverse: center should be smaller hue number
+        hue = 0.85 - (pos_from_center * 0.35)  # 0.85 (pink) to 0.5 (cyan)
 
-        # Rainbow gradient across bars: center=pink, edges=cyan
-        if pos_from_center < 0.25:
-            # Center: Pink/Magenta
-            local_pos = pos_from_center / 0.25
-            r, g, b = 255, int(100 * local_pos), int(200 * local_pos)
-        elif pos_from_center < 0.5:
-            # Mid-Center: Magenta to Purple
-            local_pos = (pos_from_center - 0.25) / 0.25
-            r, g, b = int(255 * (1-local_pos) + 200 * local_pos), int(50 * local_pos), 255
-        elif pos_from_center < 0.75:
-            # Mid-Edge: Purple to Blue
-            local_pos = (pos_from_center - 0.5) / 0.25
-            r, g, b = int(200 * (1-local_pos)), int(50 * local_pos), 255
-        else:
-            # Edge: Blue to Cyan
-            local_pos = (pos_from_center - 0.75) / 0.25
-            r, g, b = 0, int(50 + 205 * local_pos), 255
+        # Full saturation and brightness
+        color = QColor.fromHsvF(hue, 1.0, 1.0, 1.0)
+        color.setAlpha(255)
 
-        # Bright colors always visible, voice affects subtle brightness
-        return QColor(r, g, b, alpha)
+        return color

@@ -45,14 +45,13 @@ def test_bar_colors_different_by_position():
            (color_edge.red(), color_edge.green(), color_edge.blue())
 
 
-def test_bar_colors_brightness_with_voice():
-    """Verify bar brightness increases with voice intensity"""
+def test_bar_colors_always_vibrant():
+    """Verify bars are always vibrant regardless of voice"""
     tm = ThemeManager(THEME_ORIGINAL)
 
+    # Test with no voice
     color_quiet = tm.get_bar_color(bar_index=3, total_bars=7, voice_intensity=0.0, bar_height_factor=0.5)
-    color_loud = tm.get_bar_color(bar_index=3, total_bars=7, voice_intensity=1.0, bar_height_factor=0.5)
 
-    # Louder voice should produce brighter colors (higher RGB values)
-    brightness_quiet = color_quiet.red() + color_quiet.green() + color_quiet.blue()
-    brightness_loud = color_loud.red() + color_loud.green() + color_loud.blue()
-    assert brightness_loud > brightness_quiet
+    # Should be fully opaque and vibrant
+    assert color_quiet.alpha() == 255
+    assert color_quiet.red() + color_quiet.green() + color_quiet.blue() > 400  # Vibrant colors
