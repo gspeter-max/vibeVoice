@@ -54,10 +54,10 @@ def wav_to_numpy(wav_bytes: bytes) -> Tuple[np.ndarray, int]:
 
     Args:
         wav_bytes: WAV file as bytes
-
     Returns:
         Tuple of (audio array, sample_rate)
     """
+    
     with io.BytesIO(wav_bytes) as wav_buffer:
         with wave.open(wav_buffer, 'rb') as wav_file:
             sample_rate = wav_file.getframerate()

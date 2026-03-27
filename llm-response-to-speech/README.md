@@ -1,18 +1,32 @@
 # LLM Response to Speech - Kokoro TTS
 
-Lightweight Text-to-Speech system for Parakeet Flow using Kokoro 82M model.
+Lightweight Text-to-Speech system for Parakeet Flow using Kokoro 82M model with Microsoft Edge TTS integration.
 
 ## Overview
 
-This system provides a Unix socket-based TTS service that converts text to speech using the Kokoro 82M model. It's designed to be lightweight, fast, and perfect for systems with limited resources.
+This system provides a Unix socket-based TTS service that converts text to speech using multiple TTS backends. It's designed to be lightweight, fast, and perfect for systems with limited resources.
 
-### Why Kokoro 82M?
+### TTS Backends (Priority Order)
 
-- **Lightweight**: Only 350 MB model size
-- **CPU-based**: No GPU required
-- **Low RAM**: Works with 4 GB RAM
-- **Open Source**: MIT license, no API costs
-- **Fast**: Sub-second latency for short texts
+The system automatically selects the best available backend:
+
+1. **Kokoro 82M CLI** (Best quality, offline)
+   - 350 MB model size
+   - CPU-based, no GPU required
+   - Works with 4 GB RAM
+   - Open source (MIT license)
+   - Sub-second latency for short texts
+
+2. **Microsoft Edge TTS** (Good quality, requires internet)
+   - Free online service via edge-tts library
+   - Multiple natural voices available
+   - No API key required
+   - 2-3 second latency for typical sentences
+
+3. **Mock Mode** (Testing only)
+   - Generates beep tones
+   - Used for testing Unix socket protocol
+   - No external dependencies
 
 ### Architecture
 
@@ -49,18 +63,32 @@ This system provides a Unix socket-based TTS service that converts text to speec
 ```bash
 cd /Users/apple/parakeet-flow
 uv pip install -e ".[tts]"
+pip install edge-tts pydub
 ```
 
-### 2. (Optional) Install Kokoro CLI Tool
+### 2. Install ffmpeg (Required for audio conversion)
 
-If you want real speech synthesis (instead of mock beep tones):
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt-get install ffmpeg
+
+# Windows
+# Download from: https://ffmpeg.org/download.html
+```
+
+### 3. (Optional) Install Kokoro CLI Tool
+
+If you want the best offline quality:
 
 ```bash
 # Install kokoro-tts CLI tool
 # See: https://github.com/remsky/Kokoro-FastAPI
 ```
 
-If not installed, the system will use **mock mode** for testing.
+If not installed, the system will use **Microsoft Edge TTS** (requires internet connection).
 
 ## Usage
 
@@ -83,7 +111,7 @@ The service will:
 ```
 
 ### Stopping the Service
-
+ 
 ```bash
 ./scripts/stop_tts.sh
 ```
@@ -159,10 +187,29 @@ Available voices:
 
 On user's hardware (16 GB RAM, AMD Radeon Pro 5300M):
 
+### Kokoro CLI Backend (Offline)
 - **Memory**: ~500 MB (model + overhead)
 - **CPU**: Low usage, no lag
 - **Latency**: 0.5-2 seconds for typical sentences
 - **Real-time factor**: 0.1-0.5x (faster than real-time)
+
+### Edge TTS Backend (Online)
+- **Memory**: ~50 MB (no model loading)
+- **CPU**: Low usage, no lag
+- **Latency**: 2-4 seconds for typical sentences (network dependent)
+- **Real-time factor**: 0.5-2x (varies with network)
+- **Quality**: Natural-sounding neural voices
+
+### Check Active Backend
+
+```bash
+./scripts/status_tts.sh
+```
+
+Look for lines like:
+- `"Using Microsoft Edge TTS"` → Edge TTS backend
+- `"Kokoro binary: /path/to/kokoro-tts"` → Kokoro CLI backend
+- `"Using MOCK mode"` → Mock mode (beep tones only)
 
 ## Troubleshooting
 
@@ -192,12 +239,27 @@ ls -la /tmp/tts-kokoro.sock
 
 ### Only hearing beep tones
 
-This is normal if `kokoro-tts` CLI tool is not installed. The system uses mock mode for testing the Unix socket protocol.
+This means the system is in **mock mode** because:
+1. `kokoro-tts` CLI tool is not installed
+2. `edge-tts` library is not installed
+3. ffmpeg is not installed (required by edge-tts)
 
-To use real speech, install kokoro-tts:
+**Solution 1 (Recommended): Install edge-tts and ffmpeg**
+```bash
+pip install edge-tts pydub
+brew install ffmpeg  # macOS
+```
+
+**Solution 2: Install kokoro-tts CLI**
 ```bash
 # See: https://github.com/remsky/Kokoro-FastAPI
 ```
+
+### No internet connection
+
+If you're using **edge-tts** backend and have no internet:
+- Install kokoro-tts CLI for offline synthesis
+- Or use mock mode for testing
 
 ### High CPU usage
 
