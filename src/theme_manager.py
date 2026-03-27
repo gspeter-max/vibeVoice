@@ -1,54 +1,35 @@
 """
-ThemeManager Module - Manages visual themes for PillHUD widget.
-
-Provides 4 gradient themes:
-- THEME_ORIGINAL: Simple solid gray border (default)
-- THEME_RAINBOW: Diagonal rainbow gradient
-- THEME_RADIAL: Radial gradient from center
-- THEME_ANIMATED: Animated HSV color gradient
+theme_manager.py — Dynamic colorful bars for Parakeet Flow HUD
+================================================================
+Provides theme management with dynamic rainbow-colored bars based on voice input.
 """
 
-from PySide6.QtGui import QPen, QBrush, QColor, QLinearGradient, QRadialGradient
+from PySide6.QtGui import QColor, QPen, QBrush
 from PySide6.QtCore import Qt
 
-# Theme ID constants
+# Theme constant
 THEME_ORIGINAL = 0
-THEME_RAINBOW = 1
-THEME_RADIAL = 2
-THEME_ANIMATED = 3
 
-# Human-readable theme names
 THEME_NAMES = {
-    THEME_ORIGINAL: "Original (Solid Gray)",
-    THEME_RAINBOW: "Rainbow Gradient",
-    THEME_RADIAL: "Radial Glow",
-    THEME_ANIMATED: "Animated Aurora",
+    THEME_ORIGINAL: "Original (Dark with Colorful Bars)",
 }
 
 
 class ThemeManager:
-    """Manages visual themes for PillHUD with gradient borders."""
+    """
+    Manages HUD theme with dynamic colorful bars based on voice.
+    """
 
     def __init__(self, theme_id: int):
         """
-        Initialize ThemeManager with a specific theme.
+        Initialize ThemeManager.
 
         Args:
-            theme_id: Theme ID (THEME_ORIGINAL, THEME_RAINBOW, THEME_RADIAL, THEME_ANIMATED)
-                     Invalid IDs fall back to THEME_ORIGINAL
+            theme_id: Theme ID (only 0 supported)
         """
-        # Validate theme_id
-        if theme_id not in THEME_NAMES:
-            theme_id = THEME_ORIGINAL
-
-        self.current_theme = theme_id
-
-        # Set border width based on theme type
-        if theme_id == THEME_ORIGINAL:
-            self.border_width = 1.2
-        else:
-            # Gradient themes need thicker borders for visibility
-            self.border_width = 3.5
+        # Only theme 0 is supported
+        self.current_theme = THEME_ORIGINAL
+        self.border_width = 1.2
 
     @staticmethod
     def theme_name(theme_id: int) -> str:
@@ -65,111 +46,80 @@ class ThemeManager:
 
     def create_border_pen(self, rect_x: float, rect_y: float, rect_w: float, rect_h: float, hue_offset: float = 0.0) -> QPen:
         """
-        Create a QPen for the border based on current theme.
+        Create a QPen for the border (dark gray).
 
         Args:
-            rect_x: Rectangle X coordinate
-            rect_y: Rectangle Y coordinate
-            rect_w: Rectangle width
-            rect_h: Rectangle height
-            hue_offset: Hue offset for animated themes (0.0 to 1.0)
+            rect_x, rect_y, rect_w, rect_h: Dimensions and position of rectangle
+            hue_offset: Unused (for compatibility)
 
         Returns:
-            QPen configured with theme-appropriate brush
+            QPen with solid gray border
         """
-        if self.current_theme == THEME_ORIGINAL:
-            # Simple solid gray border
-            return QPen(QColor(90, 90, 95, 200), self.border_width)
-
-        elif self.current_theme == THEME_RAINBOW:
-            # Diagonal rainbow gradient with 5 stops - more vibrant colors
-            gradient = QLinearGradient(rect_x, rect_y, rect_x + rect_w, rect_y + rect_h)
-
-            # Bright pink at top-left
-            gradient.setColorAt(0.0, QColor(255, 0, 128, 255))    # Hot Pink
-            # Purple
-            gradient.setColorAt(0.25, QColor(128, 0, 255, 255))   # Purple
-            # Blue
-            gradient.setColorAt(0.5, QColor(0, 128, 255, 255))    # Blue
-            # Cyan
-            gradient.setColorAt(0.75, QColor(0, 255, 255, 255))   # Cyan
-            # Yellow at bottom-right
-            gradient.setColorAt(1.0, QColor(255, 255, 0, 255))    # Yellow
-
-            pen = QPen(gradient, self.border_width)
-            return pen
-
-        elif self.current_theme == THEME_RADIAL:
-            # Radial gradient from center - more vibrant
-            center_x = rect_x + rect_w / 2
-            center_y = rect_y + rect_h / 2
-            radius = max(rect_w, rect_h) / 2
-
-            gradient = QRadialGradient(center_x, center_y, radius)
-
-            # Bright yellow at center
-            gradient.setColorAt(0.0, QColor(255, 255, 0, 255))    # Yellow
-            # Magenta in middle
-            gradient.setColorAt(0.5, QColor(255, 0, 255, 255))    # Magenta
-            # Blue at edges
-            gradient.setColorAt(1.0, QColor(0, 128, 255, 255))    # Blue
-
-            pen = QPen(gradient, self.border_width)
-            return pen
-
-        elif self.current_theme == THEME_ANIMATED:
-            # Animated gradient with 6 HSV colors using hue_offset
-            gradient = QLinearGradient(rect_x, rect_y, rect_x + rect_w, rect_y)
-
-            # 6 color stops with HSV colors, shifted by hue_offset - full saturation
-            for i in range(6):
-                hue = (hue_offset + i / 6.0) % 1.0
-                # Convert HSV to RGB with full saturation and brightness
-                color = QColor.fromHsvF(hue, 1.0, 1.0, 1.0)
-                position = i / 5.0
-                gradient.setColorAt(position, color)
-
-            return QPen(gradient, self.border_width)
-
-        # Fallback (shouldn't reach here)
-        pen = QPen(QColor(90, 90, 95, 200))
-        pen.setWidthF(self.border_width)
-        return pen
+        return QPen(QColor(90, 90, 95, 200), self.border_width)
 
     def create_background_brush(self, rect_x: float, rect_y: float, rect_h: float, alpha: int) -> QBrush:
         """
-        Create a QBrush for the background based on current theme.
+        Create a QBrush for the background (dark).
 
         Args:
-            rect_x: Rectangle X coordinate
-            rect_y: Rectangle Y coordinate
-            rect_h: Rectangle height
-            alpha: Alpha value (0-255) for transparency
+            rect_x, rect_y, rect_h: Rectangle dimensions
+            alpha: Transparency value (0-255)
 
         Returns:
-            QBrush configured with theme-appropriate background
+            QBrush with dark gray background
         """
-        if self.current_theme == THEME_ORIGINAL:
-            # Simple solid dark background
-            color = QColor(16, 16, 18, alpha)
-            return QBrush(color)
-
-        else:
-            # Gradient themes get a vertical gradient background
-            gradient = QLinearGradient(rect_x, rect_y, rect_x, rect_y + rect_h)
-
-            # Darker at top
-            gradient.setColorAt(0.0, QColor(40, 40, 50, alpha))
-            # Even darker at bottom
-            gradient.setColorAt(1.0, QColor(20, 20, 30, alpha))
-
-            return QBrush(gradient)
+        return QBrush(QColor(16, 16, 18, alpha))
 
     def requires_animation(self) -> bool:
         """
-        Check if current theme requires animation.
+        Check if theme requires bar animation.
 
         Returns:
-            True only for THEME_ANIMATED
+            True - bars should be animated with voice
         """
-        return self.current_theme == THEME_ANIMATED
+        return True
+
+    def get_bar_color(self, bar_index: int, total_bars: int, voice_intensity: float,
+                     bar_height_factor: float) -> QColor:
+        """
+        Get dynamic color for a waveform bar based on position and voice.
+
+        Args:
+            bar_index: Index of this bar (0 to total_bars-1)
+            total_bars: Total number of bars
+            voice_intensity: Voice volume level (0.0 to 1.0)
+            bar_height_factor: Normalized bar height (0.0 to 1.0)
+
+        Returns:
+            QColor for the bar (rainbow gradient based on position)
+        """
+        # Calculate position from center (0.0 = center, 1.0 = edge)
+        mid = (total_bars - 1) / 2.0
+        pos_from_center = abs(bar_index - mid) / mid if mid > 0 else 0
+
+        # Base alpha on voice intensity and bar height
+        alpha = int(180 * (0.3 + 0.7 * voice_intensity * bar_height_factor))
+
+        # Rainbow gradient across bars: center=pink/magenta, edges=blue/cyan
+        if pos_from_center < 0.25:
+            # Center: Pink/Magenta
+            local_pos = pos_from_center / 0.25
+            r, g, b = 255, int(200 * (1-local_pos)), int(255 * local_pos)
+        elif pos_from_center < 0.5:
+            # Mid-Center: Magenta to Purple
+            local_pos = (pos_from_center - 0.25) / 0.25
+            r, g, b = int(255 * (1-local_pos) + 150 * local_pos), 100, 255
+        elif pos_from_center < 0.75:
+            # Mid-Edge: Purple to Blue
+            local_pos = (pos_from_center - 0.5) / 0.25
+            r, g, b = int(150 * (1-local_pos)), int(100 * (1-local_pos) + 200 * local_pos), 255
+        else:
+            # Edge: Blue to Cyan
+            local_pos = (pos_from_center - 0.75) / 0.25
+            r, g, b = 0, int(200 * (1-local_pos) + 255 * local_pos), 255
+
+        # Boost brightness based on voice intensity
+        brightness = 0.5 + 0.5 * voice_intensity
+        r, g, b = min(255, int(r * brightness)), min(255, int(g * brightness)), min(255, int(b * brightness))
+
+        return QColor(r, g, b, alpha)

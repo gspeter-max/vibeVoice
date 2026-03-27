@@ -181,9 +181,7 @@ class PillHUD(QWidget):
         self._last_vol_t   = 0.0
 
         # Theme manager initialization
-        theme_id = int(os.environ.get('HUD_THEME', str(THEME_ORIGINAL)))
-        self._theme_manager = ThemeManager(theme_id)
-        self._hue_offset = 0.0  # For animated theme
+        self._theme_manager = ThemeManager(THEME_ORIGINAL)
 
         # Per-bar state
         self._bar_h     = [BAR_MIN_H] * NUM_BARS
@@ -299,9 +297,8 @@ class PillHUD(QWidget):
     def _tick(self):
         self._t = time.time() - self._t0
 
-        # Update hue offset for animated themes
-        if self._theme_manager.requires_animation():
-            self._hue_offset = (self._hue_offset + 0.002) % 1.0
+        # Update hue offset for animated themes (no longer needed, kept for compatibility)
+        pass
 
         # Animate pill size (smooth lerp)
         target_w = PILL_W_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_W_IDLE
@@ -398,17 +395,20 @@ class PillHUD(QWidget):
                 bx = start_x + i * BAR_GAP
                 bh = max(BAR_MIN_H, self._bar_h[i])
                 by = cy - bh / 2
-                mid_val = (NUM_BARS - 1) / 2.0
-                cf    = 1.0 - abs(i - mid_val) / mid_val * 0.18
 
-                if self._state == THINKING:
-                    color = QColor(64, 156, 255, int(225 * cf)) # Brighter blue
-                elif self._state == PROCESSING:
-                    sweep = (math.sin(self._t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
-                    glow_cf = math.exp(-abs(i - sweep) ** 2 * 0.7)
-                    color = QColor(255, 255, 255, int((160 + 95 * glow_cf) * cf))
-                else:
-                    color = QColor(255, 255, 255, int(225 * cf))
+                # Calculate normalized bar height factor (0.0 to 1.0)
+                bar_height_factor = (bh - BAR_MIN_H) / (BAR_MAX_H - BAR_MIN_H) if BAR_MAX_H > BAR_MIN_H else 0
+
+                # Use voice intensity for dynamic coloring
+                voice_intensity = self._voice_smooth
+
+                # Get dynamic color from theme manager
+                color = self._theme_manager.get_bar_color(
+                    bar_index=i,
+                    total_bars=NUM_BARS,
+                    voice_intensity=voice_intensity,
+                    bar_height_factor=bar_height_factor
+                )
 
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(color))
