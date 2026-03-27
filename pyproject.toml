@@ -33,6 +33,13 @@ dev = [
     "pytest-mock>=3.12.0",
 ]
 
+# Install with: uv pip install -e ".[tts]"
+tts = [
+    "numpy>=1.26.0",          # Audio processing
+    "scipy>=1.11.0",          # Audio processing
+    "psutil>=5.9.0",          # System monitoring
+]
+
 
 [build-system]
 requires = ["hatchling"]
