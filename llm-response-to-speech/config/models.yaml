@@ -8,7 +8,7 @@ models:
     license: "MIT (Open Source)"
     requires_api_key: false
     executable: "kokoro-tts"
-    voice: "af_sarah"
+    voice: "am_michael"
     lang: "en-us"
     # Hardware requirements
     model_size_mb: 350
