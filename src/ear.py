@@ -267,30 +267,36 @@ class Ear:
         print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
 
     def _send_hud(self, cmd):
+        print(f"[Ear] 📤 Sending HUD command: {cmd}", flush=True)
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(0.2)
             s.connect(('127.0.0.1', 57234))
             s.sendall(cmd.encode())
             s.close()
-        except Exception:
-            pass
+            print(f"[Ear] ✅ HUD command sent successfully", flush=True)
+        except Exception as e:
+            print(f"[Ear] ❌ Failed to send HUD command: {e}", flush=True)
 
     def _start_volume_sender(self):
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         def _sender():
+            packets_sent = 0
             while True:
                 with self._lock:
                     if not self.is_recording:
+                        print(f"[Ear] Volume sender stopped (sent {packets_sent} packets)", flush=True)
                         break
                     rms = self.last_rms
                 try:
                     udp.sendto(f"vol:{rms:.4f}".encode(), ('127.0.0.1', VOL_PORT))
-                except Exception:
-                    pass
+                    packets_sent += 1
+                except Exception as e:
+                    print(f"[Ear] ❌ Failed to send volume: {e}", flush=True)
                 time.sleep(0.04)
             udp.close()
         threading.Thread(target=_sender, daemon=True).start()
+        print(f"[Ear] Volume sender thread started", flush=True)
 
     # ★ STREAMING: open a socket to brain BEFORE recording starts
     def _open_brain_stream(self) -> bool:
