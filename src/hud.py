@@ -284,6 +284,9 @@ class PillHUD(QWidget):
     def _on_volume(self, val):
         self._voice_raw  = min(1.0, val * 6.0)
         self._last_vol_t = time.time()
+        # DEBUG: Log when volume data arrives
+        if int(self._t * 60) % 10 == 0:  # Log occasionally
+            print(f"[HUD DEBUG] Received volume: {val:.3f} -> voice_raw={self._voice_raw:.3f}", flush=True)
 
     def _enter(self, state):
         self._state    = state
@@ -318,6 +321,10 @@ class PillHUD(QWidget):
         v   = self._voice_smooth
         t   = self._t
         mid = (NUM_BARS - 1) / 2.0
+
+        # DEBUG: Log voice data every 60 ticks (~1 second)
+        if int(self._t * 60) % 60 == 0 and self._state == LISTENING:
+            print(f"[HUD DEBUG] voice_raw={self._voice_raw:.3f} voice_smooth={v:.3f} state={self._state}", flush=True)
 
         for i in range(NUM_BARS):
             ph = self._bar_phase[i]
