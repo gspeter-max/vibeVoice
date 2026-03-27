@@ -66,54 +66,114 @@ class IPCServer(QThread):
     command = Signal(str)
 
     def run(self):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        print(f"[HUD] 🚀 IPCServer thread starting...", flush=True)
+        srv = None
         try:
+            print(f"[HUD] 🔧 Creating TCP socket...", flush=True)
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            print(f"[HUD] 🔧 Binding to 127.0.0.1:{IPC_PORT}...", flush=True)
             srv.bind(("127.0.0.1", IPC_PORT))
+
+            print(f"[HUD] 🔧 Setting listen queue...", flush=True)
             srv.listen(5)
+
+            print(f"[HUD] 🔧 Setting socket timeout...", flush=True)
             srv.settimeout(1.0)
-            print(f"[HUD] TCP on :{IPC_PORT}", flush=True)
+
+            print(f"[HUD] 🌐 TCP server listening on :{IPC_PORT}", flush=True)
+
             while not self.isInterruptionRequested():
                 try:
-                    conn, _ = srv.accept()
+                    conn, addr = srv.accept()
+                    print(f"[HUD] 🔌 Connection accepted from {addr}", flush=True)
                     data = conn.recv(256).decode().strip()
+                    print(f"[HUD] 📨 Received data: '{data}'", flush=True)
                     conn.close()
                     if data:
+                        print(f"[HUD] 📢 Emitting command signal: '{data}'", flush=True)
                         self.command.emit(data)
+                    else:
+                        print(f"[HUD] ⚠️ Empty data received", flush=True)
                 except socket.timeout:
                     continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[HUD] ❌ Error in receive loop: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+
         except Exception as e:
-            print(f"[HUD] TCP failed: {e}", flush=True)
+            print(f"[HUD] ❌ TCP server FAILED: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
         finally:
-            srv.close()
+            if srv:
+                print(f"[HUD] 🔧 Closing TCP socket...", flush=True)
+                srv.close()
+            print(f"[HUD] 🛑 IPCServer thread terminated", flush=True)
 
 
 class VolumeListener(QThread):
     volume = Signal(float)
+    frequency_bands = Signal(dict)  # New signal for frequency data
 
     def run(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        print(f"[HUD] 🚀 VolumeListener thread starting...", flush=True)
+        sock = None
         try:
+            print(f"[HUD] 🔧 Creating UDP socket...", flush=True)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            print(f"[HUD] 🔧 Binding to 127.0.0.1:{VOL_PORT}...", flush=True)
             sock.bind(("127.0.0.1", VOL_PORT))
+
+            print(f"[HUD] 🔧 Setting socket timeout...", flush=True)
             sock.settimeout(0.1)
-            print(f"[HUD] UDP on :{VOL_PORT}", flush=True)
+
+            print(f"[HUD] 🌐 UDP server listening on :{VOL_PORT}", flush=True)
+
             while not self.isInterruptionRequested():
                 try:
-                    data, _ = sock.recvfrom(64)
+                    data, addr = sock.recvfrom(128)
                     txt = data.decode().strip()
+                    print(f"[HUD] 📨 Received UDP from {addr}: '{txt}'", flush=True)
                     if txt.startswith("vol:"):
-                        self.volume.emit(float(txt[4:]))
+                        # Parse new format: "vol:RMS,bass:BASS,mid:MID,treble:TREBLE"
+                        try:
+                            parts = txt.split(',')
+                            vol_val = float(parts[0][4:])  # Extract "vol:X.XXX"
+
+                            # Parse frequency bands
+                            freq_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
+                            for part in parts[1:]:
+                                if ':' in part:
+                                    key, val = part.split(':', 1)
+                                    if key in freq_bands:
+                                        freq_bands[key] = float(val)
+
+                            print(f"[HUD] 🎤 Emitting volume signal: {vol_val:.4f}, freq: {freq_bands}", flush=True)
+                            self.volume.emit(vol_val)
+                            self.frequency_bands.emit(freq_bands)
+                        except (ValueError, IndexError) as e:
+                            print(f"[HUD] ⚠️ Failed to parse volume data: {e}", flush=True)
                 except socket.timeout:
                     continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[HUD] ❌ Error in UDP receive loop: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+
         except Exception as e:
-            print(f"[HUD] UDP failed: {e}", flush=True)
+            print(f"[HUD] ❌ UDP server FAILED: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
         finally:
-            sock.close()
+            if sock:
+                print(f"[HUD] 🔧 Closing UDP socket...", flush=True)
+                sock.close()
+            print(f"[HUD] 🛑 VolumeListener thread terminated", flush=True)
 
 
 # ── Sound effects (using provided external files) ─────────────────────────────
@@ -180,6 +240,9 @@ class PillHUD(QWidget):
         self._voice_smooth = 0.0
         self._last_vol_t   = 0.0
 
+        # Frequency bands for color mapping
+        self._frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
+
         # Theme manager initialization
         self._theme_manager = ThemeManager(THEME_ORIGINAL)
 
@@ -197,12 +260,20 @@ class PillHUD(QWidget):
         self._timer.timeout.connect(self._tick)
 
         # IPC threads
+        print(f"[HUD] 🔧 Creating IPCServer thread...", flush=True)
         self._ipc = IPCServer(self)
+        print(f"[HUD] 🔧 Connecting IPC command signal...", flush=True)
         self._ipc.command.connect(self._on_command)
+        print(f"[HUD] 🔧 Starting IPCServer thread...", flush=True)
         self._ipc.start()
 
+        print(f"[HUD] 🔧 Creating VolumeListener thread...", flush=True)
         self._vol = VolumeListener(self)
+        print(f"[HUD] 🔧 Connecting volume signal...", flush=True)
         self._vol.volume.connect(self._on_volume)
+        print(f"[HUD] 🔧 Connecting frequency bands signal...", flush=True)
+        self._vol.frequency_bands.connect(self._on_frequency_bands)
+        print(f"[HUD] 🔧 Starting VolumeListener thread...", flush=True)
         self._vol.start()
 
         # Keepalive timer
@@ -289,6 +360,11 @@ class PillHUD(QWidget):
         self._last_vol_t = time.time()
         # DEBUG: Log every volume packet for diagnosis
         print(f"[HUD] 🎤 Received volume: {val:.4f} -> voice_raw={self._voice_raw:.4f}", flush=True)
+
+    def _on_frequency_bands(self, freq_bands: dict):
+        """Update frequency bands for color mapping."""
+        self._frequency_bands = freq_bands
+        print(f"[HUD] 🎵 Frequency bands updated: {freq_bands}", flush=True)
 
     def _enter(self, state):
         self._state    = state
@@ -390,8 +466,8 @@ class PillHUD(QWidget):
         p.setBrush(self._theme_manager.create_background_brush(px, py, ph, fill_alpha))
         p.drawPath(pill)
 
-        # Use theme manager for border with hue offset for animated themes
-        p.setPen(self._theme_manager.create_border_pen(px, py, pw, ph, self._hue_offset))
+        # Use theme manager for border
+        p.setPen(self._theme_manager.create_border_pen(px, py, pw, ph, 0.0))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(pill)
 
@@ -411,12 +487,13 @@ class PillHUD(QWidget):
                 # Use voice intensity for dynamic coloring
                 voice_intensity = self._voice_smooth
 
-                # Get dynamic color from theme manager
+                # Get dynamic color from theme manager with frequency bands
                 color = self._theme_manager.get_bar_color(
                     bar_index=i,
                     total_bars=NUM_BARS,
                     voice_intensity=voice_intensity,
-                    bar_height_factor=bar_height_factor
+                    bar_height_factor=bar_height_factor,
+                    frequency_bands=self._frequency_bands
                 )
 
                 p.setPen(Qt.PenStyle.NoPen)

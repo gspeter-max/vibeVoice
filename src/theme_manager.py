@@ -80,29 +80,69 @@ class ThemeManager:
         return True
 
     def get_bar_color(self, bar_index: int, total_bars: int, voice_intensity: float,
-                     bar_height_factor: float) -> QColor:
+                     bar_height_factor: float, frequency_bands: dict = None) -> QColor:
         """
-        Get dynamic color for a waveform bar based on position.
+        Get DYNAMIC color for a waveform bar based on voice intensity and frequency bands.
 
         Args:
             bar_index: Index of this bar (0 to total_bars-1)
             total_bars: Total number of bars
-            voice_intensity: Voice volume level (0.0 to 1.0) - unused
-            bar_height_factor: Normalized bar height (0.0 to 1.0) - unused
+            voice_intensity: Voice volume level (0.0 to 1.0)
+            bar_height_factor: Normalized bar height (0.0 to 1.0)
+            frequency_bands: Dict with 'bass', 'mid', 'treble' values (0.0 to 1.0)
 
         Returns:
-            QColor for the bar (vibrant rainbow gradient)
+            QColor for the bar (frequency-based, voice-reactive colors)
         """
-        # Map bar position to hue for rainbow gradient
-        # Using broader spectrum: Red (0.0) at center through to Blue (0.66) at edges
-        mid = (total_bars - 1) / 2.0
-        pos_from_center = abs(bar_index - mid) / mid if mid > 0 else 0
+        import time
 
-        # Center = Red/Orange (0.0-0.1), Edges = Blue/Cyan (0.6-0.7)
-        hue = 0.0 + (pos_from_center * 0.7)
+        # Default frequency bands if not provided
+        if frequency_bands is None:
+            frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.33}
 
-        # Full saturation and maximum brightness for visibility
-        color = QColor.fromHsvF(hue, 1.0, 1.0, 1.0)
+        bass = frequency_bands.get('bass', 0.33)
+        mid = frequency_bands.get('mid', 0.33)
+        treble = frequency_bands.get('treble', 0.33)
+
+        # FREQUENCY-BASED COLOR MAPPING
+        # Bass (low frequencies) -> Warm colors (red/orange, hue 0.0-0.12)
+        # Mid (medium frequencies) -> Neutral colors (green/yellow, hue 0.28-0.40)
+        # Treble (high frequencies) -> Cool colors (blue/purple, hue 0.58-0.78)
+
+        # Find dominant frequency band
+        if bass >= mid and bass >= treble:
+            # Bass dominant -> warm red/orange
+            base_hue = 0.0 + (bass * 0.12)  # 0.0 to 0.12
+        elif mid >= bass and mid >= treble:
+            # Mid dominant -> green/yellow
+            base_hue = 0.28 + (mid * 0.12)  # 0.28 to 0.40
+        else:
+            # Treble dominant -> blue/purple
+            base_hue = 0.58 + (treble * 0.20)  # 0.58 to 0.78
+
+        # Add subtle time-based cycling (very subtle, just 5% variation)
+        time_hue = (time.time() * 0.1) % 0.05
+
+        # Bar position adds very slight variation
+        pos_mid = (total_bars - 1) / 2.0
+        pos_from_center = abs(bar_index - pos_mid) / pos_mid if pos_mid > 0 else 0
+        pos_hue = pos_from_center * 0.02
+
+        # Combine: frequency dominates, time and position add subtle shifts
+        hue = (base_hue + time_hue + pos_hue) % 1.0
+
+        # Saturation increases with voice intensity (quiet = more pastel, loud = vibrant)
+        # Minimum saturation of 0.75 even with no voice
+        saturation = 0.75 + (voice_intensity * 0.25)
+        saturation = min(1.0, saturation)
+
+        # Brightness increases with bar height and voice
+        # Minimum brightness of 0.85
+        brightness = 0.85 + (bar_height_factor * 0.10) + (voice_intensity * 0.05)
+        brightness = min(1.0, brightness)
+
+        # Create the dynamic color
+        color = QColor.fromHsvF(hue, saturation, brightness, 1.0)
         color.setAlpha(255)
 
         return color

@@ -239,6 +239,7 @@ class Ear:
         self.last_rms = 0.0
         self.gain_multiplier = 2.5 # Increased from 1.1 to fix quiet mic issues
         self._total_frames = 0
+        self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
 
         # Enable macOS Voice Isolation if requested
         if os.environ.get("VOICE_ISOLATION", "0") == "1":
@@ -267,16 +268,23 @@ class Ear:
         print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
 
     def _send_hud(self, cmd):
-        print(f"[Ear] 📤 Sending HUD command: {cmd}", flush=True)
+        print(f"[Ear] 📤 _send_hud() called with cmd='{cmd}'", flush=True)
         try:
+            print(f"[Ear] 📤 Creating socket...", flush=True)
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print(f"[Ear] 📤 Setting timeout...", flush=True)
             s.settimeout(0.2)
+            print(f"[Ear] 📤 Connecting to 127.0.0.1:57234...", flush=True)
             s.connect(('127.0.0.1', 57234))
+            print(f"[Ear] 📤 Sending data...", flush=True)
             s.sendall(cmd.encode())
+            print(f"[Ear] 📤 Closing socket...", flush=True)
             s.close()
             print(f"[Ear] ✅ HUD command sent successfully", flush=True)
         except Exception as e:
             print(f"[Ear] ❌ Failed to send HUD command: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     def _start_volume_sender(self):
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -288,8 +296,11 @@ class Ear:
                         print(f"[Ear] Volume sender stopped (sent {packets_sent} packets)", flush=True)
                         break
                     rms = self.last_rms
+                    freq_bands = self.last_frequency_bands
                 try:
-                    udp.sendto(f"vol:{rms:.4f}".encode(), ('127.0.0.1', VOL_PORT))
+                    # Send volume + frequency bands in format: "vol:RMS,bass:BASS,mid:MID,treble:TREBLE"
+                    message = f"vol:{rms:.4f},bass:{freq_bands['bass']:.3f},mid:{freq_bands['mid']:.3f},treble:{freq_bands['treble']:.3f}"
+                    udp.sendto(message.encode(), ('127.0.0.1', VOL_PORT))
                     packets_sent += 1
                 except Exception as e:
                     print(f"[Ear] ❌ Failed to send volume: {e}", flush=True)
@@ -359,17 +370,83 @@ class Ear:
         with self._lock:
             if not self.is_recording:
                 return (None, pyaudio.paContinue)
-                
+
             audio_data = np.frombuffer(in_data, dtype=np.int16)
             boosted = (audio_data.astype(np.float32) * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
             chunk_bytes = boosted.tobytes()
             self.last_rms = get_rms(chunk_bytes)
             self._total_frames += 1
 
+            # ★ FREQUENCY ANALYSIS: Extract bass/mid/treble bands using FFT
+            self.last_frequency_bands = self._analyze_frequency_bands(boosted)
+
             # ★ STREAMING: send each chunk immediately
             self._stream_chunk_to_brain(chunk_bytes)
 
         return (None, pyaudio.paContinue)
+
+    def _analyze_frequency_bands(self, audio_samples: np.ndarray) -> dict:
+        """
+        Analyze audio samples to extract bass, mid, and treble frequency bands.
+
+        Args:
+            audio_samples: NumPy array of audio samples (int16)
+
+        Returns:
+            Dict with 'bass', 'mid', 'treble' values (0.0 to 1.0)
+        """
+        try:
+            # Convert to float for FFT
+            samples_float = audio_samples.astype(np.float32) / 32768.0
+
+            # Apply windowing function to reduce spectral leakage
+            window = np.hanning(len(samples_float))
+            windowed = samples_float * window
+
+            # Compute FFT
+            fft_result = np.fft.fft(windowed)
+            fft_magnitude = np.abs(fft_result[:len(fft_result)//2])
+
+            # Frequency bins (sample rate is 16000 Hz)
+            # Nyquist frequency = 8000 Hz
+            freq_bins = np.fft.fftfreq(len(windowed), 1.0/RATE)[:len(fft_magnitude)]
+
+            # Define frequency bands for speech
+            # Bass: 20-250 Hz (low frequency hum, vowels)
+            bass_mask = (freq_bins >= 20) & (freq_bins < 250)
+            bass_energy = np.sum(fft_magnitude[bass_mask])
+
+            # Mid: 250-4000 Hz (speech intelligibility range)
+            mid_mask = (freq_bins >= 250) & (freq_bins < 4000)
+            mid_energy = np.sum(fft_magnitude[mid_mask])
+
+            # Treble: 4000-8000 Hz (consonants, high frequency sounds)
+            treble_mask = (freq_bins >= 4000) & (freq_bins < 8000)
+            treble_energy = np.sum(fft_magnitude[treble_mask])
+
+            # Normalize to 0.0-1.0 range
+            total_energy = bass_energy + mid_energy + treble_energy
+
+            if total_energy > 0:
+                bass_norm = bass_energy / total_energy
+                mid_norm = mid_energy / total_energy
+                treble_norm = treble_energy / total_energy
+            else:
+                # Equal distribution when no signal
+                bass_norm = 0.33
+                mid_norm = 0.33
+                treble_norm = 0.34
+
+            return {
+                'bass': bass_norm,
+                'mid': mid_norm,
+                'treble': treble_norm
+            }
+
+        except Exception as e:
+            # Fallback to equal distribution if FFT fails
+            print(f"[Ear] ⚠️ Frequency analysis failed: {e}", flush=True)
+            return {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
 
     def _open_mic_stream(self):
         """Open a FRESH mic stream each recording session."""
@@ -405,6 +482,8 @@ class Ear:
         if not _is_right_cmd(key):
             return
 
+        print(f"[Ear] 🔵 Right CMD pressed - on_press() called", flush=True)
+
         if self._toggle_active:
             self._toggle_active = False
             self._stop_and_send()
@@ -412,12 +491,16 @@ class Ear:
 
         with self._lock:
             if self.is_recording:
+                print(f"[Ear] ⚠️ Already recording, ignoring press", flush=True)
                 return
 
+        print(f"[Ear] 🔵 About to open brain stream", flush=True)
         # ★ STREAMING: open brain connection FIRST (before recording flag)
         if not self._open_brain_stream():
+            print(f"[Ear] ❌ Failed to open brain stream, aborting", flush=True)
             return
 
+        print(f"[Ear] 🔵 Brain stream opened successfully", flush=True)
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0
@@ -427,7 +510,9 @@ class Ear:
         print("\r\n" + "─" * 50, flush=True)
         print(f"\r🎙️  RECORDING+STREAMING ({self.active_mic_name})", flush=True)
 
+        print(f"[Ear] 🔵 About to send 'listen' command to HUD", flush=True)
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
+        print(f"[Ear] 🔵 About to start volume sender", flush=True)
         self._start_volume_sender()
 
     def on_release(self, key):
