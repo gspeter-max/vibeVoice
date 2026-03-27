@@ -2,50 +2,56 @@
 
 ## Overview
 
-The Parakeet Flow HUD features a single theme with **dark gray borders** and **dynamic rainbow spectrum waveform bars** that create a beautiful, professional audio visualizer effect.
+The Parakeet Flow HUD features a single theme with **dark gray borders** and **unified flowing color waveform bars** that create a beautiful, cohesive audio visualizer effect.
 
 ## Visual Design
 
 - **Border:** Solid gray outline (`QColor(90, 90, 95)`)
 - **Background:** Dark gray (`QColor(16, 16, 18)`)
-- **Bars:** Dynamic rainbow spectrum that shifts over time
+- **Bars:** Unified flowing color that shifts through spectrum over time
 
-## Waveform Bar Colors (Rainbow Spectrum)
+## Waveform Bar Colors (Unified Flowing Wave)
 
-The waveform bars display a **rainbow spectrum** across all bars:
+**ALL bars share the SAME color**, creating a unified wave effect:
 
-- **Center bars:** Warm colors (Red → Orange → Yellow)
-- **Middle bars:** Transition colors (Yellow → Green)
-- **Edge bars:** Cool colors (Green → Blue → Purple)
+- **All bars shift colors together** as one cohesive unit
+- **Color cycles smoothly** through entire spectrum over time
+- **Feels like breathing** - the entire waveform flows and pulses together
 
-### Spectrum Layout
+### Color Flow Cycle
 
+The entire waveform shifts through colors:
 ```
-Bar 0: Purple/Blue  (edge)
-Bar 1: Blue
-Bar 2: Green/Blue
-Bar 3: Yellow/Orange (center)
-Bar 4: Green/Blue
-Bar 5: Blue
-Bar 6: Purple/Blue  (edge)
+Time 0s:  Red/Orange      (warm)
+Time 3s:  Yellow/Green    (transition)
+Time 6s:  Blue/Cyan       (cool)
+Time 9s:  Purple/Magenta  (deep)
+Time 12s: Back to Red     (cycle repeats)
 ```
+
+**Cycle duration:** ~12 seconds for full spectrum
 
 ### Dynamic Effects
 
-**1. Time-Based Color Cycling**
-- Colors continuously shift through the spectrum
-- Creates smooth, mesmerizing animation
-- Rate: ~6.7 seconds for full spectrum cycle
+**1. Unified Color Flow**
+- All 7 bars always share the exact same color
+- Creates cohesive, professional visual effect
+- Waveform "breathes" as one unit
 
-**2. Frequency-Based Color Bias**
-- Bass-heavy audio → Shifts spectrum toward warm colors (red/orange)
-- Treble-heavy audio → Shifts spectrum toward cool colors (blue/purple)
-- Creates visual correlation with audio frequency content
+**2. Time-Based Color Cycling**
+- Smooth, continuous color transition
+- Soothing, mesmerizing flow effect
+- Never jarring or distracting
 
-**3. Voice Reactivity**
-- Volume intensity → Increases saturation (quiet=pastel, loud=vibrant)
+**3. Frequency-Based Color Bias**
+- Bass-heavy audio → Colors shift toward warm (red/orange/yellow)
+- Treble-heavy audio → Colors shift toward cool (blue/purple/cyan)
+- Creates subtle visual correlation with voice frequency
+
+**4. Voice Reactivity**
+- Volume intensity → Increases color saturation (quiet=pastel, loud=vibrant)
 - Bar height → Increases brightness (taller=brighter)
-- Position → Adds subtle variation for visual interest
+- Real-time response at 60 FPS
 
 ## Frequency Analysis (FFT)
 
@@ -54,7 +60,7 @@ The system uses **Fast Fourier Transform (FFT)** to analyze audio frequency:
 1. **Audio capture:** 16kHz sample rate, 1024-sample chunks
 2. **FFT computation:** Converts time-domain to frequency-domain
 3. **Band extraction:** Splits into bass (20-250Hz), mid (250-4000Hz), treble (4000-8000Hz)
-4. **Color bias:** Adjusts spectrum toward warm/cool based on dominant frequencies
+4. **Color bias:** Adjusts color toward warm/cool based on dominant frequencies
 
 ## Implementation
 
@@ -63,25 +69,23 @@ The system uses **Fast Fourier Transform (FFT)** to analyze audio frequency:
 ```python
 def get_bar_color(self, bar_index, total_bars, voice_intensity,
                  bar_height_factor, frequency_bands):
-    # Map bar position to hue spectrum
-    pos_mid = (total_bars - 1) / 2.0
-    pos_from_center = abs(bar_index - pos_mid) / pos_mid
+    # Time-based hue cycling (slow, smooth flow)
+    # 0.08 = ~12 seconds for full spectrum cycle
+    time_hue = (time.time() * 0.08) % 1.0
 
-    # Base hue: 0.0 (center/red) to 0.75 (edge/purple)
-    base_hue = pos_from_center * 0.75
+    # Frequency-based hue adjustment
+    # Bass dominant → warm colors
+    # Treble dominant → cool colors
+    freq_bias = (bass - treble) * 0.2
 
-    # Time-based cycling
-    time_shift = (time.time() * 0.15) % 1.0
+    # Combine for final hue
+    hue = (time_hue + freq_bias) % 1.0
 
-    # Frequency-based bias
-    freq_bias = (bass - treble) * 0.15
+    # Dynamic saturation (pulses with voice)
+    saturation = 0.82 + (voice_intensity * 0.18)
 
-    # Combine all factors
-    hue = (base_hue + time_shift + freq_bias) % 1.0
-
-    # Dynamic saturation and brightness
-    saturation = 0.85 + (voice_intensity * 0.15) + (bar_height_factor * 0.10)
-    brightness = 0.82 + (bar_height_factor * 0.13) + (voice_intensity * 0.05)
+    # Dynamic brightness (responds to voice + height)
+    brightness = 0.80 + (voice_intensity * 0.08) + (bar_height_factor * 0.12)
 
     return QColor.fromHsvF(hue, saturation, brightness, 1.0)
 ```
@@ -95,26 +99,36 @@ ear.py (microphone)
       → hud.py (VolumeListener)
         → frequency_bands signal
           → ThemeManager.get_bar_color()
-            → Rainbow spectrum + time cycling + frequency bias!
+            → Unified flowing color for ALL bars!
 ```
 
 ## Visual Experience
 
 ### What You'll See
 
-1. **Rainbow gradient** across all 7 bars
-2. **Colors slowly cycling** through the spectrum over time
-3. **Bars animating** with voice volume (height)
-4. **Colors shifting** based on voice frequency (bass→warm, treble→cool)
+1. **All bars same color** - cohesive, unified look
+2. **Color slowly flowing** through spectrum (red→orange→yellow→green→blue→purple)
+3. **Entire waveform breathing** - all bars shift color together
+4. **Subtle frequency response** - bass shifts to warm, treble to cool
 5. **Smooth 60 FPS** animation with no stuttering
 
 ### Examples
 
-- **Quiet speaking:** Pastel rainbow colors with low saturation
-- **Loud speaking:** Vibrant, saturated rainbow colors
-- **Deep voice:** Spectrum shifts toward red/orange
-- **High-pitched:** Spectrum shifts toward blue/purple
-- **No audio:** Subtle cycling rainbow with low brightness
+- **Quiet speaking:** Soft pastel colors, low saturation
+- **Loud speaking:** Vibrant, saturated colors
+- **Deep voice:** Color shifts toward red/orange (warm)
+- **High-pitched:** Color shifts toward blue/purple (cool)
+- **No audio:** Subtle slow color cycling, low brightness
+
+## Design Philosophy
+
+**Why unified colors instead of rainbow across bars?**
+
+- ✅ **More cohesive** - waveform looks like one unit, not separate bars
+- ✅ **Less distracting** - single color focus, not rainbow chaos
+- ✅ **More professional** - like high-end audio equipment
+- ✅ **Easier to process** - brain processes one color, not seven
+- ✅ **Feels organic** - like breathing, not disjointed spectrum
 
 ## Performance
 
