@@ -32,6 +32,8 @@ from PySide6.QtGui import (
     QPainter, QColor, QPainterPath, QPen, QBrush,
 )
 
+from src.theme_manager import ThemeManager, THEME_ORIGINAL
+
 # ── Pill dimensions ───────────────────────────────────────────────────────────
 PILL_W_IDLE   = 60     # was 80
 PILL_H_IDLE   = 20     # was 26
@@ -178,6 +180,11 @@ class PillHUD(QWidget):
         self._voice_smooth = 0.0
         self._last_vol_t   = 0.0
 
+        # Theme manager initialization
+        theme_id = int(os.environ.get('HUD_THEME', str(THEME_ORIGINAL)))
+        self._theme_manager = ThemeManager(theme_id)
+        self._hue_offset = 0.0  # For animated theme
+
         # Per-bar state
         self._bar_h     = [BAR_MIN_H] * NUM_BARS
         self._bar_phase = [i * 0.72 for i in range(NUM_BARS)]
@@ -292,6 +299,10 @@ class PillHUD(QWidget):
     def _tick(self):
         self._t = time.time() - self._t0
 
+        # Update hue offset for animated themes
+        if self._theme_manager.requires_animation():
+            self._hue_offset = (self._hue_offset + 0.002) % 1.0
+
         # Animate pill size (smooth lerp)
         target_w = PILL_W_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_W_IDLE
         target_h = PILL_H_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_H_IDLE
@@ -367,12 +378,14 @@ class PillHUD(QWidget):
         pill = QPainterPath()
         pill.addRoundedRect(QRectF(px, py, pw, ph), r, r)
 
+        # Use theme manager for background and border
         fill_alpha = 50 if self._state == HIDDEN else 240
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(16, 16, 18, fill_alpha)))
+        p.setBrush(self._theme_manager.create_background_brush(px, py, ph, fill_alpha))
         p.drawPath(pill)
 
-        p.setPen(QPen(QColor(90, 90, 95, 200), 1.2))
+        # Use theme manager for border with hue offset for animated themes
+        p.setPen(self._theme_manager.create_border_pen(px, py, pw, ph, self._hue_offset))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(pill)
 
