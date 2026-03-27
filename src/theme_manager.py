@@ -82,27 +82,26 @@ class ThemeManager:
     def get_bar_color(self, bar_index: int, total_bars: int, voice_intensity: float,
                      bar_height_factor: float) -> QColor:
         """
-        Get dynamic color for a waveform bar based on position and voice.
+        Get dynamic color for a waveform bar based on position.
 
         Args:
             bar_index: Index of this bar (0 to total_bars-1)
             total_bars: Total number of bars
-            voice_intensity: Voice volume level (0.0 to 1.0)
-            bar_height_factor: Normalized bar height (0.0 to 1.0)
+            voice_intensity: Voice volume level (0.0 to 1.0) - unused
+            bar_height_factor: Normalized bar height (0.0 to 1.0) - unused
 
         Returns:
-            QColor for the bar (rainbow gradient based on position)
+            QColor for the bar (vibrant rainbow gradient)
         """
-        # Rainbow gradient across bars using HSV
-        # Map bar position to hue (pink at center to cyan at edges)
+        # Map bar position to hue for rainbow gradient
+        # Using broader spectrum: Red (0.0) at center through to Blue (0.66) at edges
         mid = (total_bars - 1) / 2.0
         pos_from_center = abs(bar_index - mid) / mid if mid > 0 else 0
 
-        # Pink/Magenta at center (hue ~0.85) to Cyan at edges (hue ~0.5)
-        # Reverse: center should be smaller hue number
-        hue = 0.85 - (pos_from_center * 0.35)  # 0.85 (pink) to 0.5 (cyan)
+        # Center = Red/Orange (0.0-0.1), Edges = Blue/Cyan (0.6-0.7)
+        hue = 0.0 + (pos_from_center * 0.7)
 
-        # Full saturation and brightness
+        # Full saturation and maximum brightness for visibility
         color = QColor.fromHsvF(hue, 1.0, 1.0, 1.0)
         color.setAlpha(255)
 
