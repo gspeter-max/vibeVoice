@@ -46,6 +46,51 @@ echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
 echo ""
 
+# ── Theme Selection ───────────────────────────────────────────────
+show_theme_menu() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║           🎨 HUD THEME SELECTION                            ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║  Choose the visual theme for the pill HUD:                 ║"
+    echo "║                                                            ║"
+    echo "║  [0] Original (Solid Gray)   — Current production look    ║"
+    echo "║  [1] Rainbow Gradient        — Diagonal pink→purple→blue   ║"
+    echo "║  [2] Radial Glow             — Glowing center effect       ║"
+    echo "║  [3] Animated Aurora         — Rotating rainbow animation  ║"
+    echo "║                                                            ║"
+    echo "║  Press 0-3 to select, or ENTER for default (0)            ║"
+    echo "╚════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo -n "Theme selection [0-3]: "
+}
+
+get_theme_selection() {
+    local selection
+    read selection
+
+    case "$selection" in
+        0|1|2|3|"")
+            if [ -z "$selection" ]; then
+                selection="0"
+            fi
+            export HUD_THEME="$selection"
+            echo ""
+            echo "✓ Theme set to: $selection"
+            ;;
+        *)
+            echo ""
+            echo "⚠️  Invalid selection. Using default theme (0)."
+            export HUD_THEME="0"
+            ;;
+    esac
+}
+
+# Theme selection menu
+show_theme_menu
+get_theme_selection
+echo ""
+
 # ── Sanity check ────────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
     echo "❌ .venv not found. Run:  uv venv && uv pip install -e ."
