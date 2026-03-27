@@ -1,88 +1,45 @@
-# HUD Themes Documentation
+# HUD Theme Documentation
 
 ## Overview
 
-The Parakeet Flow HUD supports 4 visual themes that can be selected at startup via the `start.sh` script.
+The Parakeet Flow HUD features a single theme with **dark gray borders** and **colorful voice-reactive waveform bars**.
 
-## Theme Options
+## Visual Design
 
-### Theme 0: Original (Solid Gray)
-The default production theme with a solid gray border and dark background.
-- **Border:** Solid gray `QColor(90, 90, 95, 200)`
-- **Background:** Solid dark gray `QColor(16, 16, 18, alpha)`
-- **Animation:** None
-- **Use Case:** Production use, minimal visual distraction
+- **Border:** Solid gray outline (`QColor(90, 90, 95)`)
+- **Background:** Dark gray (`QColor(16, 16, 18)`)
+- **Bars:** Dynamic rainbow colors that respond to voice input
 
-### Theme 1: Rainbow Gradient
-A diagonal linear gradient with vibrant pink→purple→blue→cyan→yellow colors.
-- **Border:** 5-stop diagonal gradient (2.5px width)
-- **Background:** Subtle vertical gradient
-- **Animation:** None
-- **Colors:** Pink, Purple, Blue, Cyan, Yellow
-- **Use Case:** High visibility, energetic aesthetic
+## Waveform Bar Colors
 
-### Theme 2: Radial Glow
-A radial gradient emanating from the center with yellow→magenta→blue.
-- **Border:** Radial gradient (2.5px width)
-- **Background:** Subtle vertical gradient
-- **Animation:** None
-- **Colors:** Yellow center, Magenta mid, Blue edge
-- **Use Case:** Glowing/pulsing aesthetic
+The waveform bars display a **rainbow gradient** across the pill:
 
-### Theme 3: Animated Aurora
-An animated rainbow gradient that slowly rotates through hues.
-- **Border:** 6-stop animated linear gradient (2.5px width)
-- **Background:** Subtle vertical gradient
-- **Animation:** Continuous hue rotation (0.2% per frame)
-- **Colors:** Full HSV spectrum
-- **Use Case:** Dynamic/animated aesthetic, visual interest
+- **Center bars:** Pink/Magenta
+- **Mid-center bars:** Purple
+- **Mid-edge bars:** Blue
+- **Edge bars:** Cyan
 
-## How to Select a Theme
+### Voice Reactivity
 
-### Interactive Menu (Recommended)
-1. Run `bash start.sh`
-2. Select theme 0-3 when prompted
-3. The selected theme applies to all HUD instances
+The bars become **brighter and more vibrant** with increased voice volume:
 
-### Direct Environment Variable
-```bash
-HUD_THEME=1 python src/hud.py --demo
-HUD_THEME=2 bash start.sh
-```
+- **Quiet voice:** Dim colors, lower alpha transparency
+- **Loud voice:** Bright colors, higher alpha transparency
+- **Bar height:** Also affects brightness (taller bars = brighter)
 
-### Per-Session Selection
-Each time you run `start.sh`, you can select a different theme. The choice is not persisted.
+## Implementation
 
-## Implementation Details
+The color generation is handled by `ThemeManager.get_bar_color()` which takes:
 
-### Theme Manager Architecture
-- **File:** `src/theme_manager.py`
-- **Class:** `ThemeManager`
-- **Methods:**
-  - `create_border_pen(x, y, w, h, hue_offset)` — Returns themed QPen
-  - `create_background_brush(x, y, h, alpha)` — Returns themed QBrush
-  - `requires_animation()` — Returns True for THEME_ANIMATED
+- `bar_index`: Which bar (0 to NUM_BARS-1)
+- `total_bars`: Total number of bars (7)
+- `voice_intensity`: Volume level (0.0 to 1.0)
+- `bar_height_factor`: Normalized height (0.0 to 1.0)
 
-### Performance Considerations
-- Gradients are recreated on each paint event
-- THEME_ANIMATED adds ~2% CPU overhead for hue rotation
-- Theme selection happens at startup, zero runtime cost for switching
+This creates a **dynamic, voice-responsive visualizer** that's both beautiful and functional.
 
-## Troubleshooting
+## Performance
 
-### Theme Not Applying
-1. Verify `HUD_THEME` environment variable is set: `echo $HUD_THEME`
-2. Check hud.py logs for theme initialization
-3. Ensure theme_manager.py is in src/
-
-### Animation Not Working
-1. Verify you selected Theme 3 (Animated Aurora)
-2. Check that `_tick()` is running (look for timer logs)
-3. Ensure `requires_animation()` returns True
-
-## Future Enhancements
-Possible additions:
-- Theme persistence across sessions
-- Custom color scheme configuration
-- Gradient direction configuration
-- Animation speed control
+- Colors calculated on each paint event (60 FPS)
+- Minimal CPU overhead (~1-2%)
+- No performance impact on transcription quality
