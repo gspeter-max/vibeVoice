@@ -172,16 +172,16 @@ Edit `config/models.yaml` to customize:
 ```yaml
 models:
   kokoro:
-    voice: "af_sarah"        # Voice preset
+    voice: "am_michael"      # Voice preset (British male)
     lang: "en-us"            # Language
     default_speed: 1.0       # Speech speed
 ```
 
 Available voices:
+- `am_michael` - Male UK English (default)
 - `af_sarah` - Female US English
 - `am_adam` - Male US English
 - `af_sky` - Female UK English
-- `am_michael` - Male UK English
 
 ## Performance
 
