@@ -246,6 +246,7 @@ class PillHUD(QWidget):
 
     # ── Public state transitions ───────────────────────────────────────────
     def show_listening(self):
+        print("[HUD] 🎙️ Setting state to LISTENING", flush=True)
         _play_sound(self._snd_listen)
         self._enter(LISTENING)
 
@@ -280,13 +281,14 @@ class PillHUD(QWidget):
         elif c == "process":   self.show_processing()
         elif c == "done":      self.show_done()
         elif c == "hide":      self.hide_hud()
+        else:
+            print(f"[HUD] Unknown command: {c}", flush=True)
 
     def _on_volume(self, val):
         self._voice_raw  = min(1.0, val * 6.0)
         self._last_vol_t = time.time()
-        # DEBUG: Log when volume data arrives
-        if int(self._t * 60) % 10 == 0:  # Log occasionally
-            print(f"[HUD DEBUG] Received volume: {val:.3f} -> voice_raw={self._voice_raw:.3f}", flush=True)
+        # DEBUG: Log every volume packet for diagnosis
+        print(f"[HUD] 🎤 Received volume: {val:.4f} -> voice_raw={self._voice_raw:.4f}", flush=True)
 
     def _enter(self, state):
         self._state    = state
