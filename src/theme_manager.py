@@ -97,29 +97,26 @@ class ThemeManager:
         mid = (total_bars - 1) / 2.0
         pos_from_center = abs(bar_index - mid) / mid if mid > 0 else 0
 
-        # Base alpha on voice intensity and bar height
-        alpha = int(180 * (0.3 + 0.7 * voice_intensity * bar_height_factor))
+        # Full opacity - bars always visible
+        alpha = 255
 
-        # Rainbow gradient across bars: center=pink/magenta, edges=blue/cyan
+        # Rainbow gradient across bars: center=pink, edges=cyan
         if pos_from_center < 0.25:
             # Center: Pink/Magenta
             local_pos = pos_from_center / 0.25
-            r, g, b = 255, int(200 * (1-local_pos)), int(255 * local_pos)
+            r, g, b = 255, int(100 * local_pos), int(200 * local_pos)
         elif pos_from_center < 0.5:
             # Mid-Center: Magenta to Purple
             local_pos = (pos_from_center - 0.25) / 0.25
-            r, g, b = int(255 * (1-local_pos) + 150 * local_pos), 100, 255
+            r, g, b = int(255 * (1-local_pos) + 200 * local_pos), int(50 * local_pos), 255
         elif pos_from_center < 0.75:
             # Mid-Edge: Purple to Blue
             local_pos = (pos_from_center - 0.5) / 0.25
-            r, g, b = int(150 * (1-local_pos)), int(100 * (1-local_pos) + 200 * local_pos), 255
+            r, g, b = int(200 * (1-local_pos)), int(50 * local_pos), 255
         else:
             # Edge: Blue to Cyan
             local_pos = (pos_from_center - 0.75) / 0.25
-            r, g, b = 0, int(200 * (1-local_pos) + 255 * local_pos), 255
+            r, g, b = 0, int(50 + 205 * local_pos), 255
 
-        # Boost brightness based on voice intensity
-        brightness = 0.5 + 0.5 * voice_intensity
-        r, g, b = min(255, int(r * brightness)), min(255, int(g * brightness)), min(255, int(b * brightness))
-
+        # Bright colors always visible, voice affects subtle brightness
         return QColor(r, g, b, alpha)
