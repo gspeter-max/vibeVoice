@@ -82,20 +82,20 @@ class ThemeManager:
     def get_bar_color(self, bar_index: int, total_bars: int, voice_intensity: float,
                      bar_height_factor: float, frequency_bands: dict = None) -> QColor:
         """
-        Get DYNAMIC color for a waveform bar with rainbow spectrum effect.
+        Get DYNAMIC color for waveform bars with unified color flow.
 
-        Creates a spectrum analyzer where each bar shows a different color
-        across the full color spectrum (red → orange → yellow → green → blue → purple).
+        ALL bars share the same color, which shifts over time through the spectrum.
+        Creates a flowing wave effect where the entire waveform changes color together.
 
         Args:
-            bar_index: Index of this bar (0 to total_bars-1)
-            total_bars: Total number of bars
+            bar_index: Index of this bar (0 to total_bars-1) - NOT used for color
+            total_bars: Total number of bars - NOT used for color
             voice_intensity: Voice volume level (0.0 to 1.0)
             bar_height_factor: Normalized bar height (0.0 to 1.0)
             frequency_bands: Dict with 'bass', 'mid', 'treble' values (0.0 to 1.0)
 
         Returns:
-            QColor for the bar (dynamic rainbow spectrum, voice-reactive)
+            QColor for the bar (unified flowing color, same for all bars)
         """
         import time
 
@@ -104,58 +104,42 @@ class ThemeManager:
             frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.33}
 
         bass = frequency_bands.get('bass', 0.33)
-        mid = frequency_bands.get('mid', 0.33)
         treble = frequency_bands.get('treble', 0.33)
 
-        # RAINBOW SPECTRUM ACROSS BARS
-        # Each bar gets a different color across the full spectrum
-        # Center bars = warm colors (red/orange/yellow)
-        # Edge bars = cool colors (green/blue/purple)
+        # UNIFIED COLOR FLOW - ALL BARS SAME COLOR
+        # Color cycles through entire spectrum over time
+        # Creates smooth, flowing wave effect
 
-        # Map bar position to hue spectrum
-        # Center (bar_index = mid) → 0.0 (red)
-        # Edge (bar_index = 0 or max) → 0.7 (purple)
-        pos_mid = (total_bars - 1) / 2.0
-        pos_from_center = abs(bar_index - pos_mid) / pos_mid if pos_mid > 0 else 0
+        # Time-based hue cycling (slow, smooth flow)
+        # 0.08 = ~12 seconds for full spectrum cycle
+        time_hue = (time.time() * 0.08) % 1.0
 
-        # Base hue from position: 0.0 (center/red) to 0.75 (edge/purple)
-        # This creates a rainbow gradient from center to edges
-        base_hue = pos_from_center * 0.75
+        # Frequency-based hue adjustment
+        # Bass dominant → cycle toward warm colors (red/orange/yellow)
+        # Treble dominant → cycle toward cool colors (blue/purple)
+        freq_bias = (bass - treble) * 0.2  # Range: -0.2 to +0.2
 
-        # TIME-BASED COLOR CYCLING
-        # Colors shift over time for dynamic effect
-        time_shift = (time.time() * 0.15) % 1.0
-
-        # FREQUENCY-BASED HUE SHIFT
-        # Bass dominant → shift toward warm colors (red/orange)
-        # Treble dominant → shift toward cool colors (blue/purple)
-        freq_bias = (bass - treble) * 0.15  # Range: -0.15 to +0.15
-
-        # Combine all hue factors
-        hue = (base_hue + time_shift + freq_bias) % 1.0
+        # Combine time cycling with frequency bias
+        hue = (time_hue + freq_bias) % 1.0
 
         # DYNAMIC SATURATION
-        # Increases with voice intensity and bar height
-        # Also varies slightly by position for visual interest
-        base_saturation = 0.85
-        voice_boost = voice_intensity * 0.15
-        height_boost = bar_height_factor * 0.10
-        pos_variation = pos_from_center * 0.05
+        # Pulses with voice intensity
+        base_saturation = 0.82
+        voice_boost = voice_intensity * 0.18
 
-        saturation = base_saturation + voice_boost + height_boost + pos_variation
+        saturation = base_saturation + voice_boost
         saturation = min(1.0, max(0.70, saturation))
 
         # DYNAMIC BRIGHTNESS
-        # Taller bars = brighter
-        # Louder voice = overall brighter
-        base_brightness = 0.82
-        height_boost = bar_height_factor * 0.13
-        voice_boost = voice_intensity * 0.05
+        # Responds to both voice and bar height
+        base_brightness = 0.80
+        voice_boost = voice_intensity * 0.08
+        height_boost = bar_height_factor * 0.12
 
-        brightness = base_brightness + height_boost + voice_boost
-        brightness = min(1.0, max(0.75, brightness))
+        brightness = base_brightness + voice_boost + height_boost
+        brightness = min(1.0, max(0.72, brightness))
 
-        # Create the dynamic color
+        # Create the unified color
         color = QColor.fromHsvF(hue, saturation, brightness, 1.0)
         color.setAlpha(255)
 

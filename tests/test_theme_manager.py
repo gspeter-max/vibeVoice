@@ -34,15 +34,18 @@ def test_get_bar_color_returns_valid_color():
 
 
 def test_bar_colors_different_by_position():
-    """Verify bars at different positions get different colors"""
+    """Verify all bars have unified color (same color at same time)"""
     tm = ThemeManager(THEME_ORIGINAL)
 
+    # Get colors for different bars at the same moment
     color_center = tm.get_bar_color(bar_index=3, total_bars=7, voice_intensity=0.5, bar_height_factor=0.5, frequency_bands={'bass': 0.3, 'mid': 0.3, 'treble': 0.3})
     color_edge = tm.get_bar_color(bar_index=0, total_bars=7, voice_intensity=0.5, bar_height_factor=0.5, frequency_bands={'bass': 0.3, 'mid': 0.3, 'treble': 0.3})
 
-    # Colors should be different
-    assert (color_center.red(), color_center.green(), color_center.blue()) != \
-           (color_edge.red(), color_edge.green(), color_edge.blue())
+    # All bars should have the same color (unified wave effect)
+    # Allow small differences due to floating point math
+    assert abs(color_center.red() - color_edge.red()) <= 1
+    assert abs(color_center.green() - color_edge.green()) <= 1
+    assert abs(color_center.blue() - color_edge.blue()) <= 1
 
 
 def test_bar_colors_always_vibrant():
@@ -59,11 +62,11 @@ def test_bar_colors_always_vibrant():
 
 
 def test_frequency_based_colors():
-    """Verify rainbow spectrum colors work correctly"""
+    """Verify unified color flow effect works correctly"""
     tm = ThemeManager(THEME_ORIGINAL)
 
-    # Center bar should be warm color (red/orange/yellow range)
-    # With time cycling, just verify it's vibrant
+    # All bars should have same color (unified wave)
+    # Test with balanced frequencies
     color_center = tm.get_bar_color(
         bar_index=3,
         total_bars=7,
@@ -75,7 +78,7 @@ def test_frequency_based_colors():
     max_component = max(color_center.red(), color_center.green(), color_center.blue())
     assert max_component > 180  # Should be vibrant
 
-    # Edge bar should be cool color (blue/purple range)
+    # Edge bar should have SAME color as center (unified wave)
     color_edge = tm.get_bar_color(
         bar_index=0,
         total_bars=7,
@@ -87,13 +90,20 @@ def test_frequency_based_colors():
     max_component = max(color_edge.red(), color_edge.green(), color_edge.blue())
     assert max_component > 180
 
-    # Center and edge bars should have different colors (spectrum effect)
-    # They might occasionally be similar due to time cycling, but generally different
-    center_rgb = (color_center.red(), color_center.green(), color_center.blue())
-    edge_rgb = (color_edge.red(), color_edge.green(), color_edge.blue())
+    # Center and edge bars should have SAME color (unified wave effect)
+    # Colors should match exactly (or very close due to floating point)
+    assert abs(color_center.red() - color_edge.red()) <= 1
+    assert abs(color_center.green() - color_edge.green()) <= 1
+    assert abs(color_center.blue() - color_edge.blue()) <= 1
 
-    # Calculate color difference
-    diff = sum(abs(c - e) for c, e in zip(center_rgb, edge_rgb))
-    # Colors should be noticeably different (at least 50 difference in RGB space)
-    # This might occasionally fail due to time cycling, but 99% of the time it should pass
-    assert diff > 30 or abs(center_rgb[0] - edge_rgb[0]) > 20
+    # Frequency bias should affect the unified color
+    # Bass dominant → warm color shift
+    color_bass = tm.get_bar_color(
+        bar_index=3,
+        total_bars=7,
+        voice_intensity=0.5,
+        bar_height_factor=0.5,
+        frequency_bands={'bass': 0.9, 'mid': 0.05, 'treble': 0.05}
+    )
+    # Bass should have decent red component (warm color)
+    assert color_bass.red() > 100 or color_bass.green() > 100
