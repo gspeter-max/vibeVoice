@@ -106,7 +106,7 @@ class KokoroTTSHost(BaseTTSHost):
     def synthesize(
         self,
         text: str,
-        voice: str = "af_sarah",
+        voice: str = "am_michael",
         lang: str = "en-us",
         speed: float = 1.0,
         **kwargs
@@ -221,7 +221,7 @@ class KokoroTTSHost(BaseTTSHost):
             'type': 'CLI wrapper' if not self.use_mock else 'Mock mode',
             'model_size_mb': 350,
             'sample_rate': 22050,
-            'voices': ['af_sarah', 'am_adam', 'af_sky', 'am_michael'],
+            'voices': ['am_michael', 'am_adam', 'af_sky', 'af_sarah'],
             'languages': ['en-us', 'en-gb'],
             'license': 'MIT (Open Source)',
             'executable': self.kokoro_binary if not self.use_mock else 'None (mock mode)',
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Kokoro TTS host")
     parser.add_argument("text", help="Text to synthesize")
     parser.add_argument("--output", "-o", default="test_output.wav", help="Output WAV file")
-    parser.add_argument("--voice", default="af_sarah", help="Voice name")
+    parser.add_argument("--voice", default="am_michael", help="Voice name")
     args = parser.parse_args()
 
     host = KokoroTTSHost()
