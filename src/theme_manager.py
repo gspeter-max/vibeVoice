@@ -47,8 +47,8 @@ class ThemeManager:
         if theme_id == THEME_ORIGINAL:
             self.border_width = 1.2
         else:
-            # Gradient themes need thicker borders
-            self.border_width = 2.5
+            # Gradient themes need thicker borders for visibility
+            self.border_width = 3.5
 
     @staticmethod
     def theme_name(theme_id: int) -> str:
@@ -82,59 +82,54 @@ class ThemeManager:
             return QPen(QColor(90, 90, 95, 200), self.border_width)
 
         elif self.current_theme == THEME_RAINBOW:
-            # Diagonal rainbow gradient with 5 stops
+            # Diagonal rainbow gradient with 5 stops - more vibrant colors
             gradient = QLinearGradient(rect_x, rect_y, rect_x + rect_w, rect_y + rect_h)
 
-            # Pink at top-left
-            gradient.setColorAt(0.0, QColor(255, 105, 180, 255))  # HotPink
+            # Bright pink at top-left
+            gradient.setColorAt(0.0, QColor(255, 0, 128, 255))    # Hot Pink
             # Purple
-            gradient.setColorAt(0.25, QColor(147, 112, 219, 255))  # MediumPurple
+            gradient.setColorAt(0.25, QColor(128, 0, 255, 255))   # Purple
             # Blue
-            gradient.setColorAt(0.5, QColor(65, 105, 225, 255))  # RoyalBlue
+            gradient.setColorAt(0.5, QColor(0, 128, 255, 255))    # Blue
             # Cyan
-            gradient.setColorAt(0.75, QColor(0, 191, 255, 255))  # DeepSkyBlue
+            gradient.setColorAt(0.75, QColor(0, 255, 255, 255))   # Cyan
             # Yellow at bottom-right
-            gradient.setColorAt(1.0, QColor(255, 255, 0, 255))  # Yellow
+            gradient.setColorAt(1.0, QColor(255, 255, 0, 255))    # Yellow
 
-            pen = QPen(gradient)
-            pen.setWidthF(self.border_width)
+            pen = QPen(gradient, self.border_width)
             return pen
 
         elif self.current_theme == THEME_RADIAL:
-            # Radial gradient from center
+            # Radial gradient from center - more vibrant
             center_x = rect_x + rect_w / 2
             center_y = rect_y + rect_h / 2
             radius = max(rect_w, rect_h) / 2
 
             gradient = QRadialGradient(center_x, center_y, radius)
 
-            # Yellow at center
-            gradient.setColorAt(0.0, QColor(255, 255, 0, 255))  # Yellow
+            # Bright yellow at center
+            gradient.setColorAt(0.0, QColor(255, 255, 0, 255))    # Yellow
             # Magenta in middle
-            gradient.setColorAt(0.5, QColor(255, 0, 255, 255))  # Magenta
+            gradient.setColorAt(0.5, QColor(255, 0, 255, 255))    # Magenta
             # Blue at edges
-            gradient.setColorAt(1.0, QColor(0, 0, 255, 255))  # Blue
+            gradient.setColorAt(1.0, QColor(0, 128, 255, 255))    # Blue
 
-            pen = QPen(gradient)
-            pen.setWidthF(self.border_width)
+            pen = QPen(gradient, self.border_width)
             return pen
 
         elif self.current_theme == THEME_ANIMATED:
             # Animated gradient with 6 HSV colors using hue_offset
             gradient = QLinearGradient(rect_x, rect_y, rect_x + rect_w, rect_y)
 
-            # 6 color stops with HSV colors, shifted by hue_offset
+            # 6 color stops with HSV colors, shifted by hue_offset - full saturation
             for i in range(6):
                 hue = (hue_offset + i / 6.0) % 1.0
-                # Convert HSV to RGB with full saturation and value
-                color = QColor()
-                color.setHsvF(hue, 1.0, 1.0, 1.0)
+                # Convert HSV to RGB with full saturation and brightness
+                color = QColor.fromHsvF(hue, 1.0, 1.0, 1.0)
                 position = i / 5.0
                 gradient.setColorAt(position, color)
 
-            pen = QPen(gradient)
-            pen.setWidthF(self.border_width)
-            return pen
+            return QPen(gradient, self.border_width)
 
         # Fallback (shouldn't reach here)
         pen = QPen(QColor(90, 90, 95, 200))
