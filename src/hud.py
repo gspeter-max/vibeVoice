@@ -335,6 +335,32 @@ class PillHUD(QWidget):
     def hide_hud(self):
         self._return_to_idle()
 
+    def _on_mouse_click(self, click_num):
+        """Handle mouse click counter visualization."""
+        self._mouse_click_count = click_num
+        self._last_mouse_click_time = time.time()
+
+        # Show counter for clicks 1-3, HIDE immediately on 4th click (recording triggered)
+        if click_num < 4:
+            self._show_mouse_counter = True
+            self._mouse_counter_alpha = 1.0
+        else:
+            # 4th click - hide counter immediately as recording starts/stops
+            self._show_mouse_counter = False
+            self._mouse_click_count = 0
+            self._mouse_counter_alpha = 0.0
+
+        # Ensure timer is running to animate the counter
+        if not self._timer.isActive():
+            self._timer.start()
+
+        self.update()
+
+        # Debug logging
+        current_state = self._state
+        print(f"[HUD] 🖱️  Mouse click: {click_num}/4 | State: {current_state} | Visible: {self._show_mouse_counter} | Alpha: {self._mouse_counter_alpha:.2f}", flush=True)
+
+
     def _return_to_idle(self):
         self._state    = HIDDEN
         self._fade_dir = 0
@@ -352,6 +378,13 @@ class PillHUD(QWidget):
         elif c == "process":   self.show_processing()
         elif c == "done":      self.show_done()
         elif c == "hide":      self.hide_hud()
+        elif c.startswith("mouse_click:"):
+            # Parse mouse click count: "mouse_click:1", "mouse_click:2", etc.
+            try:
+                click_num = int(c.split(":")[1])
+                self._on_mouse_click(click_num)
+            except (ValueError, IndexError):
+                print(f"[HUD] Invalid mouse_click command: {c}", flush=True)
         else:
             print(f"[HUD] Unknown command: {c}", flush=True)
 
@@ -391,6 +424,17 @@ class PillHUD(QWidget):
         # Voice decay
         if time.time() - self._last_vol_t > 0.15:
             self._voice_raw *= 0.80
+
+        # Mouse click counter timeout - INSTANT reset after 1.5 seconds
+        if self._show_mouse_counter:
+            time_since_click = time.time() - self._last_mouse_click_time
+            if time_since_click > self._mouse_click_timeout:
+                # INSTANT reset - no gradual fade
+                self._show_mouse_counter = False
+                self._mouse_click_count = 0
+                self._mouse_counter_alpha = 0.0
+                print(f"[HUD] ⚡ Timeout (1.5s) - counter instantly reset", flush=True)
+                self.update()  # Immediate repaint
 
         target = self._voice_raw if self._state == LISTENING else 0.0
         spd    = 0.38 if target > self._voice_smooth else 0.08
@@ -503,6 +547,52 @@ class PillHUD(QWidget):
                 )
 
             p.setClipping(False)
+
+        # Draw mouse click counter (outside the pill)
+        # Dots show during clicking process, whether starting or stopping recording
+        # Only hide when 4th click triggers action (handled in _on_mouse_click)
+        # Strict threshold: must be BOTH visible AND have meaningful alpha
+        if self._show_mouse_counter and self._mouse_counter_alpha > 0.05:
+            self._draw_mouse_click_counter(p, cx, cy)
+
+        p.end()
+
+    def _draw_mouse_click_counter(self, p, cx, cy):
+        """Draw 4 dots indicating mouse click progress."""
+        num_clicks = 4
+        dot_radius = 4.0
+        dot_spacing = 12.0
+        total_width = (num_clicks - 1) * dot_spacing
+        start_x = cx - total_width / 2
+        dot_y = cy + PILL_H_ACTIVE / 2 + 15  # Below the pill
+
+        for i in range(num_clicks):
+            dot_x = start_x + i * dot_spacing
+
+            # Calculate alpha for this dot
+            if i < self._mouse_click_count:
+                # Active dot (clicked)
+                dot_alpha = int(255 * self._mouse_counter_alpha)
+                color = QColor(0, 255, 128, dot_alpha)  # Bright green
+            else:
+                # Inactive dot (not yet clicked)
+                dot_alpha = int(80 * self._mouse_counter_alpha)
+                color = QColor(255, 255, 255, dot_alpha)  # Dim white
+
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(color))
+            p.drawEllipse(
+                QRectF(dot_x - dot_radius, dot_y - dot_radius, dot_radius * 2, dot_radius * 2)
+            )
+
+        # Draw click count text
+        text = f"{self._mouse_click_count}/4"
+        p.setPen(QColor(255, 255, 255, int(255 * self._mouse_counter_alpha)))
+        font = p.font()
+        font.setPixelSize(11)
+        p.setFont(font)
+        p.drawText(QRectF(cx - 20, dot_y + 10, 40, 20), Qt.AlignmentFlag.AlignCenter, text)
+
         p.end()
 
 if __name__ == "__main__":
