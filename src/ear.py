@@ -19,7 +19,7 @@ import select
 import termios
 import tty
 import numpy as np
-from pynput import keyboard
+from pynput import keyboard, mouse
 
 # ── macOS Voice Isolation ──────────────────────────────────────────────────────
 _VOICE_ISOLATION_ACTIVE = False
@@ -538,6 +538,52 @@ class Ear:
         else:
             self._toggle_active = True
             print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
+
+    def on_mouse_click(self, x, y, button, pressed):
+        """
+        Handle mouse button press/release for hold-to-record recording control.
+
+        Press behavior (pressed=True):
+            - Record press timestamp
+            - Set holding flag
+            - No visual feedback during hold delay
+
+        Release behavior (pressed=False):
+            - Clear holding flag
+            - If recording started from this hold: stop recording
+            - Early release (< 1s): silent reset (no action)
+
+        Args:
+            x, y: Mouse coordinates (unused)
+            button: Which mouse button (only Button.left matters)
+            pressed: True for press, False for release
+        """
+        # Only left button triggers hold logic
+        if button != mouse.Button.left:
+            return
+
+        if pressed:
+            # MOUSE BUTTON PRESSED: Start hold timer
+            self._mouse_press_start_time = time.time()
+            self._is_holding = True
+            # No visual feedback during hold delay (silent wait)
+
+        else:
+            # MOUSE BUTTON RELEASED: Stop recording or cancel hold
+            self._is_holding = False
+
+            # Only stop if we started recording from this specific hold
+            if self._recording_from_hold:
+                # Check if actually recording before stopping
+                with self._lock:
+                    if not self.is_recording:
+                        self._recording_from_hold = False
+                        return
+
+                # Stop recording
+                print("\r[Ear] ⏹️  Mouse released - STOPPING recording", flush=True)
+                self._stop_and_send()
+                self._recording_from_hold = False
 
     def _stop_and_send(self):
         with self._lock:

@@ -8,6 +8,13 @@ sys.modules['pynput'] = type(sys)('pynput')
 sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
 sys.modules['pynput.mouse'] = type(sys)('pynput.mouse')
 
+# Add Button mock
+class MockButton:
+    left = 'left'
+    right = 'right'
+
+sys.modules['pynput.mouse'].Button = MockButton()
+
 # Mock pyaudio
 class MockPyAudio:
     paInt16 = 16
@@ -47,3 +54,54 @@ def test_ear_has_hold_state_variables():
     assert not hasattr(ear, '_mouse_click_count'), "Ear should NOT have _mouse_click_count attribute (removed)"
     assert not hasattr(ear, '_mouse_clicks_required'), "Ear should NOT have _mouse_clicks_required attribute (removed)"
     assert not hasattr(ear, '_mouse_click_timeout'), "Ear should NOT have _mouse_click_timeout attribute (removed)"
+
+def test_mouse_press_starts_hold_timer():
+    """Test that pressing mouse button starts hold timer."""
+    ear = Ear()
+
+    # Simulate mouse press
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+
+    # Should set press time and holding flag
+    assert ear._is_holding is True
+    assert ear._mouse_press_start_time > 0
+    assert ear._recording_from_hold is False
+
+
+def test_mouse_release_stops_hold_timer():
+    """Test that releasing mouse button clears holding flag."""
+    ear = Ear()
+
+    # Press
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    assert ear._is_holding is True
+
+    # Release
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=False)
+    assert ear._is_holding is False
+
+
+def test_only_left_button_triggers_hold():
+    """Test that only left mouse button triggers hold logic."""
+    ear = Ear()
+
+    # Right button press should be ignored
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
+    assert ear._is_holding is False
+
+    # Left button press should work
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    assert ear._is_holding is True
+
+
+def test_early_release_does_not_start_recording():
+    """Test that releasing before 1 second does not start recording."""
+    ear = Ear()
+
+    # Press and immediately release (< 1 second)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=False)
+
+    # Should not be recording
+    assert ear.is_recording is False
+    assert ear._recording_from_hold is False
