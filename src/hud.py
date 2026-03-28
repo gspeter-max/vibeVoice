@@ -392,17 +392,6 @@ class PillHUD(QWidget):
         if time.time() - self._last_vol_t > 0.15:
             self._voice_raw *= 0.80
 
-        # Mouse click counter timeout - INSTANT reset after 1.5 seconds
-        if self._show_mouse_counter:
-            time_since_click = time.time() - self._last_mouse_click_time
-            if time_since_click > self._mouse_click_timeout:
-                # INSTANT reset - no gradual fade
-                self._show_mouse_counter = False
-                self._mouse_click_count = 0
-                self._mouse_counter_alpha = 0.0
-                print(f"[HUD] ⚡ Timeout (1.5s) - counter instantly reset", flush=True)
-                self.update()  # Immediate repaint
-
         target = self._voice_raw if self._state == LISTENING else 0.0
         spd    = 0.38 if target > self._voice_smooth else 0.08
         self._voice_smooth += (target - self._voice_smooth) * spd
