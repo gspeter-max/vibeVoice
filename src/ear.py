@@ -555,11 +555,11 @@ class Ear:
 
         Args:
             x, y: Mouse coordinates (unused)
-            button: Which mouse button (only Button.left matters)
+            button: Which mouse button (only Button.right matters)
             pressed: True for press, False for release
         """
-        # Only left button triggers hold logic
-        if button != mouse.Button.left:
+        # Only right button triggers hold logic (avoids text selection from left button)
+        if button != mouse.Button.right:
             return
 
         if pressed:

@@ -60,7 +60,7 @@ def test_mouse_press_starts_hold_timer():
     ear = Ear()
 
     # Simulate mouse press
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
 
     # Should set press time and holding flag
     assert ear._is_holding is True
@@ -73,24 +73,24 @@ def test_mouse_release_stops_hold_timer():
     ear = Ear()
 
     # Press
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
     assert ear._is_holding is True
 
     # Release
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=False)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
     assert ear._is_holding is False
 
 
-def test_only_left_button_triggers_hold():
-    """Test that only left mouse button triggers hold logic."""
+def test_only_right_button_triggers_hold():
+    """Test that only right mouse button triggers hold logic."""
     ear = Ear()
 
-    # Right button press should be ignored
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
+    # Left button press should be ignored
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
     assert ear._is_holding is False
 
-    # Left button press should work
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+    # Right button press should work
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
     assert ear._is_holding is True
 
 
@@ -99,8 +99,8 @@ def test_early_release_does_not_start_recording():
     ear = Ear()
 
     # Press and immediately release (< 1 second)
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=False)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
+    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
 
     # Should not be recording
     assert ear.is_recording is False
@@ -118,7 +118,7 @@ def test_hold_one_second_starts_recording():
         with patch.object(ear, '_send_hud'):
             with patch.object(ear, '_start_volume_sender'):
                 # Press mouse button
-                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
 
                 # Wait 1.1 seconds (exceeds 1.0s threshold)
                 time_module.sleep(1.1)
@@ -141,7 +141,7 @@ def test_hold_less_than_one_second_no_recording():
         with patch.object(ear, '_send_hud'):
             with patch.object(ear, '_start_volume_sender'):
                 # Press mouse button
-                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
 
                 # Wait only 0.5 seconds (below threshold)
                 time_module.sleep(0.5)
