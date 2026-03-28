@@ -352,13 +352,6 @@ class PillHUD(QWidget):
         elif c == "process":   self.show_processing()
         elif c == "done":      self.show_done()
         elif c == "hide":      self.hide_hud()
-        elif c.startswith("mouse_click:"):
-            # Parse mouse click count: "mouse_click:1", "mouse_click:2", etc.
-            try:
-                click_num = int(c.split(":")[1])
-                self._on_mouse_click(click_num)
-            except (ValueError, IndexError):
-                print(f"[HUD] Invalid mouse_click command: {c}", flush=True)
         else:
             print(f"[HUD] Unknown command: {c}", flush=True)
 
