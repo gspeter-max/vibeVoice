@@ -504,51 +504,6 @@ class PillHUD(QWidget):
 
             p.setClipping(False)
 
-        # Draw mouse click counter (outside the pill)
-        # Dots show during clicking process, whether starting or stopping recording
-        # Only hide when 4th click triggers action (handled in _on_mouse_click)
-        # Strict threshold: must be BOTH visible AND have meaningful alpha
-        if self._show_mouse_counter and self._mouse_counter_alpha > 0.05:
-            self._draw_mouse_click_counter(p, cx, cy)
-
-        p.end()
-
-    def _draw_mouse_click_counter(self, p, cx, cy):
-        """Draw 4 dots indicating mouse click progress."""
-        num_clicks = 4
-        dot_radius = 4.0
-        dot_spacing = 12.0
-        total_width = (num_clicks - 1) * dot_spacing
-        start_x = cx - total_width / 2
-        dot_y = cy + PILL_H_ACTIVE / 2 + 15  # Below the pill
-
-        for i in range(num_clicks):
-            dot_x = start_x + i * dot_spacing
-
-            # Calculate alpha for this dot
-            if i < self._mouse_click_count:
-                # Active dot (clicked)
-                dot_alpha = int(255 * self._mouse_counter_alpha)
-                color = QColor(0, 255, 128, dot_alpha)  # Bright green
-            else:
-                # Inactive dot (not yet clicked)
-                dot_alpha = int(80 * self._mouse_counter_alpha)
-                color = QColor(255, 255, 255, dot_alpha)  # Dim white
-
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(color))
-            p.drawEllipse(
-                QRectF(dot_x - dot_radius, dot_y - dot_radius, dot_radius * 2, dot_radius * 2)
-            )
-
-        # Draw click count text
-        text = f"{self._mouse_click_count}/4"
-        p.setPen(QColor(255, 255, 255, int(255 * self._mouse_counter_alpha)))
-        font = p.font()
-        font.setPixelSize(11)
-        p.setFont(font)
-        p.drawText(QRectF(cx - 20, dot_y + 10, 40, 20), Qt.AlignmentFlag.AlignCenter, text)
-
         p.end()
 
 if __name__ == "__main__":
