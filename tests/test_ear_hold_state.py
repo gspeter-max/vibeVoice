@@ -105,3 +105,50 @@ def test_early_release_does_not_start_recording():
     # Should not be recording
     assert ear.is_recording is False
     assert ear._recording_from_hold is False
+
+
+def test_hold_one_second_starts_recording():
+    """Test that holding for 1+ seconds starts recording."""
+    import time as time_module
+
+    ear = Ear()
+
+    # Mock the brain stream and other dependencies
+    with patch.object(ear, '_open_brain_stream', return_value=True):
+        with patch.object(ear, '_send_hud'):
+            with patch.object(ear, '_start_volume_sender'):
+                # Press mouse button
+                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+
+                # Wait 1.1 seconds (exceeds 1.0s threshold)
+                time_module.sleep(1.1)
+
+                # Call the record loop tick (single iteration)
+                ear._record_loop_tick()
+
+                # Should have started recording
+                assert ear.is_recording is True, "is_recording should be True after 1.1s hold"
+                assert ear._recording_from_hold is True, "_recording_from_hold should be True"
+
+
+def test_hold_less_than_one_second_no_recording():
+    """Test that holding < 1 second does not start recording."""
+    import time as time_module
+
+    ear = Ear()
+
+    with patch.object(ear, '_open_brain_stream', return_value=True):
+        with patch.object(ear, '_send_hud'):
+            with patch.object(ear, '_start_volume_sender'):
+                # Press mouse button
+                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
+
+                # Wait only 0.5 seconds (below threshold)
+                time_module.sleep(0.5)
+
+                # Call the record loop tick
+                ear._record_loop_tick()
+
+                # Should NOT have started recording
+                assert ear.is_recording is False, "is_recording should be False after 0.5s hold"
+                assert ear._recording_from_hold is False, "_recording_from_hold should be False"

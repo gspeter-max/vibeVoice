@@ -602,14 +602,60 @@ class Ear:
         threading.Thread(target=self._close_brain_stream, daemon=True).start()
 
     def record_loop(self):
+        """Main recording loop.
+
+        Checks for hold duration >= 1.0s to start recording.
+        Displays volume meter when recording.
+        """
         while True:
             time.sleep(0.05)
-            with self._lock:
-                recording = self.is_recording
-                rms = self.last_rms
-            if recording:
-                meter = "█" * min(int(rms * 500), 50)
-                print(f"\r  Level: [{meter:<50}]", end="", flush=True)
+            self._record_loop_tick()
+
+    def _record_loop_tick(self):
+        """Single iteration of record loop logic.
+
+        Checks hold duration and starts recording if threshold met.
+        Displays volume meter when recording.
+        """
+        with self._lock:
+            recording = self.is_recording
+            rms = self.last_rms
+
+        # CHECK: Hold duration >= 1.0s → Start recording
+        # Read hold state with lock protection
+        with self._lock:
+            is_holding = self._is_holding
+            press_start_time = self._mouse_press_start_time
+
+        if is_holding and not recording:
+            hold_duration = time.time() - press_start_time
+
+            if hold_duration >= 1.0:
+                # Hold duration exceeded threshold - start recording
+
+                # Open brain connection first
+                if not self._open_brain_stream():
+                    print(f"\r[Ear] ❌ Failed to open brain stream", flush=True)
+                    with self._lock:
+                        self._is_holding = False
+                    return
+
+                with self._lock:
+                    self.is_recording = True
+                    self.last_rms = 0.0
+                    self._total_frames = 0
+                    self._recording_from_hold = True
+
+                print("\r\n" + "─" * 50, flush=True)
+                print(f"\r🎙️  RECORDING+STREAMING via MOUSE HOLD ({self.active_mic_name})", flush=True)
+
+                threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
+                self._start_volume_sender()
+
+        # Display volume meter when recording
+        if recording:
+            meter = "█" * min(int(rms * 500), 50)
+            print(f"\r  Level: [{meter:<50}]", end="", flush=True)
 
     def cleanup(self):
         self._close_brain_stream()
