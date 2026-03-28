@@ -11,7 +11,9 @@ It is highly optimized for low-latency inference on CPU, specifically for macOS 
 
 ## ⚡ Key Features
 
-- **Push-to-Talk**: Hold **RIGHT CMD** to record, release to transcribe.
+- **Dual Control Methods**:
+  - **Keyboard Shortcut**: Hold **Right CMD** to record, release to transcribe
+  - **Mouse Hold-to-Talk**: Hold **RIGHT mouse button** for 1 second to record, release to stop
 - **Auto-Type Output**: Transcriptions are typed into your active cursor position automatically.
 - **Interactive Model Toggling**: Switch between different Whisper and Parakeet models instantly while the app is running using number keys **1-9** and **0**.
 - **Privacy First**: Everything runs 100% locally. No audio or text ever leaves your machine.
@@ -81,8 +83,18 @@ Simply run the startup script:
 ./start.sh
 ```
 
-- **Hold Right Command (⌘)**: Start speaking.
-- **Release Right Command**: Text will be typed into your active app.
+**Control Recording (choose either method):**
+
+**Method 1: Keyboard Shortcut**
+- **Hold Right Command (⌘)**: Start recording
+- **Release Right Command**: Stop recording, text will be typed into your active app
+
+**Method 2: Mouse Hold-to-Talk**
+- **Press and hold RIGHT mouse button** for 1 second → Start recording
+- **Continue holding while speaking**
+- **Release RIGHT mouse button** → Stop recording, text will be typed
+
+**Model Switching:**
 - **Press 1 through 0**: Switch models instantly in the terminal.
 
 ### 4. Advanced Configuration
