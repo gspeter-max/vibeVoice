@@ -335,32 +335,6 @@ class PillHUD(QWidget):
     def hide_hud(self):
         self._return_to_idle()
 
-    def _on_mouse_click(self, click_num):
-        """Handle mouse click counter visualization."""
-        self._mouse_click_count = click_num
-        self._last_mouse_click_time = time.time()
-
-        # Show counter for clicks 1-3, HIDE immediately on 4th click (recording triggered)
-        if click_num < 4:
-            self._show_mouse_counter = True
-            self._mouse_counter_alpha = 1.0
-        else:
-            # 4th click - hide counter immediately as recording starts/stops
-            self._show_mouse_counter = False
-            self._mouse_click_count = 0
-            self._mouse_counter_alpha = 0.0
-
-        # Ensure timer is running to animate the counter
-        if not self._timer.isActive():
-            self._timer.start()
-
-        self.update()
-
-        # Debug logging
-        current_state = self._state
-        print(f"[HUD] 🖱️  Mouse click: {click_num}/4 | State: {current_state} | Visible: {self._show_mouse_counter} | Alpha: {self._mouse_counter_alpha:.2f}", flush=True)
-
-
     def _return_to_idle(self):
         self._state    = HIDDEN
         self._fade_dir = 0
