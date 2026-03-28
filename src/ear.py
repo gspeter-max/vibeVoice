@@ -258,6 +258,11 @@ class Ear:
         self._cmd_press_time = 0.0
         self._toggle_active = False
 
+        # ★ MOUSE CONTROL: Hold-to-record for voice activation
+        self._mouse_press_start_time = 0.0  # When mouse button was pressed
+        self._is_holding = False              # Currently holding mouse button
+        self._recording_from_hold = False     # Recording started from mouse hold
+
         # ★ STREAMING: persistent socket connection to brain
         self._brain_sock = None
         self._brain_sock_lock = threading.Lock()
