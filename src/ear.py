@@ -679,8 +679,15 @@ def start_ear():
     menu.start()
 
     ear = Ear(input_device_index=selected_mic_index)
+
+    # Keyboard listener for Right CMD shortcut
     listener = keyboard.Listener(on_press=ear.on_press, on_release=ear.on_release)
     listener.start()
+
+    # Mouse listener for hold-to-record
+    mouse_listener = mouse.Listener(on_click=ear.on_mouse_click)
+    mouse_listener.start()
+    print("[Ear] 🖱️  Mouse listener started - Hold left button for 1s to record", flush=True)
 
     backend_label = {
         "faster_whisper": "faster-whisper + distil-large-v3 (INT8)",
