@@ -44,28 +44,31 @@ class KokoroTTSHost(BaseTTSHost):
         config = get_model_config('kokoro')
         super().__init__(config)
 
-        # Check for Kokoro HTTP API (Docker container) - FASTEST
+        # Check for Kokoro HTTP API (Docker container) - PRIMARY
         self.kokoro_api_url = self._check_kokoro_api()
 
-        # Try to find kokoro-tts binary
+        # Try to find kokoro-tts binary - SECONDARY
         self.kokoro_binary = self._find_kokoro_binary()
 
-        # Check for edge-tts availability
-        self.has_edge_tts = self._check_edge_tts()
-
-        # Determine mode (priority: HTTP API > CLI > edge-tts > mock)
+        # Determine mode (Kokoro ONLY - no fallbacks)
         if self.kokoro_api_url:
             self.mode = "http-api"
-            self.logger.info(f"Using Kokoro HTTP API at {self.kokoro_api_url} (model pre-loaded)")
+            self.logger.info(f"✓ Using Kokoro HTTP API at {self.kokoro_api_url}")
         elif self.kokoro_binary:
             self.mode = "cli"
-            self.logger.warning(f"Using Kokoro CLI (slower - model loads per request)")
-        elif self.has_edge_tts:
-            self.mode = "edge-tts"
-            self.logger.info("Using Microsoft Edge TTS (requires internet)")
+            self.logger.warning(f"✓ Using Kokoro CLI (slower - model loads per request)")
         else:
-            self.mode = "mock"
-            self.logger.warning("No TTS backend available, using MOCK mode")
+            # No Kokoro available - FAIL HARD
+            self.mode = "unavailable"
+            error_msg = (
+                "Kokoro TTS not available!\n"
+                "Options:\n"
+                "1. Start Kokoro Docker container: docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest\n"
+                "2. Install kokoro-tts CLI tool\n"
+                "3. Use cloud TTS API instead (OpenAI, ElevenLabs, etc.)"
+            )
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
     def _find_kokoro_binary(self) -> str:
         """Find kokoro-tts executable in PATH."""
@@ -111,13 +114,6 @@ class KokoroTTSHost(BaseTTSHost):
 
         return None
 
-    def _check_edge_tts(self) -> bool:
-        """Check if edge-tts library is available."""
-        try:
-            import edge_tts
-            return True
-        except ImportError:
-            return False
 
     def load_model(self):
         """
@@ -155,13 +151,6 @@ class KokoroTTSHost(BaseTTSHost):
             except Exception as e:
                 raise RuntimeError(f"kokoro-tts verification failed: {e}")
 
-        elif self.mode == "edge-tts":
-            self.model = "edge-tts"
-            self.logger.info("Microsoft Edge TTS available")
-
-        elif self.mode == "mock":
-            self.model = "mock"
-            self.logger.warning("Kokoro TTS: Using MOCK mode (beep tones only)")
 
     def synthesize(
         self,
@@ -195,10 +184,8 @@ class KokoroTTSHost(BaseTTSHost):
             return self._synthesize_with_http_api(text, voice)
         elif self.mode == "cli":
             return self._synthesize_real(text, voice, lang, speed)
-        elif self.mode == "edge-tts":
-            return self._synthesize_with_edge_tts(text, voice)
-        else:  # mock mode
-            return self._synthesize_mock(text)
+        else:
+            raise RuntimeError(f"Unknown mode: {self.mode}")
 
     def _synthesize_with_http_api(self, text: str, voice: str = "am_michael") -> bytes:
         """
@@ -298,40 +285,12 @@ class KokoroTTSHost(BaseTTSHost):
         except subprocess.TimeoutExpired:
             raise RuntimeError("kokoro-tts synthesis timeout")
 
-    def _synthesize_mock(self, text: str) -> bytes:
-        """
-        Synthesize mock audio (beep tone) for testing without kokoro-tts.
-
-        Generates a simple sine wave tone whose duration scales with text length.
-        This allows testing the Unix socket protocol without needing kokoro-tts.
-
-        Args:
-            text: Input text (used to calculate duration)
-
-        Returns:
-            Mock audio as WAV bytes
-        """
-        # Duration scales with text length (0.05 seconds per character)
-        duration = len(text) * 0.05
-        duration = max(duration, 0.5)  # Minimum 0.5 seconds
-        duration = min(duration, 10.0)  # Maximum 10 seconds
-
-        # Generate sine wave tone (440 Hz = A4 note)
-        sample_rate = 22050
-        t = np.linspace(0, duration, int(sample_rate * duration))
-        frequency = 440  # Hz
-        audio = np.sin(2 * np.pi * frequency * t) * 0.3  # 30% volume
-
-        # Convert to WAV
-        return numpy_to_wav(audio.astype(np.float32), sample_rate)
 
     def get_model_info(self) -> Dict[str, Any]:
         """Return Kokoro model information."""
         mode_names = {
             "http-api": "HTTP API (Docker, model pre-loaded)",
-            "cli": "CLI wrapper (model loads per request)",
-            "edge-tts": "Microsoft Edge TTS (online)",
-            "mock": "Mock mode (beep tones)"
+            "cli": "CLI wrapper (model loads per request)"
         }
 
         return {
@@ -339,13 +298,12 @@ class KokoroTTSHost(BaseTTSHost):
             'type': mode_names.get(self.mode, "Unknown"),
             'mode': self.mode,
             'model_size_mb': 350 if self.mode in ["http-api", "cli"] else 0,
-            'sample_rate': 22050 if self.mode in ["http-api", "cli", "mock"] else 24000,
+            'sample_rate': 22050,
             'voices': ['am_michael', 'am_adam', 'af_sky', 'af_sarah'],
             'languages': ['en-us', 'en-gb'],
             'license': 'MIT (Open Source)',
             'api_url': self.kokoro_api_url if self.mode == "http-api" else None,
             'executable': self.kokoro_binary if self.mode == "cli" else None,
-            'requires_internet': self.mode == "edge-tts",
         }
 
 
