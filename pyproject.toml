@@ -38,6 +38,7 @@ tts = [
     "numpy>=1.26.0",          # Audio processing
     "scipy>=1.11.0",          # Audio processing
     "psutil>=5.9.0",          # System monitoring
+    "onnxruntime>=1.16.0",    # ONNX runtime for Matcha-TTS
 ]
 
 
