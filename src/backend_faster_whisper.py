@@ -13,7 +13,12 @@ import os
 import platform
 import multiprocessing
 import numpy as np
-from faster_whisper import WhisperModel
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError:  # pragma: no cover - test environments may not have the package
+    class WhisperModel:  # type: ignore[override]
+        pass
 
 # Default model on startup
 CURRENT_MODEL_NAME = "deepdml/faster-whisper-large-v3-turbo-ct2"
@@ -59,8 +64,8 @@ def transcribe(model: WhisperModel, audio_array: np.ndarray) -> str:
     segments, info = model.transcribe(
         audio_array,
         language="en",
-        beam_size=5,
-        best_of=5,
+        beam_size=1, # OPTIMIZATION: Greedy decoding (1) is much faster than beam search (5)
+        best_of=1,   # OPTIMIZATION: Greedy decoding (1) is much faster than best_of (5)
         vad_filter=True,
         vad_parameters=dict(
             min_silence_duration_ms=300,

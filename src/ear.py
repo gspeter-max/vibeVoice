@@ -19,7 +19,42 @@ import select
 import termios
 import tty
 import numpy as np
-from pynput import keyboard, mouse
+
+try:
+    from pynput import keyboard, mouse
+except Exception:  # pragma: no cover - test environments may not support pynput backends
+    class _FallbackKey:
+        cmd_r = "cmd_r"
+        esc = "esc"
+
+    class _FallbackKeyboardListener:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            return None
+
+    class _FallbackKeyboardModule:
+        Key = _FallbackKey()
+        Listener = _FallbackKeyboardListener
+
+    class _FallbackMouseButton:
+        left = "left"
+        right = "right"
+
+    class _FallbackMouseListener:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            return None
+
+    class _FallbackMouseModule:
+        Button = _FallbackMouseButton()
+        Listener = _FallbackMouseListener
+
+    keyboard = _FallbackKeyboardModule()
+    mouse = _FallbackMouseModule()
 
 # ── macOS Voice Isolation ──────────────────────────────────────────────────────
 _VOICE_ISOLATION_ACTIVE = False

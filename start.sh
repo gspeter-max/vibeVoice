@@ -17,11 +17,26 @@
 
 set -euo pipefail
 
+kill_pid_file_process() {
+    local pid_file="$1"
+    if [ -f "$pid_file" ]; then
+        kill "$(cat "$pid_file")" 2>/dev/null || true
+        kill -9 "$(cat "$pid_file")" 2>/dev/null || true
+        rm -f "$pid_file"
+    fi
+}
+
+kill_hud_processes() {
+    lsof -ti :57234 | xargs kill -9 2>/dev/null || true
+    pkill -f "src/hud.py" 2>/dev/null || true
+}
+
 cleanup() {
     echo ""
     echo "  Cleaning up..."
-    [ -f /tmp/parakeet-brain.pid ] && kill "$(cat /tmp/parakeet-brain.pid)" 2>/dev/null; kill -9 "$(cat /tmp/parakeet-brain.pid)" 2>/dev/null; rm -f /tmp/parakeet-brain.pid || true
-    [ -f /tmp/parakeet-hud.pid ] && kill "$(cat /tmp/parakeet-hud.pid)" 2>/dev/null; kill -9 "$(cat /tmp/parakeet-hud.pid)" 2>/dev/null; rm -f /tmp/parakeet-hud.pid || true
+    kill_pid_file_process /tmp/parakeet-brain.pid
+    kill_pid_file_process /tmp/parakeet-hud.pid
+    kill_hud_processes
     rm -f /tmp/parakeet.sock
     echo "  Done. Goodbye."
 }
@@ -44,7 +59,7 @@ echo ""
 echo "  Backend  : $BACKEND"
 echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
-echo "  Theme    : Dark with colorful voice-reactive bars"
+echo "  Theme    : Dark with premium white waveform bars"
 echo ""
 
 # ── Sanity check ────────────────────────────────────────────────
@@ -55,8 +70,9 @@ fi
 
 # ── Kill any stale processes ─────────────────────────────────────
 echo "  Cleaning up old processes..."
-kill $(cat /tmp/parakeet-brain.pid 2>/dev/null) 2>/dev/null || true
-kill $(cat /tmp/parakeet-hud.pid 2>/dev/null) 2>/dev/null || true
+kill_pid_file_process /tmp/parakeet-brain.pid
+kill_pid_file_process /tmp/parakeet-hud.pid
+kill_hud_processes
 rm -f /tmp/parakeet.sock /tmp/parakeet-brain.pid /tmp/parakeet-hud.pid
 
 # ── Ensure logs directory exists ─────────────────────────────────
@@ -129,8 +145,7 @@ echo ""
 # subprocess chain, macOS WindowServer rejects the GUI memory allocation
 # with SIGABRT (vm_map_enter failure).  Shell-level launch fixes this.
 echo "  Starting HUD..."
-# Kill anything stale still holding the IPC port
-lsof -ti :57234 | xargs kill -9 2>/dev/null || true
+kill_hud_processes
 "$VENV_PYTHON" src/hud.py > logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID > /tmp/parakeet-hud.pid
@@ -139,4 +154,3 @@ sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
 
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
 BACKEND="$BACKEND" "$VENV_PYTHON" src/ear.py
-

@@ -1,13 +1,13 @@
 """
 hud.py — iOS-style Pill Waveform HUD (macOS visibility fixed)
 ===============================================================
-Dark rounded-rectangle capsule with animated white vertical bars.
+Dark rounded-rectangle capsule with dense premium white waveform bars.
 
 States:
   - hidden     : small idle pill outline (always on-screen)
   - listening  : pill EXPANDS, bars animate with real mic volume
-  - thinking   : bars turn BLUE, indicates VAD detected end-of-speech
-  - processing : bars do a slow sweep/pulse (White)
+  - thinking   : bars soften into a restrained white shimmer
+  - processing : bars do a slow white sweep/pulse
   - done       : brief flash then back to idle outline
 
 IPC:
@@ -23,6 +23,7 @@ import math
 import time
 import socket
 import subprocess
+import random
 
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
@@ -37,20 +38,31 @@ from src.theme_manager import ThemeManager, THEME_ORIGINAL
 # ── Pill dimensions ───────────────────────────────────────────────────────────
 PILL_W_IDLE   = 60     # was 80
 PILL_H_IDLE   = 20     # was 26
-PILL_W_ACTIVE = 120    # was 160
+PILL_W_ACTIVE = 126    # close to original width, tuned for a denser premium waveform
 PILL_H_ACTIVE = 32     # was 44
 
 PADDING  = 20
 WINDOW_W = PILL_W_ACTIVE + PADDING * 2
 WINDOW_H = PILL_H_ACTIVE + PADDING * 2
+HUD_TOP_MARGIN = 22
+HUD_VERTICAL_ANCHOR = "top"
 
 # ── Bar config ────────────────────────────────────────────────────────────────
-NUM_BARS  = 7
-BAR_W     = 2.8
-BAR_GAP   = 7.0      # centre-to-centre spacing
-BAR_MAX_H = PILL_H_ACTIVE * 0.58
-BAR_MIN_H = PILL_H_ACTIVE * 0.10
-BAR_R     = 1.5      # rounded tip
+NUM_BARS  = 14
+BAR_W     = 1.5
+BAR_GAP   = 3.8      # centre-to-centre spacing (premium spacing with 14 bars)
+BAR_MAX_H = PILL_H_ACTIVE * 0.52
+BAR_MIN_H = PILL_H_ACTIVE * 0.16
+BAR_R     = 0.65     # rounded tip
+BAR_COLOR_MODE = "monochrome"
+WAVE_STYLE = "chaotic-zigzag"
+LISTEN_NOISE_DRIFT_LERP = 0.32
+LISTEN_NOISE_DRIFT_WEIGHT = 0.34
+LISTEN_NOISE_SPARK_WEIGHT = 0.18
+LISTEN_ZIGZAG_WEIGHT = 0.34
+LISTEN_KICK_PROB = 0.16
+LISTEN_KICK_DAMP = 0.66
+LISTEN_KICK_MAG = 0.42
 
 IPC_PORT = 57234
 VOL_PORT = 57235
@@ -60,6 +72,27 @@ LISTENING  = "listening"
 THINKING   = "thinking"
 PROCESSING = "processing"
 DONE       = "done"
+
+
+def runtime_signature() -> str:
+    return (
+        f"mode={BAR_COLOR_MODE} anchor={HUD_VERTICAL_ANCHOR} bars={NUM_BARS} "
+        f"bar_w={BAR_W:.1f} gap={BAR_GAP:.1f} active_w={PILL_W_ACTIVE} wave={WAVE_STYLE}"
+    )
+
+
+def bar_color_for_draw(voice_intensity: float, bar_height_factor: float) -> QColor:
+    """Return strict white for waveform bars with alpha-only dynamics."""
+    # Keep bars visibly bright white at all times, with subtle dynamic lift.
+    alpha = int(248 + voice_intensity * 5 + bar_height_factor * 3)
+    alpha = max(248, min(255, alpha))
+    return QColor(255, 255, 255, alpha)
+
+
+def _triangle_wave(x: float) -> float:
+    """Return a sharp triangle wave in range [-1, 1]."""
+    frac = x - math.floor(x)
+    return 1.0 - 4.0 * abs(frac - 0.5)
 
 
 class IPCServer(QThread):
@@ -228,7 +261,7 @@ class PillHUD(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move(
             screen.center().x() - WINDOW_W // 2,
-            screen.bottom() - WINDOW_H - 4,
+            screen.top() + HUD_TOP_MARGIN,
         )
 
         self._state        = HIDDEN
@@ -245,10 +278,19 @@ class PillHUD(QWidget):
 
         # Theme manager initialization
         self._theme_manager = ThemeManager(THEME_ORIGINAL)
+        print(f"[HUD] Theme mode: {runtime_signature()}", flush=True)
+        preview = bar_color_for_draw(voice_intensity=1.0, bar_height_factor=1.0)
+        print(
+            f"[HUD] Theme preview RGB=({preview.red()},{preview.green()},{preview.blue()}) "
+            f"alpha={preview.alpha()}",
+            flush=True,
+        )
 
         # Per-bar state
         self._bar_h     = [BAR_MIN_H] * NUM_BARS
-        self._bar_phase = [i * 0.72 for i in range(NUM_BARS)]
+        self._bar_phase = [i * 0.28 for i in range(NUM_BARS)]
+        self._bar_noise = [0.0] * NUM_BARS
+        self._bar_kick  = [0.0] * NUM_BARS
 
         self._cur_w = float(PILL_W_IDLE)
         self._cur_h = float(PILL_H_IDLE)
@@ -339,6 +381,8 @@ class PillHUD(QWidget):
         self._state    = HIDDEN
         self._fade_dir = 0
         self._bar_h    = [BAR_MIN_H] * NUM_BARS
+        self._bar_noise = [0.0] * NUM_BARS
+        self._bar_kick = [0.0] * NUM_BARS
         if not self._timer.isActive():
             self._timer.start()
         self.update()
@@ -406,29 +450,49 @@ class PillHUD(QWidget):
 
         for i in range(NUM_BARS):
             ph = self._bar_phase[i]
-            centre_w = 1.0 - abs(i - mid) / mid * 0.35
+            centre_w = 1.0 - abs(i - mid) / mid * 0.18
 
             if self._state == LISTENING:
-                wave = (
-                    0.50 * math.sin(t * 7.0  + ph) +
-                    0.30 * math.sin(t * 12.5 + ph * 1.8) +
-                    0.20 * math.sin(t * 19.0 + ph * 0.8)
+                # Chaotic zigzag drift: fast-rising random motion with sharp edges.
+                noise_target = random.uniform(-1.0, 1.0)
+                self._bar_noise[i] += (noise_target - self._bar_noise[i]) * LISTEN_NOISE_DRIFT_LERP
+                noise_drift = self._bar_noise[i] * LISTEN_NOISE_DRIFT_WEIGHT
+
+                # Stronger spark for non-smooth, jagged motion.
+                noise_spark = random.uniform(-1.0, 1.0) * LISTEN_NOISE_SPARK_WEIGHT
+
+                # Stochastic kick occasionally flips direction sharply.
+                if random.random() < (LISTEN_KICK_PROB * (0.45 + 0.55 * min(1.0, v))):
+                    self._bar_kick[i] = random.uniform(-LISTEN_KICK_MAG, LISTEN_KICK_MAG)
+                self._bar_kick[i] *= LISTEN_KICK_DAMP
+                kick = self._bar_kick[i]
+
+                smooth_base = (
+                    0.34 * math.sin(t * 4.6 + ph * 0.90) +
+                    0.16 * math.sin(t * 9.8 + ph * 1.20)
                 )
-                wave  = (wave + 1.0) / 2.0
-                idle  = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * 0.15
-                tgt   = idle + (BAR_MAX_H * wave * centre_w - idle) * min(1.0, v * 2.2)
+                zig_primary = _triangle_wave(t * 3.6 + i * 0.11 + ph * 0.30) * LISTEN_ZIGZAG_WEIGHT
+                zig_alt = (-1.0 if i % 2 else 1.0) * _triangle_wave(t * 5.2 + ph * 0.21) * 0.18
+                raw_wave = smooth_base + zig_primary + zig_alt + noise_drift + noise_spark + kick
+                wave = max(0.0, min(1.0, (raw_wave + 1.0) / 2.0))
+                idle  = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * 0.16
+                activity = min(1.0, 0.44 + v * 1.55)
+                tgt   = idle + (BAR_MAX_H * wave * centre_w - idle) * activity
 
             elif self._state == THINKING:
-                # Oscillating blue bars
-                wave = (math.sin(t * 5.0 + i * 0.8) + 1.0) / 2.0
-                tgt  = BAR_MIN_H + (BAR_MAX_H * 0.5) * wave
+                wave = (
+                    0.72 * math.sin(t * 3.1 + i * 0.22) +
+                    0.28 * math.sin(t * 5.4 + i * 0.12)
+                )
+                wave = (wave + 1.0) / 2.0
+                tgt = BAR_MIN_H + (BAR_MAX_H * 0.36) * wave
 
             elif self._state == PROCESSING:
-                sweep = (math.sin(t * 2.8) + 1.0) / 2.0 * (NUM_BARS - 1)
+                sweep = (math.sin(t * 1.8) + 1.0) / 2.0 * (NUM_BARS - 1)
                 dist  = abs(i - sweep)
-                glow  = math.exp(-dist * dist * 0.7)
-                breath = 0.12 + 0.06 * math.sin(t * 1.6 + i * 0.5)
-                tgt = BAR_MIN_H + (BAR_MAX_H * 0.72) * max(glow, breath)
+                glow  = math.exp(-dist * dist * 0.22)
+                breath = 0.14 + 0.04 * math.sin(t * 1.1 + i * 0.16)
+                tgt = BAR_MIN_H + (BAR_MAX_H * 0.55) * max(glow, breath)
 
             elif self._state == DONE:
                 prog = min(1.0, self._t * 5.0)
@@ -487,16 +551,26 @@ class PillHUD(QWidget):
                 # Use voice intensity for dynamic coloring
                 voice_intensity = self._voice_smooth
 
-                # Get dynamic color from theme manager with frequency bands
-                color = self._theme_manager.get_bar_color(
-                    bar_index=i,
-                    total_bars=NUM_BARS,
+                # Force strict monochrome bars. No hue, no gradient, no frequency tint.
+                color = bar_color_for_draw(
                     voice_intensity=voice_intensity,
                     bar_height_factor=bar_height_factor,
-                    frequency_bands=self._frequency_bands
                 )
 
+                # Soft white halo under each bar for a cleaner premium look.
+                glow_alpha = max(56, min(120, int(color.alpha() * 0.42)))
+                glow_color = QColor(255, 255, 255, glow_alpha)
+                glow_w = BAR_W + 1.0
+                glow_h = bh + 1.0
+
                 p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(glow_color))
+                p.drawRoundedRect(
+                    QRectF(bx - glow_w / 2, cy - glow_h / 2, glow_w, glow_h),
+                    BAR_R + 0.35,
+                    BAR_R + 0.35,
+                )
+
                 p.setBrush(QBrush(color))
                 p.drawRoundedRect(
                     QRectF(bx - BAR_W / 2, by, BAR_W, bh), BAR_R, BAR_R

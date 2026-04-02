@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
 import backend_faster_whisper
@@ -16,7 +15,7 @@ def test_backend_load_model():
         assert model == mock_model
         # Check some default args
         args, kwargs = mock_whisper_class.call_args
-        assert args[0] == "base.en"
+        assert args[0] == "deepdml/faster-whisper-large-v3-turbo-ct2"
         assert kwargs['device'] == "cpu"
 
 def test_backend_transcribe():

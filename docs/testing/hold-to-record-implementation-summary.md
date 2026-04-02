@@ -10,18 +10,12 @@
 
 ### Core Feature: Push-to-Talk Mouse Activation
 
-**Old System (Removed):**
-- 4-click activation within 1.5 seconds
-- Visual counter showing click progress (dots 1/4, 2/4, 3/4, 4/4)
-- Complex timeout logic
-- ~150 lines of click-counting code
-
-**New System (Implemented):**
-- Press and hold mouse button for 1 second → Start recording
-- Release mouse button → Stop recording
+**Current System (Implemented):**
+- Press and hold the right mouse button for 1 second → Start recording
+- Release the right mouse button → Stop recording
 - Silent wait during hold delay (no visual feedback)
 - Early release (< 1s) → Silent reset
-- ~80 lines of hold-based code
+- Mouse input streams audio to Brain over a persistent Unix socket while recording is active
 
 ---
 
@@ -43,6 +37,12 @@
 - ✅ Removed counter timeout logic
 - ✅ Removed counter visualization code
 - ✅ Net result: Simplified, cleaner code
+
+**3. `src/brain.py` (Streaming Transcription)**
+- ✅ Receives streamed PCM chunks over `/tmp/parakeet.sock`
+- ✅ Buffers audio until the ear closes the socket
+- ✅ Uses Silero VAD for HUD-only speech state
+- ✅ Pastes transcription into the active app via clipboard injection
 
 **3. `tests/test_ear_hold_state.py` (Test Suite)**
 - ✅ Created comprehensive test suite
@@ -112,7 +112,7 @@ Release mouse button           Stop recording
 ### Edge Cases Handled
 
 1. **Early Release (< 1s):** Silent reset, no recording
-2. **Right CMD Shortcut:** Still works, independent of mouse
+2. **Right CMD Shortcut:** Still works independently of mouse recording
 3. **Brain Not Ready:** Error message, hold resets
 4. **Already Recording:** Mouse hold ignored
 5. **Rapid Press-Release:** No state corruption
@@ -164,21 +164,20 @@ tests/test_ear_hold_state.py::test_hold_less_than_one_second_no_recording PASSED
    ```
 
 2. **Test hold-to-record:**
-   - Press and hold left mouse button
+   - Press and hold right mouse button
    - Wait for "RECORDING+STREAMING via MOUSE HOLD" message
    - Release button
    - Verify "Mouse released - STOPPING recording" message
 
 3. **Test early release:**
-   - Press and hold left mouse button
+   - Press and hold right mouse button
    - Release before 1 second
    - Verify nothing happens (silent reset)
 
 4. **Test keyboard shortcut:**
-   - Tap Right CMD key
-   - Verify recording starts immediately
-   - Tap Right CMD again
-   - Verify recording stops
+   - Press Right CMD to start recording
+   - Release after a short hold to stop
+   - If you tap it too quickly, it should latch until the next press
 
 ---
 

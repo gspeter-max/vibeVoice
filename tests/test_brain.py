@@ -1,104 +1,79 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-import pytest
-import os
-import socket
-from unittest.mock import MagicMock, patch, call
-from brain import start_server, worker, audio_queue, backend_info
 
-# Mock data and classes
+import brain
+
+
 class MockConn:
-    def __init__(self, data):
-        self.data = data
-        self.sent = False
+    def __init__(self, *chunks):
+        self._chunks = list(chunks) + [b""]
 
-    def recv(self, size):
-        if not self.sent:
-            self.sent = True
-            return self.data
-        return b""
+    def settimeout(self, _timeout):
+        return None
+
+    def recv(self, _size):
+        return self._chunks.pop(0)
 
     def close(self):
-        pass
+        return None
 
-@patch('brain.load_backend')
-@patch('brain.keyboard')
-@patch('socket.socket')
-@patch('os.path.exists')
-@patch('os.remove')
-def test_brain_server_logic(mock_remove, mock_exists, mock_socket_class, mock_keyboard, mock_load_backend, sample_audio_bytes):
-    """Test the brain's main server loop logic."""
-    # Setup mocks
+
+def test_handle_connection_transcribes_audio(sample_audio_bytes):
     mock_backend = MagicMock()
     mock_model = MagicMock()
-    mock_load_backend.return_value = (mock_backend, mock_model)
-    
-    # Initialize backend_info manually for the worker
-    backend_info["backend"] = mock_backend
-    backend_info["model"] = mock_model
-    
     mock_backend.transcribe.return_value = "hello world"
-    
-    # Put item in queue and a stop signal
-    audio_queue.put((sample_audio_bytes, False))
-    audio_queue.put(None)
-    
-    # Run worker directly
-    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
-        worker()
-        
-    # Verify transcription was called with converted audio
+
+    brain.backend_info["backend"] = mock_backend
+    brain.backend_info["model"] = mock_model
+    brain.vad_engine = None
+
+    conn = MockConn(sample_audio_bytes)
+
+    with patch("brain.send_hud"), patch("brain.paste_instantly") as mock_paste:
+        brain.handle_connection(conn)
+
     mock_backend.transcribe.assert_called_once()
     args, _ = mock_backend.transcribe.call_args
     assert args[0] == mock_model
     assert isinstance(args[1], np.ndarray)
     assert args[1].dtype == np.float32
-    
-    # Verify keyboard typed the result
-    mock_keyboard.type.assert_called_once_with("hello world ")
+    mock_paste.assert_called_once_with("hello world ")
 
-@patch('brain.load_backend')
-@patch('brain.keyboard')
-@patch('socket.socket')
-def test_brain_switch_model_command(mock_socket_class, mock_keyboard, mock_load_backend):
-    """Test the command to switch models."""
+
+def test_handle_connection_switch_model_command():
     mock_backend = MagicMock()
     mock_model = MagicMock()
-    mock_load_backend.return_value = (mock_backend, mock_model)
-    
-    backend_info["backend"] = mock_backend
-    backend_info["model"] = mock_model
-    
-    # Send a command instead of audio
-    command = "CMD_SWITCH_MODEL:tiny.en"
-    audio_queue.put((command.encode('utf-8'), True))
-    audio_queue.put(None)
-    
-    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
-        worker()
-        
-    # Verify load_backend was called again for the switch
-    mock_load_backend.assert_called_once_with("tiny.en")
+    mock_new_backend = MagicMock()
+    mock_new_model = MagicMock()
 
-@patch('brain.load_backend')
-@patch('brain.keyboard')
-@patch('socket.socket')
-def test_brain_too_short_audio(mock_socket_class, mock_keyboard, mock_load_backend):
-    """Test that brain skips too short audio clips."""
+    brain.backend_info["backend"] = mock_backend
+    brain.backend_info["model"] = mock_model
+    brain.vad_engine = None
+
+    conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
+
+    with patch("brain.load_backend", return_value=(mock_new_backend, mock_new_model)) as mock_load:
+        brain.handle_connection(conn)
+
+    mock_load.assert_called_once_with("tiny.en")
+    assert brain.backend_info["backend"] == mock_new_backend
+    assert brain.backend_info["model"] == mock_new_model
+
+
+def test_handle_connection_skips_too_short_audio():
     mock_backend = MagicMock()
     mock_model = MagicMock()
-    mock_load_backend.return_value = (mock_backend, mock_model)
-    
-    backend_info["backend"] = mock_backend
-    backend_info["model"] = mock_model
-    
-    # 0.1s of audio is too short (less than 4800 samples)
-    short_audio = b'\x00\x00' * 1600
-    audio_queue.put((short_audio, False))
-    audio_queue.put(None)
-    
-    with patch('sys.stdout', new=MagicMock()), patch('brain.send_hud'):
-        worker()
-        
-    # Transcribe should NOT be called
+
+    brain.backend_info["backend"] = mock_backend
+    brain.backend_info["model"] = mock_model
+    brain.vad_engine = None
+
+    short_audio = b"\x00\x00" * 1600
+    conn = MockConn(short_audio)
+
+    with patch("brain.send_hud"), patch("brain.paste_instantly") as mock_paste:
+        brain.handle_connection(conn)
+
     mock_backend.transcribe.assert_not_called()
-    mock_keyboard.type.assert_not_called()
+    mock_paste.assert_not_called()

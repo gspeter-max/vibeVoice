@@ -1,5 +1,7 @@
 # HUD Theme Documentation
 
+The current HUD ships a single theme implementation: a dark pill with unified flowing color bars.
+
 ## Overview
 
 The Parakeet Flow HUD features a single theme with **dark gray borders** and **unified flowing color waveform bars** that create a beautiful, cohesive audio visualizer effect.

@@ -36,7 +36,8 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     if thread_env:  # Check if string has a value (not empty/None)
         num_threads = int(thread_env)  # Only then convert to int
     else:
-        num_threads = multiprocessing.cpu_count()  # Use default
+        # OPTIMIZATION: On Intel i7, using 6 physical cores is faster than 12 logical cores
+        num_threads = 6
 
     print(f"[sherpa-onnx] Using {num_threads} threads", flush=True)
 

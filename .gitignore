@@ -57,3 +57,6 @@ htmlcov/
 # Git Worktrees
 /.worktrees/
 
+
+# Planned improvements
+improvement.md

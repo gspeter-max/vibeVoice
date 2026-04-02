@@ -6,7 +6,7 @@ import sys
 
 SOCKET_PATH = "/tmp/parakeet.sock"
 
-def test_transcription(wav_file_path):
+def run_transcription_test(wav_file_path):
     if not os.path.exists(SOCKET_PATH):
         print("Error: Socket not found. Make sure brain.py is running.")
         sys.exit(1)
@@ -36,4 +36,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python test_audio.py <path_to_16khz_mono.wav>")
     else:
-        test_transcription(sys.argv[1])
+        run_transcription_test(sys.argv[1])

@@ -29,7 +29,7 @@
 ### Test 1: Basic Hold-to-Record
 
 **Steps:**
-1. Press and hold left mouse button
+1. Press and hold right mouse button
 2. Wait 1+ seconds
 3. Continue holding for 2-3 seconds (simulating speaking)
 4. Release mouse button
@@ -52,7 +52,7 @@
 ### Test 2: Early Release (< 1 second)
 
 **Steps:**
-1. Press and hold left mouse button
+1. Press and hold right mouse button
 2. Release after 0.5 seconds (< 1 second threshold)
 
 **Expected Results:**
@@ -72,16 +72,16 @@
 ### Test 3: Right CMD Keyboard Shortcut Still Works
 
 **Steps:**
-1. Tap Right CMD key (press and release quickly)
-2. Wait 2-3 seconds
-3. Tap Right CMD again
+1. Press Right CMD to start recording
+2. Hold briefly, then release to stop
+3. Optional: tap Right CMD quickly to confirm it latches until the next press
 
 **Expected Results:**
-- ✅ First tap: Recording starts immediately (no 1-second delay)
+- ✅ Recording starts on press
 - ✅ "RECORDING+STREAMING" message appears
 - ✅ HUD shows listening state
-- ✅ Second tap: Recording stops
-- ✅ "Mouse released" message does NOT appear (keyboard shortcut)
+- ✅ Release after a short hold stops recording
+- ✅ Very quick tap latches until the next press
 
 **Status:** _____ PASS / FAIL
 
@@ -94,17 +94,17 @@
 ### Test 4: Mixed Methods (No Conflicts)
 
 **Steps:**
-1. Start recording with Right CMD (tap keyboard shortcut)
-2. While recording, press and hold left mouse button for 2+ seconds
+1. Press and hold Right CMD long enough to start recording
+2. While still recording, press and hold right mouse button for 2+ seconds
 3. Release mouse button
-4. Tap Right CMD to stop recording
+4. Release Right CMD to stop recording
 
 **Expected Results:**
 - ✅ Recording starts via Right CMD (normal)
 - ✅ Holding mouse button is ignored (no duplicate recording)
 - ✅ No error messages or crashes
 - ✅ Recording continues normally
-- ✅ Right CMD still stops recording
+- ✅ Releasing Right CMD stops recording
 
 **Status:** _____ PASS / FAIL
 
@@ -118,7 +118,7 @@
 
 **Steps:**
 1. Stop brain process (Ctrl+C in brain terminal)
-2. Press and hold left mouse button for 1+ seconds
+2. Press and hold right mouse button for 1+ seconds
 3. Release mouse button
 
 **Expected Results:**
@@ -138,7 +138,7 @@
 ### Test 6: Hold Duration Timing Accuracy
 
 **Steps:**
-1. Press and hold left mouse button
+1. Press and hold right mouse button
 2. Count seconds aloud (use stopwatch if available)
 3. Note when recording starts
 4. Release after 3-4 seconds
@@ -161,7 +161,7 @@
 ### Test 7: Rapid Press-Release Sequences
 
 **Steps:**
-1. Press and hold mouse button for 0.3 seconds, release
+1. Press and hold right mouse button for 0.3 seconds, release
 2. Immediately press and hold for 0.3 seconds, release
 3. Press and hold for 1.5 seconds, release (should trigger recording)
 4. While recording, press and release mouse button rapidly

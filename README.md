@@ -3,7 +3,7 @@
 
 > Local, Private, Fast Voice-to-Text for your Desktop.
 
-Parakeet Flow v2 is a push-to-talk voice-to-text tool that transcribes your speech locally and **auto-types it instantly into whatever application you're currently using** (Browser, IDE, Slack, etc.).
+Parakeet Flow v2 is a local voice-to-text tool that transcribes your speech and **auto-types it instantly into whatever application you're currently using** (Browser, IDE, Slack, etc.).
 
 It is highly optimized for low-latency inference on CPU, specifically for macOS (Intel & Apple Silicon), providing a seamless "Wispr Flow" style experience entirely on your machine.
 
@@ -12,8 +12,8 @@ It is highly optimized for low-latency inference on CPU, specifically for macOS 
 ## ⚡ Key Features
 
 - **Dual Control Methods**:
-  - **Keyboard Shortcut**: Hold **Right CMD** to record, release to transcribe
-  - **Mouse Hold-to-Talk**: Hold **RIGHT mouse button** for 1 second to record, release to stop
+  - **Keyboard Shortcut**: Press **Right CMD** to start recording; a short release latches recording until the next press, while a longer hold stops on release
+  - **Mouse Hold-to-Talk**: Hold **RIGHT mouse button** for 1 second to start recording, release to stop
 - **Auto-Type Output**: Transcriptions are typed into your active cursor position automatically.
 - **Interactive Model Toggling**: Switch between different Whisper and Parakeet models instantly while the app is running using number keys **1-9** and **0**.
 - **Privacy First**: Everything runs 100% locally. No audio or text ever leaves your machine.
@@ -121,9 +121,12 @@ Test different values to find the optimal setting for your hardware. The thread 
 
 ## 🛠️ Technical Architecture
 
-- **`ear.py`**: The "Listener". Handles global hotkeys, raw audio capture via PyAudio callback, and the interactive terminal menu.
-- **`brain.py`**: The "Inference Engine". A persistent background server that manages the loaded Whisper model, processes incoming audio buffers via a Unix socket, and auto-types the result via `pynput`.
-- **`backend_faster_whisper.py`**: The "Optimized Driver". Handles the heavy lifting of loading and running CTranslate2 models with architecture-specific optimizations.
+- **`ear.py`**: The input/controller layer. It opens the microphone, listens for keyboard and mouse gestures, streams PCM chunks to Brain over a Unix socket, and sends HUD volume telemetry over UDP.
+- **`brain.py`**: The inference server. It buffers streamed audio until the socket closes, runs VAD for HUD feedback, transcribes with the selected backend, and pastes the text into the active app.
+- **`hud.py`**: The always-on-top Qt HUD. It listens for state commands on TCP `57234` and volume/frequency packets on UDP `57235`.
+- **`backend_faster_whisper.py`**: Default CPU backend for Whisper-style models.
+- **`backend_parakeet.py`**: Optional sherpa-onnx backend for Parakeet-TDT models.
+- **`backend_openvino.py`**: Optional OpenVINO backend for Intel iGPU systems.
 
 ---
 

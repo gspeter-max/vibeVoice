@@ -41,7 +41,7 @@ def _check_openvino():
         return False
 
 
-def load_model():
+def load_model(model_name=None):
     if not _check_openvino():
         raise RuntimeError(
             "[openvino] openvino package not found.\n"
@@ -72,7 +72,7 @@ def transcribe(model, audio_array: np.ndarray) -> str:
     audio_array: float32, 16kHz, mono, -1..1
     """
     try:
-        result = model.transcribe(audio_array, language="en", beam_size=5)
+        result = model.transcribe(audio_array, language="en", beam_size=1)
         if isinstance(result, dict):
             return result.get("text", "").strip()
         return str(result).strip()

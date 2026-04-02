@@ -12,7 +12,13 @@ import socket
 import time
 import threading
 import numpy as np
-from pynput.keyboard import Controller
+
+try:
+    from pynput.keyboard import Controller
+except Exception:  # pragma: no cover - test environments may not support pynput backends
+    class Controller:  # type: ignore[override]
+        def type(self, _text):
+            return None
 
 # VAD settings
 VAD_MODEL_PATH = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
@@ -281,7 +287,13 @@ def handle_connection(conn):
 
     try:
         audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        
+
+        if len(audio) == 0:
+            print("[Brain] ⚠️  Audio is entirely silence — mic not capturing")
+            sys.stdout.flush()
+            send_hud("hide")
+            return
+
         # ── DEBUG: Show actual audio level ──
         max_val = np.max(np.abs(audio))
         rms_val = np.sqrt(np.mean(audio ** 2))
@@ -290,6 +302,7 @@ def handle_connection(conn):
 
         if max_val < 0.001:
             print("[Brain] ⚠️  Audio is silence — mic not capturing")
+            sys.stdout.flush()
             send_hud("hide")
             return
             
@@ -297,11 +310,13 @@ def handle_connection(conn):
             audio = audio / max_val * 0.9
     except Exception as e:
         print(f"[Brain] ❌ Audio decode error: {e}")
+        sys.stdout.flush()
         send_hud("hide")
         return
 
     if len(audio) < 4800:
         print("[Brain] ⚠️  Audio too short — skipped")
+        sys.stdout.flush()
         send_hud("hide")
         return
 
