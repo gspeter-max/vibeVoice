@@ -11,6 +11,8 @@ ENV/
 .env
 .env.local
 
+docs/
+EALUATION_LOG.md
 # Logs
 *.log
 brain.log
