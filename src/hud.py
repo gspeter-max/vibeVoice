@@ -1,7 +1,7 @@
 """
-hud.py — iOS-style Pill Waveform HUD (macOS visibility fixed)
-===============================================================
-Dark rounded-rectangle capsule with dense premium white waveform bars.
+hud.py — macOS menu bar waveform HUD
+====================================
+Compact native status item with premium white waveform bars.
 
 States:
   - hidden     : small idle pill outline (always on-screen)
@@ -27,33 +27,40 @@ import random
 
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtCore import Qt, QTimer, QRectF, QThread, Signal
-from PySide6.QtGui import (
-    QPainter, QColor, QPainterPath, QPen, QBrush,
-)
+import objc
+from PySide6.QtCore import QObject, QTimer, QThread, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication
 
-from src.theme_manager import ThemeManager, THEME_ORIGINAL
+try:
+    from AppKit import (
+        NSApp,
+        NSColor,
+        NSBezierPath,
+        NSMakeRect,
+        NSView,
+        NSStatusBar,
+    )
+except Exception:  # pragma: no cover - menu bar rendering is macOS-only
+    NSApp = None
+    NSColor = None
+    NSBezierPath = None
+    NSMakeRect = None
+    NSView = None
+    NSStatusBar = None
 
-# ── Pill dimensions ───────────────────────────────────────────────────────────
-PILL_W_IDLE   = 60     # was 80
-PILL_H_IDLE   = 20     # was 26
-PILL_W_ACTIVE = 126    # close to original width, tuned for a denser premium waveform
-PILL_H_ACTIVE = 32     # was 44
-
-PADDING  = 20
-WINDOW_W = PILL_W_ACTIVE + PADDING * 2
-WINDOW_H = PILL_H_ACTIVE + PADDING * 2
-HUD_TOP_MARGIN = 22
-HUD_VERTICAL_ANCHOR = "top"
+# ── Menu bar dimensions ───────────────────────────────────────────────────────
+STATUS_ITEM_W = 64
+STATUS_ITEM_H = 22
+STATUS_ITEM_VERTICAL_SHIFT = 0.0
 
 # ── Bar config ────────────────────────────────────────────────────────────────
-NUM_BARS  = 14
-BAR_W     = 1.5
-BAR_GAP   = 3.8      # centre-to-centre spacing (premium spacing with 14 bars)
-BAR_MAX_H = PILL_H_ACTIVE * 0.52
-BAR_MIN_H = PILL_H_ACTIVE * 0.16
-BAR_R     = 0.65     # rounded tip
+NUM_BARS  = 9
+BAR_W     = 2.0
+BAR_GAP   = 2.5
+BAR_MAX_H = 15.0
+BAR_MIN_H = 5.0
+BAR_R     = 0.9     # rounded tip
 BAR_COLOR_MODE = "monochrome"
 WAVE_STYLE = "chaotic-zigzag"
 LISTEN_NOISE_DRIFT_LERP = 0.32
@@ -63,6 +70,14 @@ LISTEN_ZIGZAG_WEIGHT = 0.34
 LISTEN_KICK_PROB = 0.16
 LISTEN_KICK_DAMP = 0.66
 LISTEN_KICK_MAG = 0.42
+LISTEN_SMOOTH_BASE_SPEED_A = 3.9
+LISTEN_SMOOTH_BASE_SPEED_B = 8.4
+LISTEN_ZIGZAG_SPEED_PRIMARY = 3.0
+LISTEN_ZIGZAG_SPEED_ALT = 4.4
+THINKING_SPEED_A = 2.6
+THINKING_SPEED_B = 4.6
+PROCESSING_SWEEP_SPEED = 1.45
+PROCESSING_BREATH_SPEED = 0.95
 
 IPC_PORT = 57234
 VOL_PORT = 57235
@@ -76,8 +91,8 @@ DONE       = "done"
 
 def runtime_signature() -> str:
     return (
-        f"mode={BAR_COLOR_MODE} anchor={HUD_VERTICAL_ANCHOR} bars={NUM_BARS} "
-        f"bar_w={BAR_W:.1f} gap={BAR_GAP:.1f} active_w={PILL_W_ACTIVE} wave={WAVE_STYLE}"
+        f"mode={BAR_COLOR_MODE} anchor=menu-bar bars={NUM_BARS} "
+        f"bar_w={BAR_W:.1f} gap={BAR_GAP:.1f} item_w={STATUS_ITEM_W} wave={WAVE_STYLE}"
     )
 
 
@@ -93,6 +108,54 @@ def _triangle_wave(x: float) -> float:
     """Return a sharp triangle wave in range [-1, 1]."""
     frac = x - math.floor(x)
     return 1.0 - 4.0 * abs(frac - 0.5)
+
+
+def compute_menu_bar_waveform_layout(
+    *,
+    status_width: float,
+    status_height: float,
+    num_bars: int,
+    bar_width: float,
+    bar_gap: float,
+    bar_height: float,
+) -> list[dict]:
+    """Return centered bar rectangles for a compact menu-bar waveform."""
+    total_wave_width = num_bars * bar_width + max(0, num_bars - 1) * bar_gap
+    start_x = (status_width - total_wave_width) / 2.0
+    start_y = (status_height - bar_height) / 2.0
+
+    layout = []
+    for idx in range(num_bars):
+        x = start_x + idx * (bar_width + bar_gap)
+        layout.append(
+            {
+                "x": x,
+                "y": start_y,
+                "width": bar_width,
+                "height": bar_height,
+            }
+        )
+    return layout
+
+
+class MenuBarWaveformView(NSView):
+    def initWithFrame_(self, frame):
+        self = objc.super(MenuBarWaveformView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._hud = None
+        return self
+
+    def setHud_(self, hud):
+        self._hud = hud
+
+    def isFlipped(self):
+        return True
+
+    def drawRect_(self, _dirtyRect):
+        if self._hud is None:
+            return
+        self._hud._draw_menu_bar_waveform(self.bounds())
 
 
 class IPCServer(QThread):
@@ -232,37 +295,13 @@ def _play_sound(path):
         pass
 
 
-# ── Main HUD widget ────────────────────────────────────────────────────────
-class PillHUD(QWidget):
+# ── Main menu bar controller ────────────────────────────────────────────────
+class MenuBarWaveformController(QObject):
 
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-            | Qt.WindowType.WindowDoesNotAcceptFocus
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-
-        # ★ FIX 1 — THE KEY FIX
-        try:
-            self.setAttribute(
-                Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True
-            )
-            print("[HUD] WA_MacAlwaysShowToolWindow ✓", flush=True)
-        except AttributeError:
-            print("[HUD] WA_MacAlwaysShowToolWindow not available — "
-                  "using keepalive fallback", flush=True)
-
-        self.setFixedSize(WINDOW_W, WINDOW_H)
-
-        screen = QApplication.primaryScreen().geometry()
-        self.move(
-            screen.center().x() - WINDOW_W // 2,
-            screen.top() + HUD_TOP_MARGIN,
-        )
+        self._status_item = None
+        self._status_view = None
 
         self._state        = HIDDEN
         self._t0           = time.time()
@@ -275,9 +314,6 @@ class PillHUD(QWidget):
 
         # Frequency bands for color mapping
         self._frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
-
-        # Theme manager initialization
-        self._theme_manager = ThemeManager(THEME_ORIGINAL)
         print(f"[HUD] Theme mode: {runtime_signature()}", flush=True)
         preview = bar_color_for_draw(voice_intensity=1.0, bar_height_factor=1.0)
         print(
@@ -292,8 +328,6 @@ class PillHUD(QWidget):
         self._bar_noise = [0.0] * NUM_BARS
         self._bar_kick  = [0.0] * NUM_BARS
 
-        self._cur_w = float(PILL_W_IDLE)
-        self._cur_h = float(PILL_H_IDLE)
         self._snd_listen, self._snd_done = _init_sounds()
 
         # 60 fps animation timer (only runs when animating)
@@ -324,38 +358,81 @@ class PillHUD(QWidget):
         self._keepalive.timeout.connect(self._ensure_visible)
         self._keepalive.start()
 
-        # Initial show
-        self.setWindowOpacity(1.0)
-        self.show()
+        self._ensure_menu_bar_item()
+        self._request_menu_bar_view_redraw()
 
-        # Native macOS window level
-        QTimer.singleShot(300, self._set_native_level)
-
-        print("[HUD] Pill HUD ready ✓", flush=True)
+        print("[HUD] Menu bar HUD ready ✓", flush=True)
 
     def _ensure_visible(self):
-        """Re-assert visibility WITHOUT stealing focus."""
-        if not self.isVisible():
-            self.show()
-        self.setWindowOpacity(1.0)
+        """Re-assert the menu-bar item exists and remains visible."""
+        self._ensure_menu_bar_item()
+        self._request_menu_bar_view_redraw()
 
-    def _set_native_level(self):
-        """Use macOS native API for bulletproof always-on-top (needs pyobjc)."""
-        try:
-            from AppKit import NSApp, NSFloatingWindowLevel
-            for w in NSApp.windows():
-                w.setLevel_(NSFloatingWindowLevel + 2)
-                # Show on ALL Spaces / desktops
-                w.setCollectionBehavior_(
-                    w.collectionBehavior()
-                    | (1 << 0)   # canJoinAllSpaces
-                    | (1 << 4)   # moveToActiveSpace
-                )
-            print("[HUD] Native macOS window level set ✓", flush=True)
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"[HUD] Native level failed (non-critical): {e}", flush=True)
+    def _ensure_menu_bar_item(self):
+        if self._status_item is not None:
+            return
+        if NSStatusBar is None:
+            raise RuntimeError("macOS status bar APIs are unavailable")
+        self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
+            STATUS_ITEM_W
+        )
+        if self._status_view is None and NSView is not None:
+            self._status_view = MenuBarWaveformView.alloc().initWithFrame_(
+                NSMakeRect(0, 0, STATUS_ITEM_W, STATUS_ITEM_H)
+            )
+            self._status_view.setHud_(self)
+        if self._status_view is not None:
+            self._status_item.setView_(self._status_view)
+            self._status_view.setFrame_(NSMakeRect(0, 0, STATUS_ITEM_W, STATUS_ITEM_H))
+
+    def _status_bar_alpha(self) -> float:
+        if self._state == LISTENING:
+            return min(1.0, 0.88 + self._voice_smooth * 0.12)
+        if self._state == THINKING:
+            return 0.96
+        if self._state == PROCESSING:
+            return 0.98
+        if self._state == DONE:
+            return 1.0
+        return 0.74
+
+    def _request_menu_bar_view_redraw(self):
+        if self._status_view is not None:
+            self._status_view.setNeedsDisplay_(True)
+
+    def _draw_menu_bar_waveform(self, bounds):
+        if NSColor is None or NSBezierPath is None or NSMakeRect is None:
+            return
+
+        width = float(bounds.size.width)
+        height = float(bounds.size.height)
+        NSColor.clearColor().set()
+        NSBezierPath.bezierPathWithRect_(NSMakeRect(0, 0, width, height)).fill()
+
+        layout = compute_menu_bar_waveform_layout(
+            status_width=width,
+            status_height=height,
+            num_bars=NUM_BARS,
+            bar_width=BAR_W,
+            bar_gap=BAR_GAP,
+            bar_height=BAR_MAX_H,
+        )
+        alpha = self._status_bar_alpha()
+        for idx, rect in enumerate(layout):
+            bh = max(BAR_MIN_H, self._bar_h[idx])
+            scale = 0.62 + (bh - BAR_MIN_H) / max(1.0, BAR_MAX_H - BAR_MIN_H) * 0.38
+            current_h = max(BAR_MIN_H, min(BAR_MAX_H, bh))
+            y = (height - current_h) / 2.0 + STATUS_ITEM_VERTICAL_SHIFT
+            x = rect["x"]
+            w = rect["width"]
+
+            NSColor.colorWithCalibratedWhite_alpha_(1.0, alpha * scale).set()
+            path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                NSMakeRect(x, y, w, current_h),
+                BAR_R,
+                BAR_R,
+            )
+            path.fill()
 
     # ── Public state transitions ───────────────────────────────────────────
     def show_listening(self):
@@ -385,7 +462,7 @@ class PillHUD(QWidget):
         self._bar_kick = [0.0] * NUM_BARS
         if not self._timer.isActive():
             self._timer.start()
-        self.update()
+        self._request_menu_bar_view_redraw()
 
     # ── IPC dispatcher ────────────────────────────────────────────────────
     def _on_command(self, cmd):
@@ -415,7 +492,6 @@ class PillHUD(QWidget):
         self._t0       = time.time()
         self._t        = 0.0
         self._fade_dir = 0
-        self.setWindowOpacity(1.0)
         if not self._timer.isActive():
             self._timer.start()
 
@@ -424,13 +500,6 @@ class PillHUD(QWidget):
 
         # Update hue offset for animated themes (no longer needed, kept for compatibility)
         pass
-
-        # Animate pill size (smooth lerp)
-        target_w = PILL_W_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_W_IDLE
-        target_h = PILL_H_ACTIVE if self._state in (LISTENING, THINKING, PROCESSING) else PILL_H_IDLE
-
-        self._cur_w += (target_w - self._cur_w) * 0.18
-        self._cur_h += (target_h - self._cur_h) * 0.18
 
         # Voice decay
         if time.time() - self._last_vol_t > 0.15:
@@ -468,11 +537,11 @@ class PillHUD(QWidget):
                 kick = self._bar_kick[i]
 
                 smooth_base = (
-                    0.34 * math.sin(t * 4.6 + ph * 0.90) +
-                    0.16 * math.sin(t * 9.8 + ph * 1.20)
+                    0.34 * math.sin(t * LISTEN_SMOOTH_BASE_SPEED_A + ph * 0.90) +
+                    0.16 * math.sin(t * LISTEN_SMOOTH_BASE_SPEED_B + ph * 1.20)
                 )
-                zig_primary = _triangle_wave(t * 3.6 + i * 0.11 + ph * 0.30) * LISTEN_ZIGZAG_WEIGHT
-                zig_alt = (-1.0 if i % 2 else 1.0) * _triangle_wave(t * 5.2 + ph * 0.21) * 0.18
+                zig_primary = _triangle_wave(t * LISTEN_ZIGZAG_SPEED_PRIMARY + i * 0.11 + ph * 0.30) * LISTEN_ZIGZAG_WEIGHT
+                zig_alt = (-1.0 if i % 2 else 1.0) * _triangle_wave(t * LISTEN_ZIGZAG_SPEED_ALT + ph * 0.21) * 0.18
                 raw_wave = smooth_base + zig_primary + zig_alt + noise_drift + noise_spark + kick
                 wave = max(0.0, min(1.0, (raw_wave + 1.0) / 2.0))
                 idle  = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * 0.16
@@ -481,17 +550,17 @@ class PillHUD(QWidget):
 
             elif self._state == THINKING:
                 wave = (
-                    0.72 * math.sin(t * 3.1 + i * 0.22) +
-                    0.28 * math.sin(t * 5.4 + i * 0.12)
+                    0.72 * math.sin(t * THINKING_SPEED_A + i * 0.22) +
+                    0.28 * math.sin(t * THINKING_SPEED_B + i * 0.12)
                 )
                 wave = (wave + 1.0) / 2.0
                 tgt = BAR_MIN_H + (BAR_MAX_H * 0.36) * wave
 
             elif self._state == PROCESSING:
-                sweep = (math.sin(t * 1.8) + 1.0) / 2.0 * (NUM_BARS - 1)
+                sweep = (math.sin(t * PROCESSING_SWEEP_SPEED) + 1.0) / 2.0 * (NUM_BARS - 1)
                 dist  = abs(i - sweep)
                 glow  = math.exp(-dist * dist * 0.22)
-                breath = 0.14 + 0.04 * math.sin(t * 1.1 + i * 0.16)
+                breath = 0.14 + 0.04 * math.sin(t * PROCESSING_BREATH_SPEED + i * 0.16)
                 tgt = BAR_MIN_H + (BAR_MAX_H * 0.55) * max(glow, breath)
 
             elif self._state == DONE:
@@ -504,81 +573,10 @@ class PillHUD(QWidget):
             cur = self._bar_h[i]
             self._bar_h[i] += (tgt - cur) * (0.42 if tgt > cur else 0.10)
 
-        self.update()
+        self._request_menu_bar_view_redraw()
 
-        if self._state == HIDDEN and abs(self._cur_w - PILL_W_IDLE) < 0.3:
+        if self._state == HIDDEN:
             self._timer.stop()
-
-    def paintEvent(self, _ev):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        pw = self._cur_w
-        ph = self._cur_h
-        px = (WINDOW_W - pw) / 2
-        py = (WINDOW_H - ph) / 2
-        cx = WINDOW_W / 2
-        cy = WINDOW_H / 2
-        r  = ph / 2
-
-        pill = QPainterPath()
-        pill.addRoundedRect(QRectF(px, py, pw, ph), r, r)
-
-        # Use theme manager for background and border
-        fill_alpha = 50 if self._state == HIDDEN else 240
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(self._theme_manager.create_background_brush(px, py, ph, fill_alpha))
-        p.drawPath(pill)
-
-        # Use theme manager for border
-        p.setPen(self._theme_manager.create_border_pen(px, py, pw, ph, 0.0))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawPath(pill)
-
-        if self._state != HIDDEN:
-            p.setClipPath(pill)
-            total_w = (NUM_BARS - 1) * BAR_GAP + BAR_W
-            start_x = cx - total_w / 2
-
-            for i in range(NUM_BARS):
-                bx = start_x + i * BAR_GAP
-                bh = max(BAR_MIN_H, self._bar_h[i])
-                by = cy - bh / 2
-
-                # Calculate normalized bar height factor (0.0 to 1.0)
-                bar_height_factor = (bh - BAR_MIN_H) / (BAR_MAX_H - BAR_MIN_H) if BAR_MAX_H > BAR_MIN_H else 0
-
-                # Use voice intensity for dynamic coloring
-                voice_intensity = self._voice_smooth
-
-                # Force strict monochrome bars. No hue, no gradient, no frequency tint.
-                color = bar_color_for_draw(
-                    voice_intensity=voice_intensity,
-                    bar_height_factor=bar_height_factor,
-                )
-
-                # Soft white halo under each bar for a cleaner premium look.
-                glow_alpha = max(56, min(120, int(color.alpha() * 0.42)))
-                glow_color = QColor(255, 255, 255, glow_alpha)
-                glow_w = BAR_W + 1.0
-                glow_h = bh + 1.0
-
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(glow_color))
-                p.drawRoundedRect(
-                    QRectF(bx - glow_w / 2, cy - glow_h / 2, glow_w, glow_h),
-                    BAR_R + 0.35,
-                    BAR_R + 0.35,
-                )
-
-                p.setBrush(QBrush(color))
-                p.drawRoundedRect(
-                    QRectF(bx - BAR_W / 2, by, BAR_W, bh), BAR_R, BAR_R
-                )
-
-            p.setClipping(False)
-
-        p.end()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -589,5 +587,5 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    hud = PillHUD()
+    hud = MenuBarWaveformController()
     sys.exit(app.exec())

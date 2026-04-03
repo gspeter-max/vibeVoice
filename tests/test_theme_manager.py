@@ -79,20 +79,17 @@ def test_bar_colors_are_premium_white():
 
 
 def test_hud_waveform_is_dense_and_compact():
-    """Verify the waveform uses many thin bars while fitting inside the pill."""
-    assert hud.NUM_BARS == 14
-    assert hud.PILL_W_ACTIVE <= 126
-    assert hud.BAR_W <= 1.5
-    assert hud.BAR_GAP <= 4.0
+    """Verify the waveform is compact enough for the menu bar."""
+    assert hud.NUM_BARS == 9
+    assert hud.STATUS_ITEM_W <= 64
+    assert hud.STATUS_ITEM_H <= 22
+    assert hud.BAR_W <= 2.0
+    assert hud.BAR_GAP <= 2.5
+    assert hud.BAR_MAX_H >= 15.0
+    assert hud.BAR_MIN_H >= 5.0
 
-    total_waveform_width = (hud.NUM_BARS - 1) * hud.BAR_GAP + hud.BAR_W
-    assert total_waveform_width < hud.PILL_W_ACTIVE * 0.50
-
-
-def test_hud_is_anchored_to_top_center():
-    """Verify HUD contract says it is anchored at the top."""
-    assert hud.HUD_VERTICAL_ANCHOR == "top"
-    assert hud.HUD_TOP_MARGIN >= 8
+    total_waveform_width = hud.NUM_BARS * hud.BAR_W + (hud.NUM_BARS - 1) * hud.BAR_GAP
+    assert total_waveform_width < hud.STATUS_ITEM_W
 
 
 def test_hud_declares_monochrome_bar_mode():
@@ -101,11 +98,11 @@ def test_hud_declares_monochrome_bar_mode():
 
 
 def test_hud_runtime_signature_mentions_monochrome():
-    """Verify the HUD startup signature advertises the monochrome renderer."""
+    """Verify the HUD startup signature advertises the menu-bar renderer."""
     signature = hud.runtime_signature()
     assert "monochrome" in signature
-    assert "anchor=top" in signature
-    assert "bars=14" in signature
+    assert "anchor=menu-bar" in signature
+    assert "bars=9" in signature
     assert "wave=chaotic-zigzag" in signature
 
 
@@ -134,3 +131,22 @@ def test_hud_bar_color_for_draw_is_strict_white():
     assert c1.alpha() <= c2.alpha() <= c3.alpha()
     assert c1.alpha() >= 248
     assert c3.alpha() >= 254
+
+
+def test_menu_bar_waveform_layout_is_centered():
+    """Verify menu-bar waveform bars are centered within the status slot."""
+    layout = hud.compute_menu_bar_waveform_layout(
+        status_width=hud.STATUS_ITEM_W,
+        status_height=hud.STATUS_ITEM_H,
+        num_bars=hud.NUM_BARS,
+        bar_width=hud.BAR_W,
+        bar_gap=hud.BAR_GAP,
+        bar_height=hud.BAR_MAX_H,
+    )
+
+    assert len(layout) == hud.NUM_BARS
+    first = layout[0]
+    last = layout[-1]
+    center = hud.STATUS_ITEM_W / 2
+    assert abs((first["x"] + last["x"] + last["width"]) / 2 - center) < 0.6
+    assert all(abs(item["y"] - (hud.STATUS_ITEM_H - hud.BAR_MAX_H) / 2) < 0.6 for item in layout)
