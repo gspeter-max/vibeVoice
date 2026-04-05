@@ -85,10 +85,10 @@ except ImportError:
 SOCKET_PATH     = "/tmp/parakeet.sock"
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
 VOL_PORT        = 57235
-HOLD_THRESHOLD  = 0.4
+RECORDING_BUTTON_HOLD_THRESHOLD  = 0.4
 VAD_MODEL_PATH  = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
 VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", "0.50"))
-VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.75"))
+VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.95"))
 VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "6.0"))
 VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
 VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
@@ -639,7 +639,6 @@ class Ear:
         print(f"[Ear] 🔵 Right CMD pressed - on_press() called", flush=True)
 
         if self._toggle_active:
-            print(f'===========================toggle is active============================')
             self._toggle_active = False
             self._stop_and_send(stop_session=True)
             return
@@ -673,14 +672,22 @@ class Ear:
         if not _is_right_cmd(key):
             return
 
-        if self._toggle_active:
+        if self._toggle_active: 
             return
 
         with self._lock:
             if not self.is_recording:
-                return
-        print(f"\r[Ear] ⏹️  Right CMD released - finalizing now", flush=True)
-        self._stop_and_send(stop_session=True)
+                return 
+
+        from_first_cmd_press_to_release_time_diff = time.time() - self._cmd_press_time
+        if from_first_cmd_press_to_release_time_diff >= RECORDING_BUTTON_HOLD_THRESHOLD:
+            # if user is pressin the cmd button for long time then from first cmd press to release time it large 
+            # so if that is small that means the user is doing togglning 
+            print(f"\r[Ear] ⏹️  Right CMD released - finalizing now", flush=True)
+            self._stop_and_send(stop_session=True)
+        else:
+            self._toggle_active = True
+            print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
 
     def on_mouse_click(self, x, y, button, pressed):
         """

@@ -49,6 +49,7 @@ export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export KMP_DUPLICATE_LIB_OK=TRUE
 # Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this
 export QT_MAC_WANTS_LAYER=1
+
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
 VENV_PYTHON="./.venv/bin/python"
 

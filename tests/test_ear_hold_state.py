@@ -1,4 +1,5 @@
 import pytest
+import time
 import sys
 import os
 from unittest.mock import Mock, patch
@@ -110,12 +111,54 @@ def test_key_release_finalizes_immediately_when_recording():
     """Right CMD release should finalize now (no extra silence wait)."""
     ear = Ear()
     ear.is_recording = True
+    ear._cmd_press_time = time.time() - 1.0
 
     with patch("src.ear._is_right_cmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
     mock_stop.assert_called_once_with(stop_session=True)
+
+
+def test_quick_cmd_tap_enters_toggle_mode_without_stopping():
+    """Short Right CMD tap should keep recording active and arm toggle mode."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._cmd_press_time = time.time()
+
+    with patch("src.ear._is_right_cmd", return_value=True), \
+         patch.object(ear, "_stop_and_send") as mock_stop:
+        ear.on_release(object())
+
+    assert ear._toggle_active is True
+    mock_stop.assert_not_called()
+
+
+def test_second_cmd_press_stops_recording_when_toggle_active():
+    """Second Right CMD press should stop an active toggle recording."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._toggle_active = True
+
+    with patch("src.ear._is_right_cmd", return_value=True), \
+         patch.object(ear, "_stop_and_send") as mock_stop:
+        ear.on_press(object())
+
+    assert ear._toggle_active is False
+    mock_stop.assert_called_once_with(stop_session=True)
+
+
+def test_key_release_does_nothing_when_toggle_already_active():
+    """Releasing Right CMD should be ignored once toggle mode is active."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._toggle_active = True
+
+    with patch("src.ear._is_right_cmd", return_value=True), \
+         patch.object(ear, "_stop_and_send") as mock_stop:
+        ear.on_release(object())
+
+    mock_stop.assert_not_called()
 
 
 def test_silence_boundary_splits_chunk_while_recording_continues():
