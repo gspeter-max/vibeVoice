@@ -26,11 +26,10 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
-    brain.vad_engine = None
 
     conn = MockConn(sample_audio_bytes)
 
-    with patch("brain.send_hud"), patch("brain.paste_instantly") as mock_paste:
+    with patch("brain.send_hud") as mock_hud, patch("brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
     mock_backend.transcribe.assert_called_once()
@@ -39,6 +38,7 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     assert isinstance(args[1], np.ndarray)
     assert args[1].dtype == np.float32
     mock_paste.assert_called_once_with("hello world ")
+    assert any(call.args[0] == "done" for call in mock_hud.call_args_list)
 
 
 def test_handle_connection_switch_model_command():
@@ -49,7 +49,6 @@ def test_handle_connection_switch_model_command():
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
-    brain.vad_engine = None
 
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
@@ -67,7 +66,6 @@ def test_handle_connection_skips_too_short_audio():
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
-    brain.vad_engine = None
 
     short_audio = b"\x00\x00" * 1600
     conn = MockConn(short_audio)

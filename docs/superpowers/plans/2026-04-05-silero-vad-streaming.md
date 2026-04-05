@@ -25,6 +25,12 @@
 
 The new `src/vad_segmenter.py` module should also own the current Silero ONNX wrapper that lives in `brain.py` today, so `ear.py` can import the VAD engine without depending on the transcription server.
 
+Add this constant near the other `ear.py` settings:
+
+```python
+VAD_SILENCE_TIMEOUT = 0.4   # seconds of silence before utterance closes
+```
+
 ## Design Choices
 
 The recommended approach is to gate speech in `ear.py` rather than in `brain.py`.
@@ -151,6 +157,7 @@ self._utterance_gate = SileroUtteranceGate(
     vad_engine=self._vad_engine,
     silence_timeout_s=VAD_SILENCE_TIMEOUT,
 )
+self._finalize_requested = False
 
 def _audio_callback(self, in_data, frame_count, time_info, status):
     audio_data = np.frombuffer(in_data, dtype=np.int16)
@@ -162,8 +169,8 @@ def _audio_callback(self, in_data, frame_count, time_info, status):
 
 def _record_loop_tick(self):
     with self._lock:
-        recording = self.is_recording
-    if recording and self._utterance_gate.should_finalize(time.time()):
+        finalize_requested = self._finalize_requested
+    if finalize_requested and self._utterance_gate.should_finalize(time.time()):
         self._stop_and_send()
 
 def _stop_and_send(self):
@@ -171,6 +178,7 @@ def _stop_and_send(self):
         if not self.is_recording:
             return
         self.is_recording = False
+        self._finalize_requested = False
     utterance = self._utterance_gate.flush()
     if utterance:
         threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
@@ -186,6 +194,17 @@ def _send_utterance_to_brain(self, utterance_bytes: bytes):
     client.sendall(utterance_bytes)
     client.shutdown(socket.SHUT_WR)
     client.close()
+```
+
+On button release, do not transcribe immediately. Mark the finalize request and let the VAD gate close the utterance only after silence has been stable long enough:
+
+```python
+def on_release(self, key):
+    ...
+    with self._lock:
+        if not self.is_recording:
+            return
+        self._finalize_requested = True
 ```
 
 - [ ] **Step 4: Run the test and verify it passes**
@@ -291,25 +310,24 @@ def handle_connection(conn):
     if total_bytes == 0:
         return
 
-    if total_bytes < 256:
-        try:
-            text = bytes(command_probe).decode("utf-8").strip()
-            if text.startswith("CMD_SWITCH_MODEL:"):
-                new_model = text.split(":", 1)[1]
-                print(f"\n[Brain] 🔄 Switch model: {new_model}")
+    try:
+        text = bytes(command_probe).decode("utf-8").strip()
+        if text.startswith("CMD_SWITCH_MODEL:"):
+            new_model = text.split(":", 1)[1]
+            print(f"\n[Brain] 🔄 Switch model: {new_model}")
+            sys.stdout.flush()
+            with backend_lock:
+                import gc
+                backend_info["model"] = None
+                gc.collect()
+                nb, nm = load_backend(new_model)
+                backend_info["backend"] = nb
+                backend_info["model"] = nm
+                print(f"[Brain] ✅ Switched to {new_model}")
                 sys.stdout.flush()
-                with backend_lock:
-                    import gc
-                    backend_info["model"] = None
-                    gc.collect()
-                    nb, nm = load_backend(new_model)
-                    backend_info["backend"] = nb
-                    backend_info["model"] = nm
-                    print(f"[Brain] ✅ Switched to {new_model}")
-                    sys.stdout.flush()
-        except UnicodeDecodeError:
-            pass
-        return
+            return
+    except UnicodeDecodeError:
+        pass
 
     raw_audio = bytes(pending_audio)
     if backend is None or model is None:

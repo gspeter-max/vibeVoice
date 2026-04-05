@@ -63,3 +63,21 @@ def test_menu_bar_bar_height_is_taller():
 
 def test_menu_bar_vertical_shift_is_centered():
     assert hud.STATUS_ITEM_VERTICAL_SHIFT == 0.0
+
+
+def test_hud_ignores_transcript_payloads_and_keeps_status_only():
+    hud_widget = hud.MenuBarWaveformController.__new__(hud.MenuBarWaveformController)
+    hud_widget._state = hud.HIDDEN
+    hud_widget._request_menu_bar_view_redraw = lambda: None
+    hud_widget.show_listening = lambda: None
+    hud_widget.show_done = lambda: None
+    hud_widget.hide_hud = lambda: None
+    hud_widget.show_thinking = lambda: None
+    hud_widget.show_processing = lambda: None
+
+    hud.MenuBarWaveformController._on_command(hud_widget, "draft:Hello World")
+    hud.MenuBarWaveformController._on_command(hud_widget, "final:Hello World")
+
+    assert hud_widget._state == hud.HIDDEN
+    assert not hasattr(hud_widget, "_draft_text")
+    assert not hasattr(hud_widget, "_final_text")

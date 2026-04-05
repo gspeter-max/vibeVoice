@@ -28,7 +28,7 @@ import random
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
 import objc
-from PySide6.QtCore import QObject, QTimer, QThread, Signal
+from PySide6.QtCore import QObject, QTimer, QThread, Signal, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
@@ -138,7 +138,7 @@ def compute_menu_bar_waveform_layout(
     return layout
 
 
-class MenuBarWaveformView(NSView):
+class MenuBarWaveformView(NSView if NSView is not None else object):
     def initWithFrame_(self, frame):
         self = objc.super(MenuBarWaveformView, self).initWithFrame_(frame)
         if self is None:
@@ -466,13 +466,21 @@ class MenuBarWaveformController(QObject):
 
     # ── IPC dispatcher ────────────────────────────────────────────────────
     def _on_command(self, cmd):
-        c = cmd.strip().lower()
+        c = cmd.strip()
         print(f"[HUD] ← {c}", flush=True)
-        if   c == "listen":    self.show_listening()
-        elif c == "thinking":  self.show_thinking()
-        elif c == "process":   self.show_processing()
-        elif c == "done":      self.show_done()
-        elif c == "hide":      self.hide_hud()
+        lowered = c.lower()
+        if lowered.startswith("draft:") or lowered.startswith("final:"):
+            return
+        if lowered == "listen":
+            self.show_listening()
+        elif lowered == "thinking":
+            self.show_thinking()
+        elif lowered == "process":
+            self.show_processing()
+        elif lowered == "done":
+            self.show_done()
+        elif lowered == "hide":
+            self.hide_hud()
         else:
             print(f"[HUD] Unknown command: {c}", flush=True)
 

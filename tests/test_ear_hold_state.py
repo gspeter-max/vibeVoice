@@ -18,6 +18,7 @@ sys.modules['pynput.mouse'].Button = MockButton()
 # Mock pyaudio
 class MockPyAudio:
     paInt16 = 16
+    paContinue = 0
     class PyAudio:
         def get_default_input_device_info(self):
             return {"index": 0}
@@ -35,6 +36,17 @@ def patch_open_mic_stream(monkeypatch):
     def dummy_open_stream(self):
         pass
     monkeypatch.setattr("src.ear.Ear._open_mic_stream", dummy_open_stream)
+
+
+@pytest.fixture(autouse=True)
+def patch_silero_vad(monkeypatch):
+    """Patch SileroVAD so Ear tests do not load the real ONNX model."""
+    def dummy_vad(*_args, **_kwargs):
+        return Mock(
+            reset=lambda: None,
+            is_speech=lambda *_a, **_k: 1.0,
+        )
+    monkeypatch.setattr("src.ear.SileroVAD", dummy_vad)
 
 def test_ear_has_hold_state_variables():
     """Test that Ear initializes with hold-related state variables."""
@@ -79,6 +91,177 @@ def test_mouse_release_stops_hold_timer():
     # Release
     ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
     assert ear._is_holding is False
+
+
+def test_mouse_release_finalizes_immediately_when_recording():
+    """Test that releasing while recording finalizes immediately."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._recording_from_hold = True
+
+    with patch.object(ear, "_stop_and_send") as mock_stop:
+        ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
+
+    assert ear._is_holding is False
+    mock_stop.assert_called_once_with(stop_session=True)
+
+
+def test_key_release_finalizes_immediately_when_recording():
+    """Right CMD release should finalize now (no extra silence wait)."""
+    ear = Ear()
+    ear.is_recording = True
+
+    with patch("src.ear._is_right_cmd", return_value=True), \
+         patch.object(ear, "_stop_and_send") as mock_stop:
+        ear.on_release(object())
+
+    mock_stop.assert_called_once_with(stop_session=True)
+
+
+def test_silence_boundary_splits_chunk_while_recording_continues():
+    """Test that a silence boundary sends a chunk but keeps recording active."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._total_frames = 8
+
+    mock_gate = Mock()
+    mock_gate.has_speech_started.return_value = True
+    mock_gate.should_finalize.return_value = True
+    mock_gate.silence_elapsed.return_value = 0.2
+    mock_gate.flush.return_value = b"\x01\x00" * 8
+    ear._utterance_gate = mock_gate
+    ear._current_session_id = "session123"
+
+    with patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send, \
+         patch.object(ear, "_commit_recording_session") as mock_commit, \
+         patch.object(ear, "_send_hud"):
+        ear._record_loop_tick()
+
+    mock_send.assert_called_once()
+    mock_commit.assert_not_called()
+    assert ear.is_recording is True
+    assert ear._total_frames == 0
+
+
+def test_audio_callback_uses_conditioned_audio_for_vad():
+    """VAD should receive its own conditioned signal, not blindly raw bytes."""
+    ear = Ear()
+    ear.is_recording = True
+    ear.vad_gain_multiplier = 4.0
+
+    raw = (b"\x01\x00" * 4)
+    gate = Mock()
+    gate.push.return_value = False
+    ear._utterance_gate = gate
+
+    ear._audio_callback(raw, frame_count=4, time_info=None, status=None)
+
+    gate.push.assert_called_once()
+    assert gate.push.call_args.args[0] != raw
+
+
+def test_prepare_vad_chunk_does_not_amplify_true_silence():
+    """Near-silent chunks should remain effectively silent for VAD."""
+    ear = Ear()
+    silence = b"\x00\x00" * 8
+
+    prepared = ear._prepare_vad_chunk(silence)
+
+    assert prepared == silence
+
+
+def test_prepare_vad_chunk_amplifies_quiet_non_silent_audio():
+    """Quiet speech-like chunks should be lifted before VAD sees them."""
+    ear = Ear()
+    ear.vad_gain_multiplier = 4.0
+    raw = b"\x01\x00" * 8
+
+    prepared = ear._prepare_vad_chunk(raw)
+
+    assert prepared != raw
+
+
+def test_flush_current_chunk_boosts_before_sending_to_brain():
+    """Test that audio sent to Brain is boosted while VAD stays raw."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._total_frames = 4
+    ear.gain_multiplier = 2.0
+
+    raw = b"\x01\x00" * 4
+    gate = Mock()
+    gate.has_speech_started.return_value = True
+    gate.silence_elapsed.return_value = 0.2
+    gate.flush.return_value = raw
+    ear._utterance_gate = gate
+    ear._current_session_id = "session123"
+
+    with patch.object(ear, "_send_audio_chunk_to_brain") as mock_send, \
+         patch.object(ear, "_send_hud"):
+        ear._flush_current_chunk(stop_session=True)
+
+    sent_bytes = mock_send.call_args.args[0]
+    assert sent_bytes == b"\x02\x00" * 4
+
+
+def test_flush_current_chunk_sends_commit_even_if_last_chunk_empty():
+    """If final flush is empty, Ear must still commit already-sent chunks."""
+    ear = Ear()
+    ear.is_recording = True
+    ear._current_session_id = "session123"
+    gate = Mock()
+    gate.silence_elapsed.return_value = 0.0
+    gate.flush.return_value = b""
+    ear._utterance_gate = gate
+
+    with patch.object(ear, "_commit_recording_session", return_value=True) as mock_commit:
+        sent = ear._flush_current_chunk(stop_session=True)
+
+    assert sent is False
+    mock_commit.assert_called_once()
+    assert ear._current_session_id is None
+    assert ear._chunk_seq == 0
+
+
+def test_audio_chunk_send_uses_session_header_and_sequence():
+    """Test that Ear formats chunk payloads with session id and chunk sequence."""
+    ear = Ear()
+    ear._current_session_id = "session123"
+    ear._chunk_seq = 7
+
+    captured = {}
+
+    class FakeSocket:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _addr):
+            return None
+
+        def sendall(self, data):
+            captured["data"] = data
+
+        def shutdown(self, _how):
+            return None
+
+        def close(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+    with patch("src.ear.socket.socket", return_value=FakeSocket()):
+        sent = ear._send_audio_chunk_to_brain(b"\x01\x00" * 2)
+
+    assert sent is True
+    assert captured["data"].startswith(b"CMD_AUDIO_CHUNK:session123:7\n\n")
+    assert captured["data"].endswith(b"\x01\x00" * 2)
 
 
 def test_only_right_button_triggers_hold():

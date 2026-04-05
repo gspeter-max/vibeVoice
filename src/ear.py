@@ -1,24 +1,26 @@
 """
 ear.py — Parakeet Flow v2 (Streaming Edition)
 ===============================================
-Streams audio chunks to brain.py in real-time over a persistent socket.
-Brain accumulates and transcribes the moment the stream ends.
+Captures microphone audio and splits speech into chunks on in-recording silence.
+Each chunk is sent to brain.py immediately while recording continues.
 
-Hold RIGHT CMD → speak → release → text appears instantly.
+Hold RIGHT CMD → speak → silence splits chunk → release → final chunk + commit.
 """
 
 import os
 import sys
 import socket
-import subprocess
 import threading
 import time
+import uuid
 import pyaudio
 import math
 import select
 import termios
 import tty
 import numpy as np
+
+from vad_segmenter import SileroVAD, SileroUtteranceGate
 
 try:
     from pynput import keyboard, mouse
@@ -84,6 +86,13 @@ SOCKET_PATH     = "/tmp/parakeet.sock"
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
 VOL_PORT        = 57235
 HOLD_THRESHOLD  = 0.4
+VAD_MODEL_PATH  = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
+VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", "0.50"))
+VAD_SILENCE_TIMEOUT = float(os.environ.get("VAD_SILENCE_TIMEOUT", "6.0"))
+VAD_GAIN_MULTIPLIER = float(os.environ.get("VAD_GAIN_MULTIPLIER", "6.0"))
+VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
+VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
+VAD_STATUS_LOG_INTERVAL = 0.5
 
 _RCMD_VK = 54
 
@@ -154,7 +163,7 @@ def run_self_test():
                     continue
                 else:
                     print(f"\r❌ Self-test failed: Socket not found at {SOCKET_PATH}\n", end="", flush=True)
-                    print("   Is Brain running? Check logs/brain.log\n", end="", flush=True)
+                    print("   Is Brain running? Check this terminal for Brain output.\n", end="", flush=True)
                     return
 
             client.connect(SOCKET_PATH)
@@ -171,7 +180,7 @@ def run_self_test():
                 time.sleep(retry_delay)
             else:
                 print(f"\r❌ Self-test failed: Brain not accepting connections\n", end="", flush=True)
-                print("   Brain might be loading model. Check logs/brain.log\n", end="", flush=True)
+                print("   Brain might be loading model. Check this terminal for Brain output.\n", end="", flush=True)
 
         except Exception as e:
             print(f"\r❌ Self-test failed: {e}\n", end="", flush=True)
@@ -203,34 +212,6 @@ class TerminalMenu(threading.Thread):
                         break
         finally:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, old_settings)
-
-    def stop(self):
-        self._stop.set()
-
-
-class BrainOutputTailer(threading.Thread):
-    def __init__(self, log_path: str):
-        super().__init__(daemon=True)
-        self.log_path = log_path
-        self._stop = threading.Event()
-
-    def run(self):
-        for _ in range(30):
-            if os.path.exists(self.log_path):
-                break
-            time.sleep(0.5)
-        else:
-            return
-        with open(self.log_path, "r") as f:
-            f.seek(0, 2)
-            while not self._stop.is_set():
-                line = f.readline()
-                if line:
-                    stripped = line.rstrip()
-                    if stripped:
-                        print(f"\r  🧠  {stripped}", flush=True)
-                else:
-                    time.sleep(0.05)
 
     def stop(self):
         self._stop.set()
@@ -273,8 +254,11 @@ class Ear:
         self._lock = threading.Lock()
         self.last_rms = 0.0
         self.gain_multiplier = 2.5 # Increased from 1.1 to fix quiet mic issues
+        self.vad_gain_multiplier = VAD_GAIN_MULTIPLIER
         self._total_frames = 0
         self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
+        self._last_raw_rms = 0.0
+        self._last_vad_rms = 0.0
 
         # Enable macOS Voice Isolation if requested
         if os.environ.get("VOICE_ISOLATION", "0") == "1":
@@ -298,9 +282,35 @@ class Ear:
         self._is_holding = False              # Currently holding mouse button
         self._recording_from_hold = False     # Recording started from mouse hold
 
-        # ★ STREAMING: persistent socket connection to brain
-        self._brain_sock = None
-        self._brain_sock_lock = threading.Lock()
+        self._chunk_speech_logged = False
+        self._silence_pending_logged = False
+        self._vad_state_log_time = 0.0
+        self._vad_no_speech_warned = False
+        self._current_session_id = None
+        self._chunk_seq = 0
+        self._chunk_started_at = 0.0
+
+        # ★ VAD: buffer full utterances locally before sending to Brain
+        try:
+            self._vad_engine = SileroVAD(VAD_MODEL_PATH)
+            print("[Ear] Silero VAD loaded ✓", flush=True)
+        except Exception as e:
+            self._vad_engine = None
+            print(f"[Ear] ⚠️ Silero VAD load failed: {e} — using buffer-only fallback", flush=True)
+
+        self._utterance_gate = SileroUtteranceGate(
+            self._vad_engine,
+            voice_threshold=VAD_THRESHOLD,
+            silence_timeout_s=VAD_SILENCE_TIMEOUT,
+            energy_threshold=VAD_ENERGY_THRESHOLD,
+            energy_ratio=VAD_ENERGY_RATIO,
+        )
+        print(
+            f"[Ear] VAD config: threshold={VAD_THRESHOLD:.2f}, silence_timeout={VAD_SILENCE_TIMEOUT:.2f}s, "
+            f"vad_gain={self.vad_gain_multiplier:.1f}x, energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
+            f"energy_ratio={VAD_ENERGY_RATIO:.2f}",
+            flush=True,
+        )
 
         # ★ ALWAYS LISTENING MODE: Open stream once at startup
         self.stream = None
@@ -308,23 +318,14 @@ class Ear:
         print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
 
     def _send_hud(self, cmd):
-        print(f"[Ear] 📤 _send_hud() called with cmd='{cmd}'", flush=True)
         try:
-            print(f"[Ear] 📤 Creating socket...", flush=True)
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print(f"[Ear] 📤 Setting timeout...", flush=True)
             s.settimeout(0.2)
-            print(f"[Ear] 📤 Connecting to 127.0.0.1:57234...", flush=True)
             s.connect(('127.0.0.1', 57234))
-            print(f"[Ear] 📤 Sending data...", flush=True)
             s.sendall(cmd.encode())
-            print(f"[Ear] 📤 Closing socket...", flush=True)
             s.close()
-            print(f"[Ear] ✅ HUD command sent successfully", flush=True)
         except Exception as e:
-            print(f"[Ear] ❌ Failed to send HUD command: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            print(f"[Ear] ❌ HUD command '{cmd}' failed: {e}", flush=True)
 
     def _start_volume_sender(self):
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -349,59 +350,149 @@ class Ear:
         threading.Thread(target=_sender, daemon=True).start()
         print(f"[Ear] Volume sender thread started", flush=True)
 
-    # ★ STREAMING: open a socket to brain BEFORE recording starts
+    def _send_utterance_to_brain(self, utterance_bytes: bytes):
+        """Send one complete utterance to Brain and close the socket."""
+        if not utterance_bytes:
+            return False
+
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5.0)
+                client.connect(SOCKET_PATH)
+                client.sendall(utterance_bytes)
+                client.shutdown(socket.SHUT_WR)
+            print(f"[Ear] 📤 Utterance sent to Brain ({len(utterance_bytes)} bytes)", flush=True)
+            return True
+        except Exception as e:
+            print(f"\r❌ Failed to send utterance to Brain: {e}\n", flush=True)
+            return False
+
+    def _begin_recording_session(self):
+        self._current_session_id = uuid.uuid4().hex
+        self._chunk_seq = 0
+        self._chunk_started_at = time.time()
+
+    def _send_audio_chunk_to_brain(self, utterance_bytes: bytes) -> bool:
+        if not utterance_bytes or not self._current_session_id:
+            return False
+
+        session_id = self._current_session_id
+        seq = self._chunk_seq
+        self._chunk_seq += 1
+        header = f"CMD_AUDIO_CHUNK:{session_id}:{seq}\n\n".encode("utf-8")
+
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5.0)
+                client.connect(SOCKET_PATH)
+                client.sendall(header + utterance_bytes)
+                client.shutdown(socket.SHUT_WR)
+            print(f"[Ear] 📤 Chunk {seq} sent to Brain ({len(utterance_bytes)} bytes)", flush=True)
+            return True
+        except Exception as e:
+            print(f"\r❌ Failed to send chunk to Brain: {e}\n", flush=True)
+            return False
+
+    def _commit_recording_session(self) -> bool:
+        if not self._current_session_id:
+            return False
+
+        session_id = self._current_session_id
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5.0)
+                client.connect(SOCKET_PATH)
+                client.sendall(f"CMD_SESSION_COMMIT:{session_id}".encode("utf-8"))
+                client.shutdown(socket.SHUT_WR)
+            print(f"[Ear] ✅ Commit sent for session {session_id}", flush=True)
+            return True
+        except Exception as e:
+            print(f"\r❌ Failed to commit session: {e}\n", flush=True)
+            return False
+
+    def _boost_pcm16_bytes(self, pcm16_bytes: bytes) -> bytes:
+        if not pcm16_bytes:
+            return pcm16_bytes
+        if len(pcm16_bytes) % 2:
+            pcm16_bytes = pcm16_bytes[:-1]
+        audio = np.frombuffer(pcm16_bytes, dtype=np.int16).astype(np.float32)
+        boosted = (audio * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
+        return boosted.tobytes()
+
+    def _prepare_vad_chunk(self, pcm16_bytes: bytes) -> bytes:
+        if not pcm16_bytes:
+            return pcm16_bytes
+        if len(pcm16_bytes) % 2:
+            pcm16_bytes = pcm16_bytes[:-1]
+
+        self._last_raw_rms = get_rms(pcm16_bytes)
+        if self.vad_gain_multiplier == 1.0:
+            self._last_vad_rms = self._last_raw_rms
+            return pcm16_bytes
+
+        audio = np.frombuffer(pcm16_bytes, dtype=np.int16).astype(np.float32)
+        conditioned = (audio * self.vad_gain_multiplier).clip(-32768, 32767).astype(np.int16)
+        conditioned_bytes = conditioned.tobytes()
+        self._last_vad_rms = get_rms(conditioned_bytes)
+        return conditioned_bytes
+
+    def _reset_chunk_tracking(self):
+        self._chunk_speech_logged = False
+        self._silence_pending_logged = False
+        self._vad_no_speech_warned = False
+
+    def _flush_current_chunk(self, *, stop_session: bool) -> bool:
+        now = time.time()
+        silence_elapsed = self._utterance_gate.silence_elapsed(now)
+        had_session = bool(self._current_session_id)
+
+        with self._lock:
+            if not self.is_recording:
+                return False
+            total = self._total_frames
+            if stop_session:
+                self.is_recording = False
+                self._recording_from_hold = False
+                self._chunk_started_at = 0.0
+            self._total_frames = 0
+            self.last_rms = 0.0
+            self._reset_chunk_tracking()
+
+        utterance = self._utterance_gate.flush()
+        if not utterance:
+            if stop_session:
+                print("[Ear] 🔇 No speech captured; stopping recording", flush=True)
+                if had_session:
+                    self._commit_recording_session()
+                self._current_session_id = None
+                self._chunk_seq = 0
+            return False
+
+        utterance_for_brain = self._boost_pcm16_bytes(utterance)
+
+        duration = (total * CHUNK) / RATE
+        if stop_session:
+            print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
+            threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
+        else:
+            print(
+                f"\r[Ear] ✂️  Silence boundary hit ({silence_elapsed:.2f}s) — sending chunk "
+                f"{duration:.1f}s ({total} chunks)",
+                flush=True,
+            )
+
+        sent = self._send_audio_chunk_to_brain(utterance_for_brain)
+        if stop_session:
+            self._commit_recording_session()
+            self._current_session_id = None
+            self._chunk_seq = 0
+        else:
+            self._chunk_started_at = time.time()
+        return sent
+
     def _open_brain_stream(self) -> bool:
-        """Open a persistent socket to brain for streaming chunks."""
-        with self._brain_sock_lock:
-            if self._brain_sock is not None:
-                return True
-            if not os.path.exists(SOCKET_PATH):
-                print(f"\r❌ Brain socket not found\n", flush=True)
-                return False
-            try:
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect(SOCKET_PATH)
-                self._brain_sock = sock
-                return True
-            except Exception as e:
-                print(f"\r❌ Brain connect failed: {e}\n", flush=True)
-                return False
-
-    # ★ STREAMING: send chunk immediately to brain
-    def _stream_chunk_to_brain(self, chunk_bytes: bytes):
-        with self._brain_sock_lock:
-            if self._brain_sock is None:
-                return
-            try:
-                self._brain_sock.sendall(chunk_bytes)
-            except (BrokenPipeError, ConnectionResetError):
-                # Brain closed early — stop streaming silently
-                print(f"\r⚠️  Brain disconnected — will transcribe on release\n", flush=True)
-                try:
-                    self._brain_sock.close()
-                except Exception:
-                    pass
-                self._brain_sock = None
-            except Exception as e:
-                print(f"\r❌ Stream send error: {e}\n", flush=True)
-                try:
-                    self._brain_sock.close()
-                except Exception:
-                    pass
-                self._brain_sock = None
-
-    # ★ STREAMING: close socket = signal brain to transcribe
-    def _close_brain_stream(self):
-        with self._brain_sock_lock:
-            if self._brain_sock is None:
-                return
-            try:
-                self._brain_sock.shutdown(socket.SHUT_WR)
-                self._brain_sock.close()
-            except Exception:
-                pass
-            self._brain_sock = None
+        """Compatibility stub kept for older tests and callers."""
+        return True
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         if status:
@@ -420,8 +511,31 @@ class Ear:
             # ★ FREQUENCY ANALYSIS: Extract bass/mid/treble bands using FFT
             self.last_frequency_bands = self._analyze_frequency_bands(boosted)
 
-            # ★ STREAMING: send each chunk immediately
-            self._stream_chunk_to_brain(chunk_bytes)
+            # ★ VAD BUFFERING: keep the full utterance locally until silence closes it
+            now = time.time()
+            vad_bytes = self._prepare_vad_chunk(in_data)
+            speech_now = self._utterance_gate.push(vad_bytes, now=now)
+            if speech_now and not self._chunk_speech_logged:
+                self._chunk_speech_logged = True
+                self._silence_pending_logged = False
+                print("[Ear] 🗣️  VAD speech detected", flush=True)
+            if now - self._vad_state_log_time >= VAD_STATUS_LOG_INTERVAL:
+                try:
+                    score = self._utterance_gate.last_score()
+                    energy = self._utterance_gate.last_energy()
+                    dynamic_threshold = self._utterance_gate.last_dynamic_threshold()
+                    started = self._utterance_gate.has_speech_started()
+                    silence_elapsed = self._utterance_gate.silence_elapsed(now) if started else 0.0
+                    print(
+                        f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
+                        f"started={started} silence={silence_elapsed:.2f}s "
+                        f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
+                        f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+                self._vad_state_log_time = now
 
         return (None, pyaudio.paContinue)
 
@@ -526,7 +640,7 @@ class Ear:
 
         if self._toggle_active:
             self._toggle_active = False
-            self._stop_and_send()
+            self._stop_and_send(stop_session=True)
             return
 
         with self._lock:
@@ -534,21 +648,20 @@ class Ear:
                 print(f"[Ear] ⚠️ Already recording, ignoring press", flush=True)
                 return
 
-        print(f"[Ear] 🔵 About to open brain stream", flush=True)
-        # ★ STREAMING: open brain connection FIRST (before recording flag)
-        if not self._open_brain_stream():
-            print(f"[Ear] ❌ Failed to open brain stream, aborting", flush=True)
-            return
-
-        print(f"[Ear] 🔵 Brain stream opened successfully", flush=True)
+        print(f"[Ear] 🔵 About to start recording", flush=True)
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0
             self._total_frames = 0
+            self._chunk_speech_logged = False
+            self._silence_pending_logged = False
+            self._vad_no_speech_warned = False
+        self._utterance_gate.reset()
+        self._begin_recording_session()
 
         self._cmd_press_time = time.time()
         print("\r\n" + "─" * 50, flush=True)
-        print(f"\r🎙️  RECORDING+STREAMING ({self.active_mic_name})", flush=True)
+        print(f"\r🎙️  RECORDING ({self.active_mic_name})", flush=True)
 
         print(f"[Ear] 🔵 About to send 'listen' command to HUD", flush=True)
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
@@ -565,14 +678,8 @@ class Ear:
         with self._lock:
             if not self.is_recording:
                 return
-
-        held = time.time() - self._cmd_press_time
-
-        if held >= HOLD_THRESHOLD:
-            self._stop_and_send()
-        else:
-            self._toggle_active = True
-            print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
+        print(f"\r[Ear] ⏹️  Right CMD released - finalizing now", flush=True)
+        self._stop_and_send(stop_session=True)
 
     def on_mouse_click(self, x, y, button, pressed):
         """
@@ -614,27 +721,12 @@ class Ear:
                     if not self.is_recording:
                         self._recording_from_hold = False
                         return
-
-                # Stop recording
-                print("\r[Ear] ⏹️  Mouse released - STOPPING recording", flush=True)
-                self._stop_and_send()
+                print("\r[Ear] ⏹️  Mouse released - finalizing now", flush=True)
+                self._stop_and_send(stop_session=True)
                 self._recording_from_hold = False
 
-    def _stop_and_send(self):
-        with self._lock:
-            if not self.is_recording:
-                return
-            self.is_recording = False
-            total = self._total_frames
-
-        duration = (total * CHUNK) / RATE
-        print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
-
-        threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
-
-        # ★ STREAMING: just close the socket — brain already has all chunks
-        # This triggers brain to start transcribing immediately
-        threading.Thread(target=self._close_brain_stream, daemon=True).start()
+    def _stop_and_send(self, *, stop_session: bool = True):
+        self._flush_current_chunk(stop_session=stop_session)
 
     def record_loop(self):
         """Main recording loop.
@@ -668,21 +760,19 @@ class Ear:
             if hold_duration >= 1.0:
                 # Hold duration exceeded threshold - start recording
 
-                # Open brain connection first
-                if not self._open_brain_stream():
-                    print(f"\r[Ear] ❌ Failed to open brain stream", flush=True)
-                    with self._lock:
-                        self._is_holding = False
-                    return
-
                 with self._lock:
                     self.is_recording = True
                     self.last_rms = 0.0
                     self._total_frames = 0
                     self._recording_from_hold = True
+                    self._chunk_speech_logged = False
+                    self._silence_pending_logged = False
+                    self._vad_no_speech_warned = False
+                self._utterance_gate.reset()
+                self._begin_recording_session()
 
                 print("\r\n" + "─" * 50, flush=True)
-                print(f"\r🎙️  RECORDING+STREAMING via MOUSE HOLD ({self.active_mic_name})", flush=True)
+                print(f"\r🎙️  RECORDING via MOUSE HOLD ({self.active_mic_name})", flush=True)
 
                 threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
                 self._start_volume_sender()
@@ -692,23 +782,59 @@ class Ear:
             meter = "█" * min(int(rms * 500), 50)
             print(f"\r  Level: [{meter:<50}]", end="", flush=True)
 
+            now = time.time()
+            if (
+                self._utterance_gate.has_speech_started()
+                and self._chunk_started_at > 0.0
+            ):
+                self._stop_and_send(stop_session=False)
+                return
+
+            if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
+                silence_elapsed = self._utterance_gate.silence_elapsed(now)
+                if silence_elapsed > 0.0:
+                    self._silence_pending_logged = True
+                    print(
+                        f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VAD_SILENCE_TIMEOUT:.2f}s)",
+                        flush=True,
+                    )
+
+            if (
+                not self._utterance_gate.has_speech_started()
+                and not self._vad_no_speech_warned
+                and self._chunk_started_at > 0.0
+                and (now - self._chunk_started_at) >= 1.0
+            ):
+                try:
+                    max_score = self._utterance_gate.max_score()
+                except Exception:
+                    max_score = 0.0
+                print(
+                    f"[Ear] ⚠️  VAD has not entered speech state yet "
+                    f"(max_score={max_score:.3f}, threshold={VAD_THRESHOLD:.2f}, "
+                    f"last_energy={self._utterance_gate.last_energy():.4f}, "
+                    f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
+                    flush=True,
+                )
+                self._vad_no_speech_warned = True
+
+            if self._utterance_gate.should_finalize(now):
+                silence_elapsed = self._utterance_gate.silence_elapsed(now) if self._utterance_gate.has_speech_started() else self._utterance_gate.finalize_elapsed(now)
+                print(
+                    f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VAD_SILENCE_TIMEOUT:.2f}s); sending chunk",
+                    flush=True,
+                )
+                self._stop_and_send(stop_session=False)
+
     def cleanup(self):
-        self._close_brain_stream()
         self._close_mic_stream()
         self.p.terminate()
 
 
 def start_ear():
-    # Use repo root as base for logs/
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_path = os.path.join(base_dir, "logs", "brain.log")
-
     p_temp = pyaudio.PyAudio()
     selected_mic_index = select_mic(p_temp)
     p_temp.terminate()
-
-    tailer = BrainOutputTailer(log_path)
-    tailer.start()
 
     menu = TerminalMenu()
     menu.start()
@@ -743,7 +869,7 @@ def start_ear():
     print(" Press [7] large-v3     [8] turbo       [9] Parakeet v2")
     print(" Press [0] Parakeet v3  [t] Self-test")
     print("─" * 52)
-    print(" Brain output will appear below as you speak.\n")
+    print(" Brain output prints directly in this terminal.\n")
     print("─" * 52)
 
     try:
@@ -752,7 +878,6 @@ def start_ear():
         print("\r\n\nShutting down Ear...")
     finally:
         menu.stop()
-        tailer.stop()
         ear.cleanup()
         if sys.stdin.isatty():
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, termios.tcgetattr(sys.stdin.fileno()))

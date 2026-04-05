@@ -1,9 +1,8 @@
 """
 brain.py — Parakeet Flow v2 (Streaming Edition)
 =================================================
-Receives streamed audio chunks in real-time via Unix socket.
-Accumulates until the connection closes, then transcribes immediately.
-Optimized for Intel Mac with Silero VAD (Voice Activity Detection).
+Receives chunk and commit commands via Unix socket, decodes chunks as they arrive,
+and pastes the stitched final text after session commit.
 """
 
 import os
@@ -11,6 +10,7 @@ import sys
 import socket
 import time
 import threading
+from dataclasses import dataclass, field
 import numpy as np
 
 try:
@@ -20,94 +20,9 @@ except Exception:  # pragma: no cover - test environments may not support pynput
         def type(self, _text):
             return None
 
-# VAD settings
-VAD_MODEL_PATH = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
-VAD_THRESHOLD = 0.5
-VAD_SILENCE_TIMEOUT = 0.4  # seconds of silence before auto-stop
-
 SOCKET_PATH = "/tmp/parakeet.sock"
 keyboard = Controller()
 BACKEND = os.environ.get("BACKEND", "faster_whisper").lower().strip()
-
-# ── Silero VAD Engine ────────────────────────────────────────────────────────
-class SileroVAD:
-    def __init__(self, model_path):
-        import onnxruntime as ort
-        options = ort.SessionOptions()
-        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        options.intra_op_num_threads = 1
-        options.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(model_path, options, providers=['CPUExecutionProvider'])
-        
-        # Auto-detect model version by checking input names
-        input_names = [inp.name for inp in self.session.get_inputs()]
-        print(f"[VAD] Model inputs: {input_names}")
-        
-        if 'state' in input_names:
-            # v5 — single state tensor
-            self._version = 5
-            # Find state shape from model metadata
-            state_shape = None
-            for inp in self.session.get_inputs():
-                if inp.name == 'state':
-                    # Handle dynamic axes (None or str) by defaulting to 1
-                    state_shape = [
-                        dim if isinstance(dim, int) else 1 
-                        for dim in inp.shape
-                    ]
-                    break
-            
-            if state_shape is None:
-                # Fallback to standard Silero VAD v5 state shape if lookup fails
-                state_shape = [2, 1, 128]
-                
-            self._state = np.zeros(state_shape, dtype=np.float32)
-        else:
-            # v3/v4 — separate h and c
-            self._version = 3
-            self._h = np.zeros((2, 1, 64), dtype=np.float32)
-            self._c = np.zeros((2, 1, 64), dtype=np.float32)
-
-    def reset(self):
-        """Reset VAD state between recordings."""
-        if self._version == 5:
-            self._state = np.zeros_like(self._state)
-        else:
-            self._h = np.zeros_like(self._h)
-            self._c = np.zeros_like(self._c)
-
-    def is_speech(self, audio_chunk: np.ndarray, sample_rate: int = 16000) -> float:
-        if len(audio_chunk) == 0:
-            return 0.0
-        
-        # Silero expects exactly 512 samples for 16kHz
-        if len(audio_chunk) < 512:
-            audio_chunk = np.pad(audio_chunk, (0, 512 - len(audio_chunk)))
-        elif len(audio_chunk) > 512:
-            audio_chunk = audio_chunk[:512]
-
-        if self._version == 5:
-            ort_inputs = {
-                'input': audio_chunk.reshape(1, -1),
-                'sr': np.array([sample_rate], dtype=np.int64),
-                'state': self._state,
-            }
-            out, new_state = self.session.run(None, ort_inputs)
-            self._state = new_state
-        else:
-            ort_inputs = {
-                'input': audio_chunk.reshape(1, -1),
-                'sr': np.array([sample_rate], dtype=np.int64),
-                'h': self._h,
-                'c': self._c,
-            }
-            out, h, c = self.session.run(None, ort_inputs)
-            self._h, self._c = h, c
-        
-        return out[0][0]
-
-# Global VAD instance
-vad_engine = None
 
 def load_backend(model_name="base.en"):
     if "parakeet-tdt" in model_name:
@@ -135,6 +50,20 @@ def load_backend(model_name="base.en"):
 # Global state
 backend_info = {"backend": None, "model": None}
 backend_lock = threading.Lock()
+session_store = {}
+session_store_lock = threading.Lock()
+
+
+@dataclass
+class SessionState:
+    backend: object
+    model: object
+    received_count: int = 0
+    done_count: int = 0
+    closed: bool = False
+    finalized: bool = False
+    transcript_parts: dict = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def send_hud(cmd: str):
@@ -146,6 +75,94 @@ def send_hud(cmd: str):
         s.close()
     except Exception:
         pass
+
+
+def _get_or_create_session(session_id: str) -> SessionState:
+    with session_store_lock:
+        session = session_store.get(session_id)
+        if session is not None:
+            return session
+
+        with backend_lock:
+            backend = backend_info["backend"]
+            model = backend_info["model"]
+
+        session = SessionState(backend=backend, model=model)
+        session_store[session_id] = session
+        return session
+
+
+def _finalize_session_if_ready(session_id: str) -> None:
+    with session_store_lock:
+        session = session_store.get(session_id)
+    if session is None:
+        return
+
+    text = None
+    with session.lock:
+        if session.finalized:
+            return
+        if not session.closed or session.done_count != session.received_count:
+            return
+
+        parts = [session.transcript_parts[idx] for idx in sorted(session.transcript_parts) if session.transcript_parts[idx]]
+        text = " ".join(parts).strip()
+        session.finalized = True
+
+    short_id = session_id[:8]
+    if text:
+        print(f"[Brain] 📝 [session {short_id} | {session.received_count} chunks] → \"{text}\"", flush=True)
+        send_hud("process")
+        paste_instantly(text + " ")
+        send_hud("done")
+    else:
+        print(f"[Brain] 🔇 [session {short_id}] Nothing detected", flush=True)
+        send_hud("hide")
+
+    with session_store_lock:
+        session_store.pop(session_id, None)
+
+
+def _handle_audio_chunk(session_id: str, seq: int, audio_bytes: bytes) -> None:
+    session = _get_or_create_session(session_id)
+
+    with session.lock:
+        session.received_count += 1
+
+    if len(audio_bytes) % 2:
+        audio_bytes = audio_bytes[:-1]
+    audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+    audio = _normalize_audio(audio_int16)
+
+    text = ""
+    if audio is not None:
+        duration_s = len(audio_int16) / 16000.0
+        print(f"[Brain] 🎙️  [session {session_id[:8]} chunk {seq}] decode ({duration_s:.2f}s)", flush=True)
+        try:
+            backend = session.backend
+            model = session.model
+            if backend is None or model is None:
+                print("[Brain] ⚠️  No model loaded — skipping chunk", flush=True)
+            else:
+                text = backend.transcribe(model, audio).strip()
+        except Exception as e:
+            print(f"[Brain] ❌ Chunk decode error: {e}", flush=True)
+            text = ""
+    else:
+        print(f"[Brain] 🔇 [session {session_id[:8]} chunk {seq}] Nothing detected", flush=True)
+
+    with session.lock:
+        session.transcript_parts[seq] = text
+        session.done_count += 1
+
+    _finalize_session_if_ready(session_id)
+
+
+def _mark_session_closed(session_id: str) -> None:
+    session = _get_or_create_session(session_id)
+    with session.lock:
+        session.closed = True
+    _finalize_session_if_ready(session_id)
 
 
 import subprocess
@@ -182,31 +199,29 @@ def paste_instantly(text: str):
         print(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
         keyboard.type(text)
 
+
+def _normalize_audio(int16_audio: np.ndarray) -> np.ndarray | None:
+    """Convert int16 PCM to normalized float32 audio and reject silence."""
+    if len(int16_audio) == 0:
+        return None
+
+    audio = int16_audio.astype(np.float32) / 32768.0
+    max_val = float(np.max(np.abs(audio)))
+    if max_val < 0.001:
+        return None
+    if max_val > 0.01:
+        audio = audio / max_val * 0.9
+    return audio
+
+
 def handle_connection(conn):
-    """Handle one streaming connection: accumulate → transcribe when ear closes."""
+    """Handle one payload (chunk/commit/switch/raw audio fallback)."""
     t_connect = time.perf_counter()
-    chunks = []
+    raw_audio = bytearray()
     total_bytes = 0
-
-    # VAD State — HUD feedback ONLY, never closes connection
-    speech_detected = False
-    last_speech_time = time.perf_counter()
-    thinking_sent = False
-
-    # Reset VAD state for fresh recording
-    if vad_engine:
-        vad_engine.reset()
 
     try:
         while True:
-            # VAD silence → just update HUD (NEVER break)
-            if (speech_detected
-                and not thinking_sent
-                and (time.perf_counter() - last_speech_time > VAD_SILENCE_TIMEOUT)):
-                print("[Brain] 💤 VAD: Speech paused (HUD only)")
-                send_hud("thinking")
-                thinking_sent = True
-
             conn.settimeout(0.1)
             try:
                 data = conn.recv(32768)
@@ -214,153 +229,123 @@ def handle_connection(conn):
                 continue
 
             if not data:
-                break  # ← ONLY exit: ear closed the socket
+                break
 
-            chunks.append(data)
             total_bytes += len(data)
-
-            # --- Real-time VAD (wrapped in try to never kill connection) ---
-            try:
-                if vad_engine and len(data) >= 1024:
-                    audio_chunk = np.frombuffer(data[-1024:], dtype=np.int16).astype(np.float32) / 32768.0
-                    score = vad_engine.is_speech(audio_chunk)
-                    if score > VAD_THRESHOLD:
-                        if not speech_detected:
-                            print("[Brain] 🗣️  VAD: Speech started")
-                        speech_detected = True
-                        last_speech_time = time.perf_counter()
-                        thinking_sent = False  # Reset if speech resumes
-            except Exception as ve:
-                print(f"[Brain] ⚠️  VAD error (non-fatal): {ve}")
-
+            raw_audio.extend(data)
     except Exception as e:
         print(f"[Brain] ⚠️  Recv error: {e}")
     finally:
         conn.close()
 
-    t_received = time.perf_counter()
-
     if total_bytes == 0:
         return
 
-    raw = b"".join(chunks)
+    print(f"[Brain] 📥 Received utterance: {total_bytes} bytes", flush=True)
 
-    # Check if it's a command
-    if total_bytes < 256:
+    blob = bytes(raw_audio)
+
+    if blob.startswith(b"CMD_SWITCH_MODEL:"):
         try:
-            text = raw.decode("utf-8").strip()
-            if text.startswith("CMD_SWITCH_MODEL:"):
-                new_model = text.split(":", 1)[1]
-                print(f"\n[Brain] 🔄 Switch model: {new_model}")
-                sys.stdout.flush()
-                with backend_lock:
-                    try:
-                        import gc
-                        backend_info["model"] = None
-                        gc.collect()
-                        nb, nm = load_backend(new_model)
-                        backend_info["backend"] = nb
-                        backend_info["model"] = nm
-                        print(f"[Brain] ✅ Switched to {new_model}")
-                    except Exception as e:
-                        print(f"[Brain] ❌ Failed: {e}, falling back to base.en")
-                        try:
-                            nb, nm = load_backend("base.en")
-                            backend_info["backend"] = nb
-                            backend_info["model"] = nm
-                        except Exception as e2:
-                            print(f"[Brain] 💥 Fallback failed: {e2}")
-                    sys.stdout.flush()
-                return
-        except UnicodeDecodeError:
-            pass
+            text_probe = blob.decode("utf-8").strip()
+            new_model = text_probe.split(":", 1)[1]
+        except Exception:
+            print("[Brain] ⚠️  Bad switch command — skipping", flush=True)
+            return
 
-    # ── Process audio ──
+        print(f"\n[Brain] 🔄 Switch model: {new_model}")
+        sys.stdout.flush()
+        with backend_lock:
+            try:
+                import gc
+                backend_info["model"] = None
+                gc.collect()
+                nb, nm = load_backend(new_model)
+                backend_info["backend"] = nb
+                backend_info["model"] = nm
+                print(f"[Brain] ✅ Switched to {new_model}")
+            except Exception as e:
+                print(f"[Brain] ❌ Failed: {e}, falling back to base.en")
+                try:
+                    nb, nm = load_backend("base.en")
+                    backend_info["backend"] = nb
+                    backend_info["model"] = nm
+                except Exception as e2:
+                    print(f"[Brain] 💥 Fallback failed: {e2}")
+            sys.stdout.flush()
+        return
+
+    if blob.startswith(b"CMD_SESSION_COMMIT:"):
+        try:
+            text_probe = blob.decode("utf-8").strip()
+            session_id = text_probe.split(":", 1)[1]
+        except Exception:
+            print("[Brain] ⚠️  Bad commit command — skipping", flush=True)
+            return
+
+        print(f"[Brain] ✅ Commit received for session {session_id[:8]}", flush=True)
+        _mark_session_closed(session_id)
+        return
+
+    if blob.startswith(b"CMD_AUDIO_CHUNK:") and b"\n\n" in blob:
+        header, audio_bytes = blob.split(b"\n\n", 1)
+        try:
+            header_text = header.decode("utf-8").strip()
+            _, session_id, seq_text = header_text.split(":", 2)
+            seq = int(seq_text)
+        except Exception as e:
+            print(f"[Brain] ⚠️  Bad chunk header: {e}", flush=True)
+            return
+
+        _handle_audio_chunk(session_id, seq, audio_bytes)
+        return
+
     with backend_lock:
-        be = backend_info["backend"]
-        mo = backend_info["model"]
+        backend = backend_info["backend"]
+        model = backend_info["model"]
 
-    if be is None or mo is None:
+    if backend is None or model is None:
         print("[Brain] ⚠️  No model loaded — skipping")
         send_hud("hide")
         return
 
     try:
-        audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-
-        if len(audio) == 0:
-            print("[Brain] ⚠️  Audio is entirely silence — mic not capturing")
-            sys.stdout.flush()
+        if len(blob) % 2:
+            blob = blob[:-1]
+        audio_int16 = np.frombuffer(blob, dtype=np.int16)
+        if len(audio_int16) == 0:
+            print("[Brain] 🔇 Nothing detected")
+            send_hud("hide")
+            return
+        audio = _normalize_audio(audio_int16)
+        if audio is None:
+            print("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
 
-        # ── DEBUG: Show actual audio level ──
-        max_val = np.max(np.abs(audio))
-        rms_val = np.sqrt(np.mean(audio ** 2))
-        nonzero = np.count_nonzero(audio)
-        # print(f"[Brain] 📊 max={max_val:.4f} rms={rms_val:.4f} nonzero={nonzero}/{len(audio)}")
-
-        if max_val < 0.001:
-            print("[Brain] ⚠️  Audio is silence — mic not capturing")
-            sys.stdout.flush()
+        duration_s = len(audio_int16) / 16000.0
+        print(f"[Brain] 🎙️  Final utterance decode ({duration_s:.2f}s)", flush=True)
+        send_hud("process")
+        final_text = backend.transcribe(model, audio).strip()
+        if not final_text:
+            print("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
-            
-        if max_val > 0.01:
-            audio = audio / max_val * 0.9
     except Exception as e:
         print(f"[Brain] ❌ Audio decode error: {e}")
         sys.stdout.flush()
         send_hud("hide")
         return
 
-    if len(audio) < 4800:
-        print("[Brain] ⚠️  Audio too short — skipped")
-        sys.stdout.flush()
-        send_hud("hide")
-        return
-
-    duration = len(audio) / 16000.0
-    print(f"[Brain] 🎙️  {duration:.1f}s audio received")
-    sys.stdout.flush()
-    send_hud("process")
-
-    t_start = time.perf_counter()
-
-    try:
-        text = be.transcribe(mo, audio)
-    except Exception as e:
-        print(f"[Brain] ❌ Transcription error: {e}")
-        send_hud("hide")
-        return
-
-    t_elapsed = time.perf_counter() - t_start
     total_latency = time.perf_counter() - t_connect
-
-    if text:
-        print(f"[Brain] 📝 [{t_elapsed:.2f}s | {total_latency:.2f}s total] → \"{text}\"")
-        sys.stdout.flush()
-        # Add a trailing space to separate dictated phrases, just like the old behavior
-        paste_instantly(text + " ")
-        send_hud("done")
-    else:
-        print(f"[Brain] 🔇 [{t_elapsed:.2f}s] Nothing detected")
-        send_hud("hide")
-
+    print(f"[Brain] 📝 [utterance | {total_latency:.2f}s total] → \"{final_text}\"")
+    sys.stdout.flush()
+    paste_instantly(final_text + " ")
+    send_hud("done")
     sys.stdout.flush()
 
 
 def start_server():
-    global vad_engine
-    
-    # Initialize VAD
-    print("[Brain] Loading Silero VAD...")
-    try:
-        vad_engine = SileroVAD(VAD_MODEL_PATH)
-        print("[Brain] ✅ VAD Engine ready.")
-    except Exception as e:
-        print(f"[Brain] ❌ VAD initialization failed: {e}")
-
     # Load model
     initial_backend, initial_model = load_backend("base.en")
     backend_info["backend"] = initial_backend

@@ -448,6 +448,7 @@ dev = [
 ]
 tts = [
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "psutil" },
     { name = "scipy" },
 ]
@@ -457,6 +458,7 @@ requires-dist = [
     { name = "faster-whisper", specifier = ">=1.1.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "numpy", marker = "extra == 'tts'", specifier = ">=1.26.0" },
+    { name = "onnxruntime", marker = "extra == 'tts'", specifier = ">=1.16.0" },
     { name = "psutil", marker = "extra == 'tts'", specifier = ">=5.9.0" },
     { name = "pyaudio", specifier = ">=0.2.14" },
     { name = "pynput", specifier = ">=1.7.7" },

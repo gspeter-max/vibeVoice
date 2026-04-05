@@ -13,6 +13,7 @@
 # ║                                                              ║
 # ║  Voice Isolation toggle (for macOS):                         ║
 # ║    VOICE_ISOLATION=1 ./start.sh   ← enable (default off)     ║
+# ║  Brain logs always print in this terminal.                   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
@@ -60,6 +61,7 @@ echo "  Backend  : $BACKEND"
 echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
 echo "  Theme    : Dark with premium white waveform bars"
+echo "  Logs     : live terminal output"
 echo ""
 
 # ── Sanity check ────────────────────────────────────────────────
@@ -80,10 +82,10 @@ mkdir -p logs
 
 # ── Start Brain in background ────────────────────────────────────
 echo "  Starting Brain..."
-BACKEND="$BACKEND" "$VENV_PYTHON" src/brain.py > logs/brain.log 2>&1 &
+BACKEND="$BACKEND" "$VENV_PYTHON" src/brain.py &
 BRAIN_PID=$!
 echo $BRAIN_PID > /tmp/parakeet-brain.pid
-echo "  Brain PID: $BRAIN_PID  |  log: logs/brain.log"
+echo "  Brain PID: $BRAIN_PID  |  live terminal output"
 
 # ── Wait for socket (up to 120s for first-run model download) ───
 echo ""
@@ -110,25 +112,13 @@ while [ ! -S /tmp/parakeet.sock ]; do
     if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
         echo ""
         echo "❌ Brain crashed on startup."
-        if [ -f "logs/brain.log" ]; then
-            echo "Last log:"
-            echo "─────────────────────────────────────"
-            tail -30 logs/brain.log
-            echo "─────────────────────────────────────"
-        else
-            echo "No log file found. Possible issues:"
-            echo "  - logs/ directory doesn't exist"
-            echo "  - Brain crashed before logging could start"
-            echo "  - Python import error (missing dependencies)"
-            echo ""
-            echo "Try running: src/brain.py manually to see the error"
-        fi
+        echo "Scroll up in this terminal for Brain's output."
         exit 1
     fi
 
     if [ $WAIT -ge $MAX_WAIT ]; then
         echo ""
-        echo "❌ Timed out waiting for Brain. Check logs/brain.log"
+        echo "❌ Timed out waiting for Brain. Watch the terminal output above."
         exit 1
     fi
 done
