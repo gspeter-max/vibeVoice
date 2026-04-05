@@ -147,7 +147,7 @@ def test_audio_callback_uses_conditioned_audio_for_vad():
     """VAD should receive its own conditioned signal, not blindly raw bytes."""
     ear = Ear()
     ear.is_recording = True
-    ear.vad_gain_multiplier = 4.0
+    ear.vad_sensitivity_boost = 4.0
 
     raw = (b"\x01\x00" * 4)
     gate = Mock()
@@ -173,7 +173,7 @@ def test_prepare_vad_chunk_does_not_amplify_true_silence():
 def test_prepare_vad_chunk_amplifies_quiet_non_silent_audio():
     """Quiet speech-like chunks should be lifted before VAD sees them."""
     ear = Ear()
-    ear.vad_gain_multiplier = 4.0
+    ear.vad_sensitivity_boost = 4.0
     raw = b"\x01\x00" * 8
 
     prepared = ear._prepare_vad_chunk(raw)

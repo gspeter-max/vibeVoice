@@ -88,8 +88,8 @@ VOL_PORT        = 57235
 HOLD_THRESHOLD  = 0.4
 VAD_MODEL_PATH  = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
 VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", "0.50"))
-VAD_SILENCE_TIMEOUT = float(os.environ.get("VAD_SILENCE_TIMEOUT", "6.0"))
-VAD_GAIN_MULTIPLIER = float(os.environ.get("VAD_GAIN_MULTIPLIER", "6.0"))
+VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.75"))
+VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "6.0"))
 VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
 VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
 VAD_STATUS_LOG_INTERVAL = 0.5
@@ -248,13 +248,13 @@ def select_mic(p):
 # ── Main ear class (STREAMING) ─────────────────────────────────────────────────
 class Ear:
     def __init__(self, input_device_index=None):
-        self.p = pyaudio.PyAudio()
+        self.pyaudio_libaray_for_capturing_audio = pyaudio.PyAudio()
         self.stream = None
         self.is_recording = False
         self._lock = threading.Lock()
         self.last_rms = 0.0
         self.gain_multiplier = 2.5 # Increased from 1.1 to fix quiet mic issues
-        self.vad_gain_multiplier = VAD_GAIN_MULTIPLIER
+        self.vad_sensitivity_boost = VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION
         self._total_frames = 0
         self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
         self._last_raw_rms = 0.0
@@ -267,11 +267,11 @@ class Ear:
             print("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)", flush=True)
 
         if input_device_index is None:
-            self.input_device_index = self.p.get_default_input_device_info().get("index")
+            self.input_device_index = self.pyaudio_libaray_for_capturing_audio.get_default_input_device_info().get("index")
         else:
             self.input_device_index = input_device_index
 
-        self.active_mic_name = self.p.get_device_info_by_index(self.input_device_index).get("name")
+        self.active_mic_name = self.pyaudio_libaray_for_capturing_audio.get_device_info_by_index(self.input_device_index).get("name")
 
         self.hud_proc = None
         self._cmd_press_time = 0.0
@@ -301,13 +301,13 @@ class Ear:
         self._utterance_gate = SileroUtteranceGate(
             self._vad_engine,
             voice_threshold=VAD_THRESHOLD,
-            silence_timeout_s=VAD_SILENCE_TIMEOUT,
+            silence_timeout_s=VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT,
             energy_threshold=VAD_ENERGY_THRESHOLD,
             energy_ratio=VAD_ENERGY_RATIO,
         )
         print(
-            f"[Ear] VAD config: threshold={VAD_THRESHOLD:.2f}, silence_timeout={VAD_SILENCE_TIMEOUT:.2f}s, "
-            f"vad_gain={self.vad_gain_multiplier:.1f}x, energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
+            f"[Ear] VAD config: threshold={VAD_THRESHOLD:.2f}, silence_timeout={VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s, "
+            f"vad_gain={self.vad_sensitivity_boost:.1f}x, energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
             f"energy_ratio={VAD_ENERGY_RATIO:.2f}",
             flush=True,
         )
@@ -426,12 +426,12 @@ class Ear:
             pcm16_bytes = pcm16_bytes[:-1]
 
         self._last_raw_rms = get_rms(pcm16_bytes)
-        if self.vad_gain_multiplier == 1.0:
+        if self.vad_sensitivity_boost == 1.0:
             self._last_vad_rms = self._last_raw_rms
             return pcm16_bytes
 
         audio = np.frombuffer(pcm16_bytes, dtype=np.int16).astype(np.float32)
-        conditioned = (audio * self.vad_gain_multiplier).clip(-32768, 32767).astype(np.int16)
+        conditioned = (audio * self.vad_sensitivity_boost).clip(-32768, 32767).astype(np.int16)
         conditioned_bytes = conditioned.tobytes()
         self._last_vad_rms = get_rms(conditioned_bytes)
         return conditioned_bytes
@@ -611,7 +611,7 @@ class Ear:
             except Exception:
                 pass
 
-        self.stream = self.p.open(
+        self.stream = self.pyaudio_libaray_for_capturing_audio.open(
             format=FORMAT,
             channels=CHANNELS,
             rate=RATE,
@@ -639,6 +639,7 @@ class Ear:
         print(f"[Ear] 🔵 Right CMD pressed - on_press() called", flush=True)
 
         if self._toggle_active:
+            print(f'===========================toggle is active============================')
             self._toggle_active = False
             self._stop_and_send(stop_session=True)
             return
@@ -783,19 +784,13 @@ class Ear:
             print(f"\r  Level: [{meter:<50}]", end="", flush=True)
 
             now = time.time()
-            if (
-                self._utterance_gate.has_speech_started()
-                and self._chunk_started_at > 0.0
-            ):
-                self._stop_and_send(stop_session=False)
-                return
 
             if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
                 silence_elapsed = self._utterance_gate.silence_elapsed(now)
                 if silence_elapsed > 0.0:
                     self._silence_pending_logged = True
                     print(
-                        f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VAD_SILENCE_TIMEOUT:.2f}s)",
+                        f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s)",
                         flush=True,
                     )
 
@@ -821,14 +816,14 @@ class Ear:
             if self._utterance_gate.should_finalize(now):
                 silence_elapsed = self._utterance_gate.silence_elapsed(now) if self._utterance_gate.has_speech_started() else self._utterance_gate.finalize_elapsed(now)
                 print(
-                    f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VAD_SILENCE_TIMEOUT:.2f}s); sending chunk",
+                    f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
                     flush=True,
                 )
                 self._stop_and_send(stop_session=False)
 
     def cleanup(self):
         self._close_mic_stream()
-        self.p.terminate()
+        self.pyaudio_libaray_for_capturing_audio.terminate()
 
 
 def start_ear():
