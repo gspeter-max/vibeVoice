@@ -211,6 +211,43 @@ def test_silence_boundary_splits_chunk_while_recording_continues():
     assert ear._total_frames == 0
 
 
+def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
+    ear = Ear()
+    ear.is_recording = True
+    ear._current_session_id = "sess"
+    ear._chunk_overlap_audio_bytes = 4
+    ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
+    ear._total_frames = 4
+
+    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.2), \
+         patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00\x05\x00\x06\x00"), \
+         patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
+         patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send:
+        ear._flush_current_chunk(stop_session=False)
+
+    mock_send.assert_called_once_with(b"\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00")
+    assert ear._pending_chunk_overlap_audio == b"\x03\x00\x04\x00\x05\x00\x06\x00"[-4:]
+
+
+def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
+    ear = Ear()
+    ear.is_recording = True
+    ear._current_session_id = "sess"
+    ear._chunk_overlap_audio_bytes = 4
+    ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
+    ear._total_frames = 4
+
+    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.2), \
+         patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00"), \
+         patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
+         patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send, \
+         patch.object(ear, "_commit_recording_session", return_value=True):
+        ear._flush_current_chunk(stop_session=True)
+
+    mock_send.assert_called_once_with(b"\x03\x00\x04\x00")
+    assert ear._pending_chunk_overlap_audio == b""
+
+
 def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.ear.RECORDING_MODE", "no_streaming")
     ear = Ear()
@@ -447,6 +484,7 @@ def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatc
 
 def test_record_loop_tick_finalizes_on_silence_in_silence_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.ear.RECORDING_MODE", "silence_streaming")
+    monkeypatch.setattr("src.ear.MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING", 1.0)
     ear = Ear()
     ear.is_recording = True
     ear._chunk_started_at = time.time() - 2.0

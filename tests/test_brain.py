@@ -3,6 +3,7 @@ import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 import brain
 
@@ -19,6 +20,13 @@ class MockConn:
 
     def close(self):
         return None
+
+
+@pytest.fixture(autouse=True)
+def clear_session_store():
+    brain.session_store.clear()
+    yield
+    brain.session_store.clear()
 
 
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
@@ -109,3 +117,42 @@ def test_load_backend_falls_back_to_faster_whisper_when_openvino_unavailable(mon
     assert model == "fw-model"
     failing_openvino.load_model.assert_called_once_with("base.en")
     fallback_backend.load_model.assert_called_once_with("base.en")
+
+
+def test_dedupe_with_previous_chunk_removes_repeated_prefix():
+    cleaned = brain._remove_duplicate_chunk_prefix(
+        "I want to see that things are happening fine",
+        "things are happening fine and doing H3 grid",
+    )
+
+    assert cleaned == "and doing H3 grid"
+
+
+def test_dedupe_with_previous_chunk_keeps_non_overlapping_text():
+    cleaned = brain._remove_duplicate_chunk_prefix(
+        "Now I want to see that things are happening",
+        "Window",
+    )
+
+    assert cleaned == "Window"
+
+
+def test_handle_audio_chunk_dedupes_against_previous_chunk_text():
+    mock_backend = MagicMock()
+    mock_model = MagicMock()
+    mock_backend.transcribe.side_effect = [
+        "I want to see that things are happening fine",
+        "things are happening fine and doing H3 grid",
+    ]
+
+    brain.backend_info["backend"] = mock_backend
+    brain.backend_info["model"] = mock_model
+    session_id = "session123"
+    audio_bytes = b"\x00\x10" * 32000
+
+    brain._handle_audio_chunk(session_id, 0, audio_bytes)
+    brain._handle_audio_chunk(session_id, 1, audio_bytes)
+
+    session = brain.session_store[session_id]
+    assert session.transcript_parts[0] == "I want to see that things are happening fine"
+    assert session.transcript_parts[1] == "and doing H3 grid"

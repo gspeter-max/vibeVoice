@@ -92,6 +92,35 @@ def _get_or_create_session(session_id: str) -> SessionState:
         return session
 
 
+def _split_text_into_comparable_words(text: str) -> list[str]:
+    return [word for word in text.strip().split() if word]
+
+
+def _remove_duplicate_chunk_prefix(
+    previous_chunk_text: str,
+    current_chunk_text: str,
+    *,
+    max_overlap_words: int = 8,
+) -> str:
+    if not previous_chunk_text or not current_chunk_text:
+        return current_chunk_text.strip()
+
+    previous_chunk_words = _split_text_into_comparable_words(previous_chunk_text)
+    current_chunk_words = _split_text_into_comparable_words(current_chunk_text)
+    largest_possible_overlap = min(
+        len(previous_chunk_words),
+        len(current_chunk_words),
+        max_overlap_words,
+    )
+
+    # Remove only exact repeated word prefixes from the current chunk.
+    for overlap_word_count in range(largest_possible_overlap, 0, -1):
+        if previous_chunk_words[-overlap_word_count:] == current_chunk_words[:overlap_word_count]:
+            return " ".join(current_chunk_words[overlap_word_count:]).strip()
+
+    return current_chunk_text.strip()
+
+
 def _finalize_session_if_ready(session_id: str) -> None:
     with session_store_lock:
         session = session_store.get(session_id)
@@ -152,7 +181,9 @@ def _handle_audio_chunk(session_id: str, seq: int, audio_bytes: bytes) -> None:
         print(f"[Brain] 🔇 [session {session_id[:8]} chunk {seq}] Nothing detected", flush=True)
 
     with session.lock:
-        session.transcript_parts[seq] = text
+        previous_chunk_text = session.transcript_parts.get(seq - 1, "")
+        cleaned_chunk_text = _remove_duplicate_chunk_prefix(previous_chunk_text, text)
+        session.transcript_parts[seq] = cleaned_chunk_text
         session.done_count += 1
 
     _finalize_session_if_ready(session_id)
