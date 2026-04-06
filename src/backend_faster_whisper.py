@@ -11,7 +11,6 @@ Uses CTranslate2 with:
 
 import os
 import platform
-import multiprocessing
 import numpy as np
 
 try:
@@ -53,10 +52,6 @@ def load_model(model_name=None) -> WhisperModel:
 
     print(f"[faster-whisper] ✅ Model loaded.", flush=True)
     return _model_instance
-
-def get_current_model():
-    return _model_instance
-
 def transcribe(model: WhisperModel, audio_array: np.ndarray) -> str:
     """
     Transcribe a float32 numpy array (16kHz, mono, normalized -1..1).

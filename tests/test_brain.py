@@ -1,3 +1,5 @@
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -75,3 +77,35 @@ def test_handle_connection_skips_too_short_audio():
 
     mock_backend.transcribe.assert_not_called()
     mock_paste.assert_not_called()
+
+
+def test_load_backend_uses_openvino_when_selected(monkeypatch):
+    fake_backend = types.SimpleNamespace(load_model=MagicMock(return_value="ov-model"))
+    monkeypatch.setattr(brain, "BACKEND", "openvino")
+
+    with patch.dict(sys.modules, {"backend_openvino": fake_backend}):
+        backend_module, model = brain.load_backend("base.en")
+
+    assert backend_module is fake_backend
+    assert model == "ov-model"
+    fake_backend.load_model.assert_called_once_with("base.en")
+
+
+def test_load_backend_falls_back_to_faster_whisper_when_openvino_unavailable(monkeypatch):
+    failing_openvino = types.SimpleNamespace(load_model=MagicMock(side_effect=RuntimeError("missing openvino")))
+    fallback_backend = types.SimpleNamespace(load_model=MagicMock(return_value="fw-model"))
+    monkeypatch.setattr(brain, "BACKEND", "openvino")
+
+    with patch.dict(
+        sys.modules,
+        {
+            "backend_openvino": failing_openvino,
+            "backend_faster_whisper": fallback_backend,
+        },
+    ):
+        backend_module, model = brain.load_backend("base.en")
+
+    assert backend_module is fallback_backend
+    assert model == "fw-model"
+    failing_openvino.load_model.assert_called_once_with("base.en")
+    fallback_backend.load_model.assert_called_once_with("base.en")

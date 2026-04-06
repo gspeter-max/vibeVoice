@@ -161,6 +161,31 @@ def test_key_release_does_nothing_when_toggle_already_active():
     mock_stop.assert_not_called()
 
 
+def test_stop_and_send_uses_no_streaming_path(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "no_streaming")
+    ear = Ear()
+    ear.is_recording = True
+
+    with patch.object(ear, "_stop_no_streaming") as mock_stop_no_streaming, \
+         patch.object(ear, "_flush_current_chunk") as mock_flush:
+        ear._stop_and_send(stop_session=True)
+
+    mock_stop_no_streaming.assert_called_once_with()
+    mock_flush.assert_not_called()
+
+
+def test_stop_and_send_uses_silence_streaming_path(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "silence_streaming")
+    ear = Ear()
+
+    with patch.object(ear, "_stop_no_streaming") as mock_stop_no_streaming, \
+         patch.object(ear, "_flush_current_chunk") as mock_flush:
+        ear._stop_and_send(stop_session=False)
+
+    mock_stop_no_streaming.assert_not_called()
+    mock_flush.assert_called_once_with(stop_session=False)
+
+
 def test_silence_boundary_splits_chunk_while_recording_continues():
     """Test that a silence boundary sends a chunk but keeps recording active."""
     ear = Ear()
@@ -186,6 +211,17 @@ def test_silence_boundary_splits_chunk_while_recording_continues():
     assert ear._total_frames == 0
 
 
+def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "no_streaming")
+    ear = Ear()
+    ear.is_recording = True
+
+    with patch.object(ear, "_stream_chunk_to_brain") as mock_stream:
+        ear._audio_callback(b"\x01\x00" * 8, frame_count=8, time_info=None, status=None)
+
+    mock_stream.assert_called_once()
+
+
 def test_audio_callback_uses_conditioned_audio_for_vad():
     """VAD should receive its own conditioned signal, not blindly raw bytes."""
     ear = Ear()
@@ -201,6 +237,20 @@ def test_audio_callback_uses_conditioned_audio_for_vad():
 
     gate.push.assert_called_once()
     assert gate.push.call_args.args[0] != raw
+
+
+def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "no_streaming")
+    ear = Ear()
+
+    with patch("src.ear._is_right_cmd", return_value=True), \
+         patch.object(ear, "_open_brain_stream", return_value=True) as mock_open, \
+         patch.object(ear, "_start_volume_sender"), \
+         patch.object(ear, "_send_hud"):
+        ear.on_press(object())
+
+    mock_open.assert_called_once_with()
+    assert ear.is_recording is True
 
 
 def test_prepare_vad_chunk_does_not_amplify_true_silence():
@@ -378,3 +428,34 @@ def test_hold_less_than_one_second_no_recording():
                 # Should NOT have started recording
                 assert ear.is_recording is False, "is_recording should be False after 0.5s hold"
                 assert ear._recording_from_hold is False, "_recording_from_hold should be False"
+
+
+def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "no_streaming")
+    ear = Ear()
+    ear.is_recording = True
+    ear._chunk_started_at = time.time() - 2.0
+    ear._utterance_gate = Mock()
+    ear._utterance_gate.has_speech_started.return_value = True
+    ear._utterance_gate.should_finalize.return_value = True
+
+    with patch.object(ear, "_stop_and_send") as mock_stop:
+        ear._record_loop_tick()
+
+    mock_stop.assert_not_called()
+
+
+def test_record_loop_tick_finalizes_on_silence_in_silence_streaming_mode(monkeypatch):
+    monkeypatch.setattr("src.ear.RECORDING_MODE", "silence_streaming")
+    ear = Ear()
+    ear.is_recording = True
+    ear._chunk_started_at = time.time() - 2.0
+    ear._utterance_gate = Mock()
+    ear._utterance_gate.has_speech_started.return_value = True
+    ear._utterance_gate.should_finalize.return_value = True
+    ear._utterance_gate.silence_elapsed.return_value = 1.2
+
+    with patch.object(ear, "_stop_and_send") as mock_stop:
+        ear._record_loop_tick()
+
+    mock_stop.assert_called_once_with(stop_session=False)

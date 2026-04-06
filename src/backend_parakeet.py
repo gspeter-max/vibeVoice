@@ -6,7 +6,6 @@ Runs significantly faster than Whisper on CPU.
 """
 
 import os
-import multiprocessing
 import numpy as np
 import sherpa_onnx
 
@@ -58,10 +57,6 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     _model_instance = recognizer
     print(f"[sherpa-onnx] ✅ Model loaded.", flush=True)
     return _model_instance
-
-def get_current_model():
-    return _model_instance
-
 def transcribe(model: sherpa_onnx.OfflineRecognizer, audio_array: np.ndarray) -> str:
     """
     Transcribe a float32 numpy array (16kHz, mono, normalized -1..1).

@@ -84,11 +84,14 @@ except ImportError:
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
+RECORDING_MODE  = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
+NO_STREAMING_MODE = "no_streaming"
+SILENCE_STREAMING_MODE = "silence_streaming"
 VOL_PORT        = 57235
 RECORDING_BUTTON_HOLD_THRESHOLD  = 0.4
 VAD_MODEL_PATH  = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
 VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", "0.50"))
-VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.95"))
+VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.65"))
 VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "6.0"))
 VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
 VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
@@ -276,6 +279,8 @@ class Ear:
         self.hud_proc = None
         self._cmd_press_time = 0.0
         self._toggle_active = False
+        self._brain_sock = None
+        self._brain_sock_lock = threading.Lock()
 
         # ★ MOUSE CONTROL: Hold-to-record for voice activation
         self._mouse_press_start_time = 0.0  # When mouse button was pressed
@@ -350,22 +355,11 @@ class Ear:
         threading.Thread(target=_sender, daemon=True).start()
         print(f"[Ear] Volume sender thread started", flush=True)
 
-    def _send_utterance_to_brain(self, utterance_bytes: bytes):
-        """Send one complete utterance to Brain and close the socket."""
-        if not utterance_bytes:
-            return False
+    def _is_no_streaming_mode(self) -> bool:
+        return RECORDING_MODE == NO_STREAMING_MODE
 
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(5.0)
-                client.connect(SOCKET_PATH)
-                client.sendall(utterance_bytes)
-                client.shutdown(socket.SHUT_WR)
-            print(f"[Ear] 📤 Utterance sent to Brain ({len(utterance_bytes)} bytes)", flush=True)
-            return True
-        except Exception as e:
-            print(f"\r❌ Failed to send utterance to Brain: {e}\n", flush=True)
-            return False
+    def _is_silence_streaming_mode(self) -> bool:
+        return RECORDING_MODE == SILENCE_STREAMING_MODE
 
     def _begin_recording_session(self):
         self._current_session_id = uuid.uuid4().hex
@@ -490,9 +484,70 @@ class Ear:
             self._chunk_started_at = time.time()
         return sent
 
+    def _stop_no_streaming(self):
+        with self._lock:
+            if not self.is_recording:
+                return
+            self.is_recording = False
+            self._recording_from_hold = False
+            total = self._total_frames
+            self._total_frames = 0
+            self.last_rms = 0.0
+
+        duration = (total * CHUNK) / RATE
+        print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
+        threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
+        threading.Thread(target=self._close_brain_stream, daemon=True).start()
+
     def _open_brain_stream(self) -> bool:
-        """Compatibility stub kept for older tests and callers."""
-        return True
+        """Open a persistent socket to brain for no-streaming mode buffering."""
+        with self._brain_sock_lock:
+            if self._brain_sock is not None:
+                return True
+            if not os.path.exists(SOCKET_PATH):
+                print(f"\r❌ Brain socket not found\n", flush=True)
+                return False
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(5.0)
+                sock.connect(SOCKET_PATH)
+                self._brain_sock = sock
+                return True
+            except Exception as e:
+                print(f"\r❌ Brain connect failed: {e}\n", flush=True)
+                return False
+
+    def _stream_chunk_to_brain(self, chunk_bytes: bytes):
+        with self._brain_sock_lock:
+            if self._brain_sock is None:
+                return
+            try:
+                self._brain_sock.sendall(chunk_bytes)
+            except (BrokenPipeError, ConnectionResetError):
+                print(f"\r⚠️  Brain disconnected — will transcribe on release\n", flush=True)
+                try:
+                    self._brain_sock.close()
+                except Exception:
+                    pass
+                self._brain_sock = None
+            except Exception as e:
+                print(f"\r❌ Stream send error: {e}\n", flush=True)
+                try:
+                    self._brain_sock.close()
+                except Exception:
+                    pass
+                self._brain_sock = None
+
+    def _close_brain_stream(self):
+        with self._brain_sock_lock:
+            if self._brain_sock is None:
+                return
+            try:
+                self._brain_sock.shutdown(socket.SHUT_WR)
+                self._brain_sock.close()
+            except Exception:
+                pass
+            self._brain_sock = None
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         if status:
@@ -511,31 +566,34 @@ class Ear:
             # ★ FREQUENCY ANALYSIS: Extract bass/mid/treble bands using FFT
             self.last_frequency_bands = self._analyze_frequency_bands(boosted)
 
-            # ★ VAD BUFFERING: keep the full utterance locally until silence closes it
-            now = time.time()
-            vad_bytes = self._prepare_vad_chunk(in_data)
-            speech_now = self._utterance_gate.push(vad_bytes, now=now)
-            if speech_now and not self._chunk_speech_logged:
-                self._chunk_speech_logged = True
-                self._silence_pending_logged = False
-                print("[Ear] 🗣️  VAD speech detected", flush=True)
-            if now - self._vad_state_log_time >= VAD_STATUS_LOG_INTERVAL:
-                try:
-                    score = self._utterance_gate.last_score()
-                    energy = self._utterance_gate.last_energy()
-                    dynamic_threshold = self._utterance_gate.last_dynamic_threshold()
-                    started = self._utterance_gate.has_speech_started()
-                    silence_elapsed = self._utterance_gate.silence_elapsed(now) if started else 0.0
-                    print(
-                        f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
-                        f"started={started} silence={silence_elapsed:.2f}s "
-                        f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
-                        f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
-                        flush=True,
-                    )
-                except Exception:
-                    pass
-                self._vad_state_log_time = now
+            if self._is_no_streaming_mode():
+                self._stream_chunk_to_brain(chunk_bytes)
+            else:
+                # ★ VAD BUFFERING: keep the full utterance locally until silence closes it
+                now = time.time()
+                vad_bytes = self._prepare_vad_chunk(in_data)
+                speech_now = self._utterance_gate.push(vad_bytes, now=now)
+                if speech_now and not self._chunk_speech_logged:
+                    self._chunk_speech_logged = True
+                    self._silence_pending_logged = False
+                    print("[Ear] 🗣️  VAD speech detected", flush=True)
+                if now - self._vad_state_log_time >= VAD_STATUS_LOG_INTERVAL:
+                    try:
+                        score = self._utterance_gate.last_score()
+                        energy = self._utterance_gate.last_energy()
+                        dynamic_threshold = self._utterance_gate.last_dynamic_threshold()
+                        started = self._utterance_gate.has_speech_started()
+                        silence_elapsed = self._utterance_gate.silence_elapsed(now) if started else 0.0
+                        print(
+                            f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
+                            f"started={started} silence={silence_elapsed:.2f}s "
+                            f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
+                            f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
+                    self._vad_state_log_time = now
 
         return (None, pyaudio.paContinue)
 
@@ -632,6 +690,20 @@ class Ear:
                 pass
             self.stream = None
 
+    def _start_recording_state(self, *, from_hold: bool) -> None:
+        with self._lock:
+            self.is_recording = True
+            self.last_rms = 0.0
+            self._total_frames = 0
+            self._recording_from_hold = from_hold
+            self._chunk_speech_logged = False
+            self._silence_pending_logged = False
+            self._vad_no_speech_warned = False
+
+        if self._is_silence_streaming_mode():
+            self._utterance_gate.reset()
+            self._begin_recording_session()
+
     def on_press(self, key):
         if not _is_right_cmd(key):
             return
@@ -648,16 +720,14 @@ class Ear:
                 print(f"[Ear] ⚠️ Already recording, ignoring press", flush=True)
                 return
 
+        if self._is_no_streaming_mode():
+            print(f"[Ear] 🔵 About to open brain stream", flush=True)
+            if not self._open_brain_stream():
+                print(f"[Ear] ❌ Failed to open brain stream, aborting", flush=True)
+                return
+
         print(f"[Ear] 🔵 About to start recording", flush=True)
-        with self._lock:
-            self.is_recording = True
-            self.last_rms = 0.0
-            self._total_frames = 0
-            self._chunk_speech_logged = False
-            self._silence_pending_logged = False
-            self._vad_no_speech_warned = False
-        self._utterance_gate.reset()
-        self._begin_recording_session()
+        self._start_recording_state(from_hold=False)
 
         self._cmd_press_time = time.time()
         print("\r\n" + "─" * 50, flush=True)
@@ -734,6 +804,9 @@ class Ear:
                 self._recording_from_hold = False
 
     def _stop_and_send(self, *, stop_session: bool = True):
+        if self._is_no_streaming_mode():
+            self._stop_no_streaming()
+            return
         self._flush_current_chunk(stop_session=stop_session)
 
     def record_loop(self):
@@ -767,17 +840,14 @@ class Ear:
 
             if hold_duration >= 1.0:
                 # Hold duration exceeded threshold - start recording
+                if self._is_no_streaming_mode():
+                    if not self._open_brain_stream():
+                        print(f"\r[Ear] ❌ Failed to open brain stream", flush=True)
+                        with self._lock:
+                            self._is_holding = False
+                        return
 
-                with self._lock:
-                    self.is_recording = True
-                    self.last_rms = 0.0
-                    self._total_frames = 0
-                    self._recording_from_hold = True
-                    self._chunk_speech_logged = False
-                    self._silence_pending_logged = False
-                    self._vad_no_speech_warned = False
-                self._utterance_gate.reset()
-                self._begin_recording_session()
+                self._start_recording_state(from_hold=True)
 
                 print("\r\n" + "─" * 50, flush=True)
                 print(f"\r🎙️  RECORDING via MOUSE HOLD ({self.active_mic_name})", flush=True)
@@ -790,45 +860,47 @@ class Ear:
             meter = "█" * min(int(rms * 500), 50)
             print(f"\r  Level: [{meter:<50}]", end="", flush=True)
 
-            now = time.time()
+            if self._is_silence_streaming_mode():
+                now = time.time()
 
-            if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
-                silence_elapsed = self._utterance_gate.silence_elapsed(now)
-                if silence_elapsed > 0.0:
-                    self._silence_pending_logged = True
+                if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
+                    silence_elapsed = self._utterance_gate.silence_elapsed(now)
+                    if silence_elapsed > 0.0:
+                        self._silence_pending_logged = True
+                        print(
+                            f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s)",
+                            flush=True,
+                        )
+
+                if (
+                    not self._utterance_gate.has_speech_started()
+                    and not self._vad_no_speech_warned
+                    and self._chunk_started_at > 0.0
+                    and (now - self._chunk_started_at) >= 1.0
+                ):
+                    try:
+                        max_score = self._utterance_gate.max_score()
+                    except Exception:
+                        max_score = 0.0
                     print(
-                        f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s)",
+                        f"[Ear] ⚠️  VAD has not entered speech state yet "
+                        f"(max_score={max_score:.3f}, threshold={VAD_THRESHOLD:.2f}, "
+                        f"last_energy={self._utterance_gate.last_energy():.4f}, "
+                        f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
                         flush=True,
                     )
+                    self._vad_no_speech_warned = True
 
-            if (
-                not self._utterance_gate.has_speech_started()
-                and not self._vad_no_speech_warned
-                and self._chunk_started_at > 0.0
-                and (now - self._chunk_started_at) >= 1.0
-            ):
-                try:
-                    max_score = self._utterance_gate.max_score()
-                except Exception:
-                    max_score = 0.0
-                print(
-                    f"[Ear] ⚠️  VAD has not entered speech state yet "
-                    f"(max_score={max_score:.3f}, threshold={VAD_THRESHOLD:.2f}, "
-                    f"last_energy={self._utterance_gate.last_energy():.4f}, "
-                    f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
-                    flush=True,
-                )
-                self._vad_no_speech_warned = True
-
-            if self._utterance_gate.should_finalize(now):
-                silence_elapsed = self._utterance_gate.silence_elapsed(now) if self._utterance_gate.has_speech_started() else self._utterance_gate.finalize_elapsed(now)
-                print(
-                    f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
-                    flush=True,
-                )
-                self._stop_and_send(stop_session=False)
+                if self._utterance_gate.should_finalize(now):
+                    silence_elapsed = self._utterance_gate.silence_elapsed(now) if self._utterance_gate.has_speech_started() else self._utterance_gate.finalize_elapsed(now)
+                    print(
+                        f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
+                        flush=True,
+                    )
+                    self._stop_and_send(stop_session=False)
 
     def cleanup(self):
+        self._close_brain_stream()
         self._close_mic_stream()
         self.pyaudio_libaray_for_capturing_audio.terminate()
 

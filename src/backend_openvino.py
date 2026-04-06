@@ -28,7 +28,6 @@ import os
 import numpy as np
 
 _OPENVINO_AVAILABLE = False
-_ov_model = None
 
 
 def _check_openvino():
@@ -79,7 +78,3 @@ def transcribe(model, audio_array: np.ndarray) -> str:
     except Exception as e:
         print(f"[openvino] Transcription error: {e}")
         return ""
-
-
-def is_available() -> bool:
-    return _check_openvino()

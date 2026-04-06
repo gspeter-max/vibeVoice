@@ -51,6 +51,22 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 export QT_MAC_WANTS_LAYER=1
 
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
+export RECORDING_MODE="${RECORDING_MODE:-}"
+if [ -z "$RECORDING_MODE" ]; then
+    echo "Select recording mode:"
+    echo "  [1] no_streaming"
+    echo "  [2] silence_streaming"
+    read -r -p "Enter choice [1/2]: " mode_choice
+
+    case "$mode_choice" in
+        1) RECORDING_MODE="no_streaming" ;;
+        2|"") RECORDING_MODE="silence_streaming" ;;
+        *) RECORDING_MODE="silence_streaming" ;;
+    esac
+fi
+
+export RECORDING_MODE
+
 VENV_PYTHON="./.venv/bin/python"
 
 echo ""
@@ -59,6 +75,7 @@ echo "║        🎙️  PARAKEET FLOW  v2                      ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 echo "  Backend  : $BACKEND"
+echo "  Mode     : $RECORDING_MODE"
 echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
 echo "  Theme    : Dark with premium white waveform bars"
@@ -144,4 +161,4 @@ echo "  HUD   PID: $HUD_PID  |  log: logs/hud.log"
 sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
 
 # ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
-BACKEND="$BACKEND" "$VENV_PYTHON" src/ear.py
+BACKEND="$BACKEND" RECORDING_MODE="$RECORDING_MODE" "$VENV_PYTHON" src/ear.py
