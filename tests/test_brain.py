@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import brain
+from streaming_shared_logic import remove_duplicate_chunk_prefix
 
 
 class MockConn:
@@ -126,6 +127,10 @@ def test_dedupe_with_previous_chunk_removes_repeated_prefix():
     )
 
     assert cleaned == "and doing H3 grid"
+
+
+def test_brain_uses_shared_remove_duplicate_chunk_prefix():
+    assert brain.remove_duplicate_chunk_prefix is remove_duplicate_chunk_prefix
 
 
 def test_dedupe_with_previous_chunk_keeps_non_overlapping_text():

@@ -20,6 +20,7 @@ import termios
 import tty
 import numpy as np
 
+from streaming_shared_logic import apply_previous_chunk_overlap, should_split_chunk_after_silence
 from vad_segmenter import SileroVAD, SileroUtteranceGate
 
 try:
@@ -96,7 +97,7 @@ VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVI
 VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
 VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
 VAD_STATUS_LOG_INTERVAL = 0.5
-OVERLAP_SECONDS = float(os.environ.get("OVERLAP_SECONDS", "0.30"))
+OVERLAP_SECONDS = float(os.environ.get("OVERLAP_SECONDS", "0.50"))
 MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = float(os.environ.get("MIN_CHUNK_SECONDS", "12.0"))
 
 _RCMD_VK = 54
@@ -440,17 +441,15 @@ class Ear:
         self._vad_no_speech_warned = False
 
     def _prepend_pending_chunk_overlap(self, audio_chunk_for_brain: bytes, *, stop_session: bool) -> bytes:
-        if stop_session:
-            self._pending_chunk_overlap_audio = b""
-            return audio_chunk_for_brain
-
-        # Prepend the previous chunk tail so the decoder keeps boundary context.
-        overlapped_audio_chunk = self._pending_chunk_overlap_audio + audio_chunk_for_brain
-        if self._chunk_overlap_audio_bytes > 0:
-            self._pending_chunk_overlap_audio = audio_chunk_for_brain[-self._chunk_overlap_audio_bytes:]
-        else:
-            self._pending_chunk_overlap_audio = b""
-        return overlapped_audio_chunk
+        overlap_application_result = apply_previous_chunk_overlap(
+            current_chunk_audio_bytes=audio_chunk_for_brain,
+            previous_pending_overlap_audio_bytes=self._pending_chunk_overlap_audio,
+            overlap_audio_byte_count=self._chunk_overlap_audio_bytes,
+            sample_rate=RATE,
+            stop_session=stop_session,
+        )
+        self._pending_chunk_overlap_audio = overlap_application_result.next_pending_overlap_audio_bytes
+        return overlap_application_result.overlapped_audio_bytes
 
     def _flush_current_chunk(self, *, stop_session: bool) -> bool:
         now = time.time()
@@ -914,9 +913,19 @@ class Ear:
                     )
                     self._vad_no_speech_warned = True
                 
-                chunk_age = now - self._chunk_started_at
-                if chunk_age > MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING and self._utterance_gate.should_finalize(now):
-                    silence_elapsed = self._utterance_gate.silence_elapsed(now) if self._utterance_gate.has_speech_started() else self._utterance_gate.finalize_elapsed(now)
+                silence_elapsed = (
+                    self._utterance_gate.silence_elapsed(now)
+                    if self._utterance_gate.has_speech_started()
+                    else self._utterance_gate.finalize_elapsed(now)
+                )
+                split_decision = should_split_chunk_after_silence(
+                    chunk_started_at_seconds=self._chunk_started_at,
+                    now_seconds=now,
+                    minimum_chunk_age_before_silence_split_seconds=MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING,
+                    utterance_gate_should_finalize_now=self._utterance_gate.should_finalize(now),
+                    silence_duration_seconds=silence_elapsed,
+                )
+                if split_decision.should_split_now:
                     print(
                         f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
                         flush=True,

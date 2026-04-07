@@ -4,6 +4,8 @@ import sys
 import os
 from unittest.mock import Mock, patch
 
+from streaming_shared_logic import should_split_chunk_after_silence
+
 # Mock pynput before importing Ear
 sys.modules['pynput'] = type(sys)('pynput')
 sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
@@ -209,6 +211,12 @@ def test_silence_boundary_splits_chunk_while_recording_continues():
     mock_commit.assert_not_called()
     assert ear.is_recording is True
     assert ear._total_frames == 0
+
+
+def test_ear_uses_shared_should_split_chunk_after_silence():
+    import src.ear as ear_module
+
+    assert ear_module.should_split_chunk_after_silence is should_split_chunk_after_silence
 
 
 def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
