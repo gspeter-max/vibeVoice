@@ -282,7 +282,7 @@ class Ear:
         self.is_recording = False
         self._lock = threading.Lock()
         self.last_rms = 0.0
-        self.gain_multiplier = 2.5 # Increased from 1.1 to fix quiet mic issues
+        self.gain_multiplier = 1.2 # Increased from 1.1 to fix quiet mic issues
         self.vad_sensitivity_boost = VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION
         self._total_frames = 0
         self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
