@@ -83,6 +83,8 @@ Simply run the startup script:
 ./start.sh
 ```
 
+When the app starts, microphone choices are shown as simple menu numbers such as `0`, `1`, `2`. These are menu choices, not the raw PyAudio device indices.
+
 **Control Recording (choose either method):**
 
 **Method 1: Keyboard Shortcut**
@@ -98,6 +100,19 @@ Simply run the startup script:
 - **Press 1 through 0**: Switch models instantly in the terminal.
 
 ### 4. Advanced Configuration
+
+#### Streaming Defaults
+The live streaming path currently uses these defaults:
+
+- `VAD_THRESHOLD=0.50`
+- `VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT=0.65`
+- `VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION=1.0`
+- `VAD_ENERGY_THRESHOLD=0.05`
+- `VAD_ENERGY_RATIO=2.5`
+- `OVERLAP_SECONDS=0.50`
+- `MIN_CHUNK_SECONDS=8.0`
+
+The capture path also applies a mild microphone gain before sending audio to ASR. The current in-code default is `1.2x`.
 
 #### Thread Count Tuning
 For Parakeet models, you can manually configure the number of threads used for transcription:
@@ -121,8 +136,8 @@ Test different values to find the optimal setting for your hardware. The thread 
 
 ## 🛠️ Technical Architecture
 
-- **`ear.py`**: The input/controller layer. It opens the microphone, listens for keyboard and mouse gestures, streams PCM chunks to Brain over a Unix socket, and sends HUD volume telemetry over UDP.
-- **`brain.py`**: The inference server. It buffers streamed audio until the socket closes, runs VAD for HUD feedback, transcribes with the selected backend, and pastes the text into the active app.
+- **`ear.py`**: The input/controller layer. It opens the microphone, listens for keyboard and mouse gestures, applies streaming VAD, cuts speech into chunks on silence, sends each chunk to Brain over a Unix socket, and sends HUD volume telemetry over UDP.
+- **`brain.py`**: The inference server. In streaming session mode it decodes chunks as they arrive, deduplicates overlap against the previous chunk, waits for session commit, then pastes the stitched final text into the active app. It also still supports one-shot fallback decoding when raw audio is sent without chunk/session headers.
 - **`hud.py`**: The always-on-top Qt HUD. It listens for state commands on TCP `57234` and volume/frequency packets on UDP `57235`.
 - **`backend_faster_whisper.py`**: Default CPU backend for Whisper-style models.
 - **`backend_parakeet.py`**: Optional sherpa-onnx backend for Parakeet-TDT models.
