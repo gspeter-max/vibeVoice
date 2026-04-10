@@ -26,7 +26,7 @@ TOGGLE: Run with  BACKEND=openvino ./start.sh
 
 import os
 import numpy as np
-
+from src import log
 _OPENVINO_AVAILABLE = False
 
 
@@ -59,7 +59,7 @@ def load_model(model_name=None):
     try:
         from openvino_whisper import OVWhisperModel  # type: ignore
         model = OVWhisperModel(model_path, device="GPU")  # tries iGPU, falls back to CPU
-        print(f"[openvino] ✅ Model loaded from {model_path}")
+        log.info(f"[openvino] ✅ Model loaded from {model_path}")
         return model
     except Exception as e:
         raise RuntimeError(f"[openvino] Failed to load model: {e}")
@@ -76,5 +76,5 @@ def transcribe(model, audio_array: np.ndarray) -> str:
             return result.get("text", "").strip()
         return str(result).strip()
     except Exception as e:
-        print(f"[openvino] Transcription error: {e}")
+        log.info(f"[openvino] Transcription error: {e}")
         return ""

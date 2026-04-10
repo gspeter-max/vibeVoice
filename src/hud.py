@@ -24,7 +24,7 @@ import time
 import socket
 import subprocess
 import random
-
+from src import log
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
 import objc
@@ -162,52 +162,52 @@ class IPCServer(QThread):
     command = Signal(str)
 
     def run(self):
-        print(f"[HUD] 🚀 IPCServer thread starting...", flush=True)
+        log.info(f"[HUD] 🚀 IPCServer thread starting...")
         srv = None
         try:
-            print(f"[HUD] 🔧 Creating TCP socket...", flush=True)
+            log.info(f"[HUD] 🔧 Creating TCP socket...")
             srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-            print(f"[HUD] 🔧 Binding to 127.0.0.1:{IPC_PORT}...", flush=True)
+            log.info(f"[HUD] 🔧 Binding to 127.0.0.1:{IPC_PORT}...")
             srv.bind(("127.0.0.1", IPC_PORT))
 
-            print(f"[HUD] 🔧 Setting listen queue...", flush=True)
+            log.info(f"[HUD] 🔧 Setting listen queue...")
             srv.listen(5)
 
-            print(f"[HUD] 🔧 Setting socket timeout...", flush=True)
+            log.info(f"[HUD] 🔧 Setting socket timeout...")
             srv.settimeout(1.0)
 
-            print(f"[HUD] 🌐 TCP server listening on :{IPC_PORT}", flush=True)
+            log.info(f"[HUD] 🌐 TCP server listening on :{IPC_PORT}")
 
             while not self.isInterruptionRequested():
                 try:
                     conn, addr = srv.accept()
-                    print(f"[HUD] 🔌 Connection accepted from {addr}", flush=True)
+                    log.info(f"[HUD] 🔌 Connection accepted from {addr}")
                     data = conn.recv(256).decode().strip()
-                    print(f"[HUD] 📨 Received data: '{data}'", flush=True)
+                    log.info(f"[HUD] 📨 Received data: '{data}'")
                     conn.close()
                     if data:
-                        print(f"[HUD] 📢 Emitting command signal: '{data}'", flush=True)
+                        log.info(f"[HUD] 📢 Emitting command signal: '{data}'")
                         self.command.emit(data)
                     else:
-                        print(f"[HUD] ⚠️ Empty data received", flush=True)
+                        log.info(f"[HUD] ⚠️ Empty data received")
                 except socket.timeout:
                     continue
                 except Exception as e:
-                    print(f"[HUD] ❌ Error in receive loop: {e}", flush=True)
+                    log.info(f"[HUD] ❌ Error in receive loop: {e}")
                     import traceback
                     traceback.print_exc()
 
         except Exception as e:
-            print(f"[HUD] ❌ TCP server FAILED: {e}", flush=True)
+            log.info(f"[HUD] ❌ TCP server FAILED: {e}")
             import traceback
             traceback.print_exc()
         finally:
             if srv:
-                print(f"[HUD] 🔧 Closing TCP socket...", flush=True)
+                log.info(f"[HUD] 🔧 Closing TCP socket...")
                 srv.close()
-            print(f"[HUD] 🛑 IPCServer thread terminated", flush=True)
+            log.info(f"[HUD] 🛑 IPCServer thread terminated")
 
 
 class VolumeListener(QThread):
@@ -215,26 +215,26 @@ class VolumeListener(QThread):
     frequency_bands = Signal(dict)  # New signal for frequency data
 
     def run(self):
-        print(f"[HUD] 🚀 VolumeListener thread starting...", flush=True)
+        log.info(f"[HUD] 🚀 VolumeListener thread starting...")
         sock = None
         try:
-            print(f"[HUD] 🔧 Creating UDP socket...", flush=True)
+            log.info(f"[HUD] 🔧 Creating UDP socket...")
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-            print(f"[HUD] 🔧 Binding to 127.0.0.1:{VOL_PORT}...", flush=True)
+            log.info(f"[HUD] 🔧 Binding to 127.0.0.1:{VOL_PORT}...")
             sock.bind(("127.0.0.1", VOL_PORT))
 
-            print(f"[HUD] 🔧 Setting socket timeout...", flush=True)
+            log.info(f"[HUD] 🔧 Setting socket timeout...")
             sock.settimeout(0.1)
 
-            print(f"[HUD] 🌐 UDP server listening on :{VOL_PORT}", flush=True)
+            log.info(f"[HUD] 🌐 UDP server listening on :{VOL_PORT}")
 
             while not self.isInterruptionRequested():
                 try:
                     data, addr = sock.recvfrom(128)
                     txt = data.decode().strip()
-                    print(f"[HUD] 📨 Received UDP from {addr}: '{txt}'", flush=True)
+                    log.info(f"[HUD] 📨 Received UDP from {addr}: '{txt}'")
                     if txt.startswith("vol:"):
                         # Parse new format: "vol:RMS,bass:BASS,mid:MID,treble:TREBLE"
                         try:
@@ -249,27 +249,27 @@ class VolumeListener(QThread):
                                     if key in freq_bands:
                                         freq_bands[key] = float(val)
 
-                            print(f"[HUD] 🎤 Emitting volume signal: {vol_val:.4f}, freq: {freq_bands}", flush=True)
+                            log.info(f"[HUD] 🎤 Emitting volume signal: {vol_val:.4f}, freq: {freq_bands}")
                             self.volume.emit(vol_val)
                             self.frequency_bands.emit(freq_bands)
                         except (ValueError, IndexError) as e:
-                            print(f"[HUD] ⚠️ Failed to parse volume data: {e}", flush=True)
+                            log.info(f"[HUD] ⚠️ Failed to parse volume data: {e}")
                 except socket.timeout:
                     continue
                 except Exception as e:
-                    print(f"[HUD] ❌ Error in UDP receive loop: {e}", flush=True)
+                    log.info(f"[HUD] ❌ Error in UDP receive loop: {e}")
                     import traceback
                     traceback.print_exc()
 
         except Exception as e:
-            print(f"[HUD] ❌ UDP server FAILED: {e}", flush=True)
+            log.info(f"[HUD] ❌ UDP server FAILED: {e}")
             import traceback
             traceback.print_exc()
         finally:
             if sock:
-                print(f"[HUD] 🔧 Closing UDP socket...", flush=True)
+                log.info(f"[HUD] 🔧 Closing UDP socket...")
                 sock.close()
-            print(f"[HUD] 🛑 VolumeListener thread terminated", flush=True)
+            log.info(f"[HUD] 🛑 VolumeListener thread terminated")
 
 
 # ── Sound effects (using provided external files) ─────────────────────────────
@@ -314,13 +314,9 @@ class MenuBarWaveformController(QObject):
 
         # Frequency bands for color mapping
         self._frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
-        print(f"[HUD] Theme mode: {runtime_signature()}", flush=True)
+        log.info(f"[HUD] Theme mode: {runtime_signature()}")
         preview = bar_color_for_draw(voice_intensity=1.0, bar_height_factor=1.0)
-        print(
-            f"[HUD] Theme preview RGB=({preview.red()},{preview.green()},{preview.blue()}) "
-            f"alpha={preview.alpha()}",
-            flush=True,
-        )
+        log.info(f"[HUD] Theme preview RGB=({preview.red()},{preview.green()},{preview.blue()}) alpha={preview.alpha()}")
 
         # Per-bar state
         self._bar_h     = [BAR_MIN_H] * NUM_BARS
@@ -336,20 +332,20 @@ class MenuBarWaveformController(QObject):
         self._timer.timeout.connect(self._tick)
 
         # IPC threads
-        print(f"[HUD] 🔧 Creating IPCServer thread...", flush=True)
+        log.info(f"[HUD] 🔧 Creating IPCServer thread...")
         self._ipc = IPCServer(self)
-        print(f"[HUD] 🔧 Connecting IPC command signal...", flush=True)
+        log.info(f"[HUD] 🔧 Connecting IPC command signal...")
         self._ipc.command.connect(self._on_command)
-        print(f"[HUD] 🔧 Starting IPCServer thread...", flush=True)
+        log.info(f"[HUD] 🔧 Starting IPCServer thread...")
         self._ipc.start()
 
-        print(f"[HUD] 🔧 Creating VolumeListener thread...", flush=True)
+        log.info(f"[HUD] 🔧 Creating VolumeListener thread...")
         self._vol = VolumeListener(self)
-        print(f"[HUD] 🔧 Connecting volume signal...", flush=True)
+        log.info(f"[HUD] 🔧 Connecting volume signal...")
         self._vol.volume.connect(self._on_volume)
-        print(f"[HUD] 🔧 Connecting frequency bands signal...", flush=True)
+        log.info(f"[HUD] 🔧 Connecting frequency bands signal...")
         self._vol.frequency_bands.connect(self._on_frequency_bands)
-        print(f"[HUD] 🔧 Starting VolumeListener thread...", flush=True)
+        log.info(f"[HUD] 🔧 Starting VolumeListener thread...")
         self._vol.start()
 
         # Keepalive timer
@@ -361,7 +357,7 @@ class MenuBarWaveformController(QObject):
         self._ensure_menu_bar_item()
         self._request_menu_bar_view_redraw()
 
-        print("[HUD] Menu bar HUD ready ✓", flush=True)
+        log.info("[HUD] Menu bar HUD ready ✓")
 
     def _ensure_visible(self):
         """Re-assert the menu-bar item exists and remains visible."""
@@ -436,7 +432,7 @@ class MenuBarWaveformController(QObject):
 
     # ── Public state transitions ───────────────────────────────────────────
     def show_listening(self):
-        print("[HUD] 🎙️ Setting state to LISTENING", flush=True)
+        log.info("[HUD] 🎙️ Setting state to LISTENING")
         _play_sound(self._snd_listen)
         self._enter(LISTENING)
 
@@ -467,7 +463,7 @@ class MenuBarWaveformController(QObject):
     # ── IPC dispatcher ────────────────────────────────────────────────────
     def _on_command(self, cmd):
         c = cmd.strip()
-        print(f"[HUD] ← {c}", flush=True)
+        log.info(f"[HUD] ← {c}")
         lowered = c.lower()
         if lowered.startswith("draft:") or lowered.startswith("final:"):
             return
@@ -482,18 +478,18 @@ class MenuBarWaveformController(QObject):
         elif lowered == "hide":
             self.hide_hud()
         else:
-            print(f"[HUD] Unknown command: {c}", flush=True)
+            log.info(f"[HUD] Unknown command: {c}")
 
     def _on_volume(self, val):
         self._voice_raw  = min(1.0, val * 6.0)
         self._last_vol_t = time.time()
         # DEBUG: Log every volume packet for diagnosis
-        print(f"[HUD] 🎤 Received volume: {val:.4f} -> voice_raw={self._voice_raw:.4f}", flush=True)
+        log.info(f"[HUD] 🎤 Received volume: {val:.4f} -> voice_raw={self._voice_raw:.4f}")
 
     def _on_frequency_bands(self, freq_bands: dict):
         """Update frequency bands for color mapping."""
         self._frequency_bands = freq_bands
-        print(f"[HUD] 🎵 Frequency bands updated: {freq_bands}", flush=True)
+        log.info(f"[HUD] 🎵 Frequency bands updated: {freq_bands}")
 
     def _enter(self, state):
         self._state    = state
@@ -523,7 +519,7 @@ class MenuBarWaveformController(QObject):
 
         # DEBUG: Log voice data every 60 ticks (~1 second)
         if int(self._t * 60) % 60 == 0 and self._state == LISTENING:
-            print(f"[HUD DEBUG] voice_raw={self._voice_raw:.3f} voice_smooth={v:.3f} state={self._state}", flush=True)
+            log.info(f"[HUD DEBUG] voice_raw={self._voice_raw:.3f} voice_smooth={v:.3f} state={self._state}")
 
         for i in range(NUM_BARS):
             ph = self._bar_phase[i]

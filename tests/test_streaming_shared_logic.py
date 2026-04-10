@@ -41,5 +41,21 @@ def test_remove_duplicate_chunk_prefix_removes_exact_overlap_only():
     ) == "and doing work"
 
 
+def test_remove_duplicate_chunk_prefix_ignores_case_and_edge_punctuation_for_matching():
+    assert remove_duplicate_chunk_prefix(
+        "that I made.",
+        "That I made a few months ago while writing an article for Italian Wired.",
+        max_overlap_words=8,
+    ) == "a few months ago while writing an article for Italian Wired."
+
+
+def test_remove_duplicate_chunk_prefix_keeps_text_when_overlap_trim_would_be_too_small():
+    assert remove_duplicate_chunk_prefix(
+        "once in my",
+        "once in my life.",
+        max_overlap_words=8,
+    ) == "once in my life."
+
+
 def test_normalize_text_for_word_error_rate_removes_case_and_punctuation_noise():
     assert normalize_text_for_word_error_rate("HELLO, World!!") == "hello world"

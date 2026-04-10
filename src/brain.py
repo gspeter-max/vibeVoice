@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 import numpy as np
 from streaming_shared_logic import remove_duplicate_chunk_prefix
-
+from src import log
 try:
     from pynput.keyboard import Controller
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -27,22 +27,22 @@ BACKEND = os.environ.get("BACKEND", "faster_whisper").lower().strip()
 
 def load_backend(model_name="base.en"):
     if "parakeet-tdt" in model_name:
-        print(f"[Brain] Backend: NVIDIA Parakeet-TDT (via sherpa-onnx)")
+        log.info(f"[Brain] Backend: NVIDIA Parakeet-TDT (via sherpa-onnx)")
         import backend_parakeet as backend
         model = backend.load_model(model_name)
         return backend, model
 
     if BACKEND == "openvino":
-        print("[Brain] Backend: whisper.cpp + OpenVINO (Intel iGPU)")
+        log.info("[Brain] Backend: whisper.cpp + OpenVINO (Intel iGPU)")
         try:
             import backend_openvino as backend
             model = backend.load_model(model_name)
             return backend, model
         except RuntimeError as e:
-            print(f"[Brain] ⚠️  OpenVINO unavailable: {e}")
-            print("[Brain] ↩️  Falling back to faster-whisper...")
+            log.info(f"[Brain] ⚠️  OpenVINO unavailable: {e}")
+            log.info("[Brain] ↩️  Falling back to faster-whisper...")
 
-    print(f"[Brain] Backend: faster-whisper + {model_name} + INT8 (CPU)")
+    log.info(f"[Brain] Backend: faster-whisper + {model_name} + INT8 (CPU)")
     import backend_faster_whisper as backend
     model = backend.load_model(model_name)
     return backend, model
@@ -114,12 +114,12 @@ def _finalize_session_if_ready(session_id: str) -> None:
 
     short_id = session_id[:8]
     if text:
-        print(f"[Brain] 📝 [session {short_id} | {session.received_count} chunks] → \"{text}\"", flush=True)
+        log.info(f"[Brain] 📝 [session {short_id} | {session.received_count} chunks] → \"{text}\"")
         send_hud("process")
         paste_instantly(text + " ")
         send_hud("done")
     else:
-        print(f"[Brain] 🔇 [session {short_id}] Nothing detected", flush=True)
+        log.info(f"[Brain] 🔇 [session {short_id}] Nothing detected")
         send_hud("hide")
 
     with session_store_lock:
@@ -140,19 +140,19 @@ def _handle_audio_chunk(session_id: str, seq: int, audio_bytes: bytes) -> None:
     text = ""
     if audio is not None:
         duration_s = len(audio_int16) / 16000.0
-        print(f"[Brain] 🎙️  [session {session_id[:8]} chunk {seq}] decode ({duration_s:.2f}s)", flush=True)
+        log.info(f"[Brain] 🎙️  [session {session_id[:8]} chunk {seq}] decode ({duration_s:.2f}s)")
         try:
             backend = session.backend
             model = session.model
             if backend is None or model is None:
-                print("[Brain] ⚠️  No model loaded — skipping chunk", flush=True)
+                log.info("[Brain] ⚠️  No model loaded — skipping chunk")
             else:
                 text = backend.transcribe(model, audio).strip()
         except Exception as e:
-            print(f"[Brain] ❌ Chunk decode error: {e}", flush=True)
+            log.info(f"[Brain] ❌ Chunk decode error: {e}")
             text = ""
     else:
-        print(f"[Brain] 🔇 [session {session_id[:8]} chunk {seq}] Nothing detected", flush=True)
+        log.info(f"[Brain] 🔇 [session {session_id[:8]} chunk {seq}] Nothing detected")
 
     with session.lock:
         previous_chunk_text = session.transcript_parts.get(seq - 1, "")
@@ -201,7 +201,7 @@ def paste_instantly(text: str):
             pass 
             
     except Exception as e:
-        print(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
+        log.info(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
         keyboard.type(text)
 
 
@@ -239,14 +239,14 @@ def handle_connection(conn):
             total_bytes += len(data)
             raw_audio.extend(data)
     except Exception as e:
-        print(f"[Brain] ⚠️  Recv error: {e}")
+        log.info(f"[Brain] ⚠️  Recv error: {e}")
     finally:
         conn.close()
 
     if total_bytes == 0:
         return
 
-    print(f"[Brain] 📥 Received utterance: {total_bytes} bytes", flush=True)
+    log.info(f"[Brain] 📥 Received utterance: {total_bytes} bytes")
 
     blob = bytes(raw_audio)
 
@@ -255,10 +255,10 @@ def handle_connection(conn):
             text_probe = blob.decode("utf-8").strip()
             new_model = text_probe.split(":", 1)[1]
         except Exception:
-            print("[Brain] ⚠️  Bad switch command — skipping", flush=True)
+            log.info("[Brain] ⚠️  Bad switch command — skipping")
             return
 
-        print(f"\n[Brain] 🔄 Switch model: {new_model}")
+        log.info(f"\n[Brain] 🔄 Switch model: {new_model}")
         sys.stdout.flush()
         with backend_lock:
             try:
@@ -268,15 +268,15 @@ def handle_connection(conn):
                 nb, nm = load_backend(new_model)
                 backend_info["backend"] = nb
                 backend_info["model"] = nm
-                print(f"[Brain] ✅ Switched to {new_model}")
+                log.info(f"[Brain] ✅ Switched to {new_model}")
             except Exception as e:
-                print(f"[Brain] ❌ Failed: {e}, falling back to base.en")
+                log.info(f"[Brain] ❌ Failed: {e}, falling back to base.en")
                 try:
                     nb, nm = load_backend("base.en")
                     backend_info["backend"] = nb
                     backend_info["model"] = nm
                 except Exception as e2:
-                    print(f"[Brain] 💥 Fallback failed: {e2}")
+                    log.info(f"[Brain] 💥 Fallback failed: {e2}")
             sys.stdout.flush()
         return
 
@@ -285,10 +285,10 @@ def handle_connection(conn):
             text_probe = blob.decode("utf-8").strip()
             session_id = text_probe.split(":", 1)[1]
         except Exception:
-            print("[Brain] ⚠️  Bad commit command — skipping", flush=True)
+            log.info("[Brain] ⚠️  Bad commit command — skipping")
             return
 
-        print(f"[Brain] ✅ Commit received for session {session_id[:8]}", flush=True)
+        log.info(f"[Brain] ✅ Commit received for session {session_id[:8]}")
         _mark_session_closed(session_id)
         return
 
@@ -299,7 +299,7 @@ def handle_connection(conn):
             _, session_id, seq_text = header_text.split(":", 2)
             seq = int(seq_text)
         except Exception as e:
-            print(f"[Brain] ⚠️  Bad chunk header: {e}", flush=True)
+            log.info(f"[Brain] ⚠️  Bad chunk header: {e}")
             return
 
         _handle_audio_chunk(session_id, seq, audio_bytes)
@@ -310,7 +310,7 @@ def handle_connection(conn):
         model = backend_info["model"]
 
     if backend is None or model is None:
-        print("[Brain] ⚠️  No model loaded — skipping")
+        log.info("[Brain] ⚠️  No model loaded — skipping")
         send_hud("hide")
         return
 
@@ -319,31 +319,31 @@ def handle_connection(conn):
             blob = blob[:-1]
         audio_int16 = np.frombuffer(blob, dtype=np.int16)
         if len(audio_int16) == 0:
-            print("[Brain] 🔇 Nothing detected")
+            log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
         audio = _normalize_audio(audio_int16)
         if audio is None:
-            print("[Brain] 🔇 Nothing detected")
+            log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
 
         duration_s = len(audio_int16) / 16000.0
-        print(f"[Brain] 🎙️  Final utterance decode ({duration_s:.2f}s)", flush=True)
+        log.info(f"[Brain] 🎙️  Final utterance decode ({duration_s:.2f}s)")
         send_hud("process")
         final_text = backend.transcribe(model, audio).strip()
         if not final_text:
-            print("[Brain] 🔇 Nothing detected")
+            log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
     except Exception as e:
-        print(f"[Brain] ❌ Audio decode error: {e}")
+        log.info(f"[Brain] ❌ Audio decode error: {e}")
         sys.stdout.flush()
         send_hud("hide")
         return
 
     total_latency = time.perf_counter() - t_connect
-    print(f"[Brain] 📝 [utterance | {total_latency:.2f}s total] → \"{final_text}\"")
+    log.info(f"[Brain] 📝 [utterance | {total_latency:.2f}s total] → \"{final_text}\"")
     sys.stdout.flush()
     paste_instantly(final_text + " ")
     send_hud("done")
@@ -357,13 +357,13 @@ def start_server():
     backend_info["model"] = initial_model
 
     # ★ WARM UP
-    print("[Brain] Warming up model...")
+    log.info("[Brain] Warming up model...")
     dummy = np.zeros(8000, dtype=np.float32)
     try:
         initial_backend.transcribe(initial_model, dummy)
     except Exception:
         pass
-    print("[Brain] Warm-up done ✓")
+    log.info("[Brain] Warm-up done ✓")
 
     if os.path.exists(SOCKET_PATH):
         os.remove(SOCKET_PATH)
@@ -372,7 +372,7 @@ def start_server():
     server.bind(SOCKET_PATH)
     server.listen(10)
 
-    print(f"[Brain] ✅ Streaming server ready at {SOCKET_PATH}")
+    log.info(f"[Brain] ✅ Streaming server ready at {SOCKET_PATH}")
     sys.stdout.flush()
 
     try:
@@ -382,7 +382,7 @@ def start_server():
             t.start()
 
     except KeyboardInterrupt:
-        print("\n[Brain] Shutting down...")
+        log.info("\n[Brain] Shutting down...")
     finally:
         server.close()
         if os.path.exists(SOCKET_PATH):

@@ -5,9 +5,18 @@ Highly optimized TDT (Token-and-Duration Transducer) architecture.
 Runs significantly faster than Whisper on CPU.
 """
 
+from __future__ import annotations
+
 import os
 import numpy as np
-import sherpa_onnx
+from src import log
+
+try:
+    import sherpa_onnx
+    _SHERPA_ONNX_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - depends on platform wheels
+    sherpa_onnx = None  # type: ignore[assignment]
+    _SHERPA_ONNX_IMPORT_ERROR = exc
 
 # Default model on startup if this backend is forced
 CURRENT_MODEL_NAME = "nemo-parakeet-tdt-0.6b-v3"
@@ -15,6 +24,12 @@ _model_instance = None
 
 def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     global _model_instance, CURRENT_MODEL_NAME
+
+    if sherpa_onnx is None:
+        raise RuntimeError(
+            "sherpa-onnx is unavailable in this environment"
+            + (f": {_SHERPA_ONNX_IMPORT_ERROR}" if _SHERPA_ONNX_IMPORT_ERROR else "")
+        )
     
     if model_name:
         # Strip 'nemo-' prefix if user passed it, as we add it in the path
@@ -25,7 +40,7 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     if not os.path.exists(model_dir):
          raise RuntimeError(f"Model directory not found: {model_dir}")
 
-    print(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_dir}...", flush=True)
+    log.info(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_dir}...")
 
     # Use PARAKEET_THREADS env var, or default to all cores
     # NOTE: os.environ.get() returns empty string if var is set but empty
@@ -38,7 +53,7 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
         # OPTIMIZATION: On Intel i7, using 6 physical cores is faster than 12 logical cores
         num_threads = 6
 
-    print(f"[sherpa-onnx] Using {num_threads} threads", flush=True)
+    log.info(f"[sherpa-onnx] Using {num_threads} threads")
 
     # Use the from_transducer factory method which is available in the Python API
     recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
@@ -55,7 +70,7 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     )
 
     _model_instance = recognizer
-    print(f"[sherpa-onnx] ✅ Model loaded.", flush=True)
+    log.info(f"[sherpa-onnx] ✅ Model loaded.")
     return _model_instance
 def transcribe(model: sherpa_onnx.OfflineRecognizer, audio_array: np.ndarray) -> str:
     """

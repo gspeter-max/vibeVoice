@@ -12,7 +12,7 @@ Uses CTranslate2 with:
 import os
 import platform
 import numpy as np
-
+from src import log
 try:
     from faster_whisper import WhisperModel
 except ImportError:  # pragma: no cover - test environments may not have the package
@@ -38,8 +38,8 @@ def load_model(model_name=None) -> WhisperModel:
     if model_name:
         CURRENT_MODEL_NAME = model_name
         
-    print(f"\n[faster-whisper] 🚀 Optimizing for Intel i7 (Threads: {CPU_THREADS}, Mode: {COMPUTE_TYPE})")
-    print(f"[faster-whisper] Loading {CURRENT_MODEL_NAME}...", flush=True)
+    log.info(f"\n[faster-whisper] 🚀 Optimizing for Intel i7 (Threads: {CPU_THREADS}, Mode: {COMPUTE_TYPE})")
+    log.info(f"[faster-whisper] Loading {CURRENT_MODEL_NAME}...")
 
     _model_instance = WhisperModel(
         CURRENT_MODEL_NAME,
@@ -50,7 +50,7 @@ def load_model(model_name=None) -> WhisperModel:
         download_root=os.path.expanduser("~/.cache/parakeet-flow/models"),
     )
 
-    print(f"[faster-whisper] ✅ Model loaded.", flush=True)
+    log.info(f"[faster-whisper] ✅ Model loaded.")
     return _model_instance
 def transcribe(model: WhisperModel, audio_array: np.ndarray) -> str:
     """

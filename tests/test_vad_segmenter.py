@@ -9,6 +9,16 @@ class FakeVAD:
         return next(self._scores)
 
 
+class RecordingVAD:
+    def __init__(self, score):
+        self.score = score
+        self.seen_audio_chunks = []
+
+    def is_speech(self, audio_chunk, sample_rate=16000):
+        self.seen_audio_chunks.append(audio_chunk.copy())
+        return self.score
+
+
 def test_gate_flushes_only_after_voice_then_silence():
     gate = SileroUtteranceGate(
         vad_engine=FakeVAD([0.95, 0.91]),
@@ -58,3 +68,46 @@ def test_gate_falls_back_to_energy_when_silero_score_flatlines():
     assert gate.has_speech_started() is True
     assert gate.push(quiet, now=0.1) is False
     assert gate.should_finalize(now=0.31) is True
+
+
+def test_gate_keeps_raw_audio_but_uses_analysis_audio_for_detection():
+    vad_engine = RecordingVAD(score=0.95)
+    gate = SileroUtteranceGate(
+        vad_engine=vad_engine,
+        voice_threshold=0.5,
+        silence_timeout_s=0.2,
+        min_utterance_bytes=8,
+        frame_samples=4,
+    )
+
+    raw_pcm16_bytes = b"\x01\x00" * 4
+    analysis_pcm16_bytes = b"\x02\x00" * 4
+
+    assert gate.push(
+        raw_pcm16_bytes,
+        now=0.0,
+        analysis_pcm16_bytes=analysis_pcm16_bytes,
+    ) is True
+    assert gate.flush() == raw_pcm16_bytes
+    assert vad_engine.seen_audio_chunks[0].tolist() == [2 / 32768.0] * 4
+
+
+def test_gate_uses_current_raw_frame_for_energy_fallback_not_first_frame_forever():
+    gate = SileroUtteranceGate(
+        vad_engine=FakeVAD([0.001, 0.001]),
+        voice_threshold=0.5,
+        silence_timeout_s=0.2,
+        min_utterance_bytes=16,
+        frame_samples=4,
+    )
+
+    loud_raw_pcm16_bytes = b"\x00\x10" * 4
+    quiet_raw_pcm16_bytes = b"\x00\x01" * 4
+    boosted_quiet_analysis_pcm16_bytes = b"\x00\x06" * 4
+
+    assert gate.push(loud_raw_pcm16_bytes, now=0.0) is True
+    assert gate.push(
+        quiet_raw_pcm16_bytes,
+        now=0.1,
+        analysis_pcm16_bytes=boosted_quiet_analysis_pcm16_bytes,
+    ) is False

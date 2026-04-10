@@ -19,6 +19,8 @@ brain.log
 output.log
 startup.log
 
+evaluation/results  
+evaluation/__pycache__
 # Audio files (Test data)
 *.wav
 *.aiff

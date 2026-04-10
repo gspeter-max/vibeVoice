@@ -20,9 +20,18 @@ import termios
 import tty
 import numpy as np
 
-from streaming_shared_logic import apply_previous_chunk_overlap, should_split_chunk_after_silence
+from streaming_shared_logic import (
+    DEFAULT_ENERGY_RATIO,
+    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+    DEFAULT_OVERLAP_SECONDS,
+    DEFAULT_SILENCE_TIMEOUT_SECONDS,
+    DEFAULT_VAD_ENERGY_THRESHOLD,
+    DEFAULT_VAD_SCORE_THRESHOLD,
+    apply_previous_chunk_overlap,
+    should_split_chunk_after_silence,
+)
 from vad_segmenter import SileroVAD, SileroUtteranceGate
-
+from src import log
 try:
     from pynput import keyboard, mouse
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -73,14 +82,14 @@ try:
                 if success:
                     _VOICE_ISOLATION_ACTIVE = True
                 else:
-                    print(f"[Ear] Voice processing not enabled: {error}", flush=True)
+                    log.info(f"[Ear] Voice processing not enabled: {error}")
             else:
-                print("[Ear] inputNode does not support setVoiceProcessingEnabled_error_", flush=True)
+                log.info("[Ear] inputNode does not support setVoiceProcessingEnabled_error_")
         except Exception as e:
-            print(f"[Ear] Voice isolation init failed: {e}", flush=True)
+            log.info(f"[Ear] Voice isolation init failed: {e}")
 except ImportError:
     def _enable_macos_voice_isolation():
-        print("[Ear] AVFoundation not available", flush=True)
+        log.info("[Ear] AVFoundation not available")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
@@ -91,14 +100,24 @@ SILENCE_STREAMING_MODE = "silence_streaming"
 VOL_PORT        = 57235
 RECORDING_BUTTON_HOLD_THRESHOLD  = 0.4
 VAD_MODEL_PATH  = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
-VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", "0.50"))
-VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(os.environ.get("VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT", "0.65"))
-VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "6.0"))
-VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05"))
-VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", "2.5"))
+VAD_THRESHOLD   = float(os.environ.get("VAD_THRESHOLD", str(DEFAULT_VAD_SCORE_THRESHOLD)))
+VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(
+    os.environ.get(
+        "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
+        str(DEFAULT_SILENCE_TIMEOUT_SECONDS),
+    )
+)
+VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "1.0"))
+VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", str(DEFAULT_VAD_ENERGY_THRESHOLD)))
+VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", str(DEFAULT_ENERGY_RATIO)))
 VAD_STATUS_LOG_INTERVAL = 0.5
-OVERLAP_SECONDS = float(os.environ.get("OVERLAP_SECONDS", "0.50"))
-MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = float(os.environ.get("MIN_CHUNK_SECONDS", "12.0"))
+OVERLAP_SECONDS = float(os.environ.get("OVERLAP_SECONDS", str(DEFAULT_OVERLAP_SECONDS)))
+MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = float(
+    os.environ.get(
+        "MIN_CHUNK_SECONDS",
+        str(DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS),
+    )
+)
 
 _RCMD_VK = 54
 
@@ -134,7 +153,7 @@ def get_rms(block: bytes) -> float:
     return math.sqrt(sum_sq / len(shorts))
 
 def send_switch_command(model_name):
-    print(f"\n🔄 Switching Brain to use: {model_name}...\n", end="", flush=True)
+    log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(SOCKET_PATH)
@@ -143,10 +162,10 @@ def send_switch_command(model_name):
         client.shutdown(socket.SHUT_WR)
         client.close()
     except Exception as e:
-        print(f"\n❌ Failed to send switch command: {e}\n", end="", flush=True)
+        log.info(f"\n❌ Failed to send switch command: {e}\n")
 
 def run_self_test():
-    print("\n🧪 Running SELF-TEST (synthetic audio)...\n", end="", flush=True)
+    log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
     duration = 1.0
     frequency = 440.0
     t = np.linspace(0, duration, int(RATE * duration), endpoint=False)
@@ -164,12 +183,12 @@ def run_self_test():
             # Check if socket exists first
             if not os.path.exists(SOCKET_PATH):
                 if attempt < max_retries - 1:
-                    print(f"\r⏳ Socket not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n", end="", flush=True)
+                    log.info(f"\r⏳ Socket not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n")
                     time.sleep(retry_delay)
                     continue
                 else:
-                    print(f"\r❌ Self-test failed: Socket not found at {SOCKET_PATH}\n", end="", flush=True)
-                    print("   Is Brain running? Check this terminal for Brain output.\n", end="", flush=True)
+                    log.info(f"\r❌ Self-test failed: Socket not found at {SOCKET_PATH}\n")
+                    log.info("   Is Brain running? Check this terminal for Brain output.\n")
                     return
 
             client.connect(SOCKET_PATH)
@@ -177,19 +196,19 @@ def run_self_test():
             client.shutdown(socket.SHUT_WR)
             client.close()
 
-            print("\r✅ Self-test audio sent to Brain\n", end="", flush=True)
+            log.info("\r✅ Self-test audio sent to Brain\n")
             return
 
         except ConnectionRefusedError:
             if attempt < max_retries - 1:
-                print(f"\r⏳ Brain busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n", end="", flush=True)
+                log.info(f"\r⏳ Brain busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n")
                 time.sleep(retry_delay)
             else:
-                print(f"\r❌ Self-test failed: Brain not accepting connections\n", end="", flush=True)
-                print("   Brain might be loading model. Check this terminal for Brain output.\n", end="", flush=True)
+                log.info(f"\r❌ Self-test failed: Brain not accepting connections\n")
+                log.info("   Brain might be loading model. Check this terminal for Brain output.\n")
 
         except Exception as e:
-            print(f"\r❌ Self-test failed: {e}\n", end="", flush=True)
+            log.info(f"\r❌ Self-test failed: {e}\n")
             break
 
 
@@ -224,31 +243,35 @@ class TerminalMenu(threading.Thread):
 
 
 def select_mic(p):
-    print("\n🎤  SELECT YOUR MICROPHONE:")
-    print("─" * 30)
+    log.info("\n🎤  SELECT YOUR MICROPHONE:")
+    log.info("─" * 30)
     devices = []
     default_device = p.get_default_input_device_info()
-    default_index = default_device.get("index")
-    for i in range(p.get_device_count()):
-        info = p.get_device_info_by_index(i)
+    default_device_index = default_device.get("index")
+    default_choice_index = 0
+    for device_index in range(p.get_device_count()):
+        info = p.get_device_info_by_index(device_index)
         if info.get("maxInputChannels") > 0:
             name = info.get("name")
-            is_default = " (DEFAULT)" if i == default_index else ""
-            print(f" [{i}] {name}{is_default}")
-            devices.append(i)
-    print("─" * 30)
+            choice_index = len(devices)
+            is_default = " (DEFAULT)" if device_index == default_device_index else ""
+            log.info(f" [{choice_index}] {name}{is_default}")
+            devices.append(device_index)
+            if device_index == default_device_index:
+                default_choice_index = choice_index
+    log.info("─" * 30)
     while True:
         try:
-            choice = input(f"Select Mic Index [default {default_index}]: ").strip()
+            choice = input(f"Select Mic Index [default {default_choice_index}]: ").strip()
             if not choice:
-                return default_index
-            idx = int(choice)
-            if idx in devices:
-                return idx
+                return default_device_index
+            choice_index = int(choice)
+            if 0 <= choice_index < len(devices):
+                return devices[choice_index]
             else:
-                print("❌ Invalid index.")
+                log.info("❌ Invalid index.")
         except ValueError:
-            print("❌ Please enter a valid number.")
+            log.info("❌ Please enter a valid number.")
 
 
 # ── Main ear class (STREAMING) ─────────────────────────────────────────────────
@@ -270,7 +293,7 @@ class Ear:
         if os.environ.get("VOICE_ISOLATION", "0") == "1":
             _enable_macos_voice_isolation()
         else:
-            print("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)", flush=True)
+            log.info("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)")
 
         if input_device_index is None:
             self.input_device_index = self.pyaudio_libaray_for_capturing_audio.get_default_input_device_info().get("index")
@@ -303,10 +326,10 @@ class Ear:
         # ★ VAD: buffer full utterances locally before sending to Brain
         try:
             self._vad_engine = SileroVAD(VAD_MODEL_PATH)
-            print("[Ear] Silero VAD loaded ✓", flush=True)
+            log.info("[Ear] Silero VAD loaded ✓")
         except Exception as e:
             self._vad_engine = None
-            print(f"[Ear] ⚠️ Silero VAD load failed: {e} — using buffer-only fallback", flush=True)
+            log.info(f"[Ear] ⚠️ Silero VAD load failed: {e} — using buffer-only fallback")
 
         self._utterance_gate = SileroUtteranceGate(
             self._vad_engine,
@@ -315,17 +338,16 @@ class Ear:
             energy_threshold=VAD_ENERGY_THRESHOLD,
             energy_ratio=VAD_ENERGY_RATIO,
         )
-        print(
+        log.info(
             f"[Ear] VAD config: threshold={VAD_THRESHOLD:.2f}, silence_timeout={VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s, "
             f"vad_gain={self.vad_sensitivity_boost:.1f}x, energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
-            f"energy_ratio={VAD_ENERGY_RATIO:.2f}",
-            flush=True,
+            f"energy_ratio={VAD_ENERGY_RATIO:.2f}"
         )
 
         # ★ ALWAYS LISTENING MODE: Open stream once at startup
         self.stream = None
         self._open_mic_stream()
-        print(f"[Ear] Mic selected: {self.active_mic_name} ✓", flush=True)
+        log.info(f"[Ear] Mic selected: {self.active_mic_name} ✓")
 
     def _send_hud(self, cmd):
         try:
@@ -335,7 +357,7 @@ class Ear:
             s.sendall(cmd.encode())
             s.close()
         except Exception as e:
-            print(f"[Ear] ❌ HUD command '{cmd}' failed: {e}", flush=True)
+            log.info(f"[Ear] ❌ HUD command '{cmd}' failed: {e}")
 
     def _start_volume_sender(self):
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -344,7 +366,7 @@ class Ear:
             while True:
                 with self._lock:
                     if not self.is_recording:
-                        print(f"[Ear] Volume sender stopped (sent {packets_sent} packets)", flush=True)
+                        log.info(f"[Ear] Volume sender stopped (sent {packets_sent} packets)")
                         break
                     rms = self.last_rms
                     freq_bands = self.last_frequency_bands
@@ -354,11 +376,11 @@ class Ear:
                     udp.sendto(message.encode(), ('127.0.0.1', VOL_PORT))
                     packets_sent += 1
                 except Exception as e:
-                    print(f"[Ear] ❌ Failed to send volume: {e}", flush=True)
+                    log.info(f"[Ear] ❌ Failed to send volume: {e}")
                 time.sleep(0.04)
             udp.close()
         threading.Thread(target=_sender, daemon=True).start()
-        print(f"[Ear] Volume sender thread started", flush=True)
+        log.info("[Ear] Volume sender thread started")
 
     def _is_no_streaming_mode(self) -> bool:
         return RECORDING_MODE == NO_STREAMING_MODE
@@ -386,10 +408,10 @@ class Ear:
                 client.connect(SOCKET_PATH)
                 client.sendall(header + utterance_bytes)
                 client.shutdown(socket.SHUT_WR)
-            print(f"[Ear] 📤 Chunk {seq} sent to Brain ({len(utterance_bytes)} bytes)", flush=True)
+            log.info(f"[Ear] 📤 Chunk {seq} sent to Brain ({len(utterance_bytes)} bytes)")
             return True
         except Exception as e:
-            print(f"\r❌ Failed to send chunk to Brain: {e}\n", flush=True)
+            log.info(f"\r❌ Failed to send chunk to Brain: {e}\n")
             return False
 
     def _commit_recording_session(self) -> bool:
@@ -403,10 +425,10 @@ class Ear:
                 client.connect(SOCKET_PATH)
                 client.sendall(f"CMD_SESSION_COMMIT:{session_id}".encode("utf-8"))
                 client.shutdown(socket.SHUT_WR)
-            print(f"[Ear] ✅ Commit sent for session {session_id}", flush=True)
+            log.info(f"[Ear] ✅ Commit sent for session {session_id}")
             return True
         except Exception as e:
-            print(f"\r❌ Failed to commit session: {e}\n", flush=True)
+            log.info(f"\r❌ Failed to commit session: {e}\n")
             return False
 
     def _boost_pcm16_bytes(self, pcm16_bytes: bytes) -> bytes:
@@ -472,7 +494,7 @@ class Ear:
         if not utterance:
             if stop_session:
                 self._pending_chunk_overlap_audio = b""
-                print("[Ear] 🔇 No speech captured; stopping recording", flush=True)
+                log.info("[Ear] 🔇 No speech captured; stopping recording")
                 if had_session:
                     self._commit_recording_session()
                 self._current_session_id = None
@@ -487,13 +509,12 @@ class Ear:
 
         duration = (total * CHUNK) / RATE
         if stop_session:
-            print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
+            log.info(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n")
             threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
         else:
-            print(
+            log.info(
                 f"\r[Ear] ✂️  Silence boundary hit ({silence_elapsed:.2f}s) — sending chunk "
-                f"{duration:.1f}s ({total} chunks)",
-                flush=True,
+                f"{duration:.1f}s ({total} chunks)"
             )
 
         sent = self._send_audio_chunk_to_brain(utterance_for_brain)
@@ -516,7 +537,7 @@ class Ear:
             self.last_rms = 0.0
 
         duration = (total * CHUNK) / RATE
-        print(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n", end="", flush=True)
+        log.info(f"\r\n⏹️  Streamed {duration:.1f}s ({total} chunks) — Brain transcribing...\n")
         threading.Thread(target=self._send_hud, args=("process",), daemon=True).start()
         threading.Thread(target=self._close_brain_stream, daemon=True).start()
 
@@ -526,7 +547,7 @@ class Ear:
             if self._brain_sock is not None:
                 return True
             if not os.path.exists(SOCKET_PATH):
-                print(f"\r❌ Brain socket not found\n", flush=True)
+                log.info(f"\r❌ Brain socket not found\n")
                 return False
             try:
                 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -535,7 +556,7 @@ class Ear:
                 self._brain_sock = sock
                 return True
             except Exception as e:
-                print(f"\r❌ Brain connect failed: {e}\n", flush=True)
+                log.info(f"\r❌ Brain connect failed: {e}\n")
                 return False
 
     def _stream_chunk_to_brain(self, chunk_bytes: bytes):
@@ -545,14 +566,14 @@ class Ear:
             try:
                 self._brain_sock.sendall(chunk_bytes)
             except (BrokenPipeError, ConnectionResetError):
-                print(f"\r⚠️  Brain disconnected — will transcribe on release\n", flush=True)
+                log.info(f"\r⚠️  Brain disconnected — will transcribe on release\n")
                 try:
                     self._brain_sock.close()
                 except Exception:
                     pass
                 self._brain_sock = None
             except Exception as e:
-                print(f"\r❌ Stream send error: {e}\n", flush=True)
+                log.info(f"\r❌ Stream send error: {e}\n")
                 try:
                     self._brain_sock.close()
                 except Exception:
@@ -593,11 +614,18 @@ class Ear:
                 # ★ VAD BUFFERING: keep the full utterance locally until silence closes it
                 now = time.time()
                 vad_bytes = self._prepare_vad_chunk(in_data)
-                speech_now = self._utterance_gate.push(vad_bytes, now=now)
+                
+                speech_now = self._utterance_gate.push(
+                    pcm16_bytes=in_data,
+                    now=now ,
+                    analysis_pcm16_bytes= vad_bytes 
+                )
+
                 if speech_now and not self._chunk_speech_logged:
                     self._chunk_speech_logged = True
                     self._silence_pending_logged = False
-                    print("[Ear] 🗣️  VAD speech detected", flush=True)
+                    log.info("[Ear] 🗣️  VAD speech detected")
+                
                 if now - self._vad_state_log_time >= VAD_STATUS_LOG_INTERVAL:
                     try:
                         score = self._utterance_gate.last_score()
@@ -605,12 +633,11 @@ class Ear:
                         dynamic_threshold = self._utterance_gate.last_dynamic_threshold()
                         started = self._utterance_gate.has_speech_started()
                         silence_elapsed = self._utterance_gate.silence_elapsed(now) if started else 0.0
-                        print(
+                        log.info(
                             f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
                             f"started={started} silence={silence_elapsed:.2f}s "
                             f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
                             f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
-                            flush=True,
                         )
                     except Exception:
                         pass
@@ -678,7 +705,7 @@ class Ear:
 
         except Exception as e:
             # Fallback to equal distribution if FFT fails
-            print(f"[Ear] ⚠️ Frequency analysis failed: {e}", flush=True)
+            log.info(f"[Ear] ⚠️ Frequency analysis failed: {e}")
             return {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
 
     def _open_mic_stream(self):
@@ -699,7 +726,7 @@ class Ear:
             frames_per_buffer=CHUNK,
             stream_callback=self._audio_callback
         )
-        print(f"[Ear] 🎤 Mic stream opened", flush=True)
+        log.info("[Ear] 🎤 Mic stream opened")
 
     def _close_mic_stream(self):
         """Close mic stream after recording."""
@@ -730,7 +757,7 @@ class Ear:
         if not _is_right_cmd(key):
             return
 
-        print(f"[Ear] 🔵 Right CMD pressed - on_press() called", flush=True)
+        log.info("[Ear] 🔵 Right CMD pressed - on_press() called")
 
         if self._toggle_active:
             self._toggle_active = False
@@ -739,25 +766,25 @@ class Ear:
 
         with self._lock:
             if self.is_recording:
-                print(f"[Ear] ⚠️ Already recording, ignoring press", flush=True)
+                log.info("[Ear] ⚠️ Already recording, ignoring press")
                 return
 
         if self._is_no_streaming_mode():
-            print(f"[Ear] 🔵 About to open brain stream", flush=True)
+            log.info("[Ear] 🔵 About to open brain stream")
             if not self._open_brain_stream():
-                print(f"[Ear] ❌ Failed to open brain stream, aborting", flush=True)
+                log.info("[Ear] ❌ Failed to open brain stream, aborting")
                 return
 
-        print(f"[Ear] 🔵 About to start recording", flush=True)
+        log.info("[Ear] 🔵 About to start recording")
         self._start_recording_state(from_hold=False)
 
         self._cmd_press_time = time.time()
-        print("\r\n" + "─" * 50, flush=True)
-        print(f"\r🎙️  RECORDING ({self.active_mic_name})", flush=True)
+        log.info("\r\n" + "─" * 50)
+        log.info(f"\r🎙️  RECORDING ({self.active_mic_name})")
 
-        print(f"[Ear] 🔵 About to send 'listen' command to HUD", flush=True)
+        log.info("[Ear] 🔵 About to send 'listen' command to HUD")
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
-        print(f"[Ear] 🔵 About to start volume sender", flush=True)
+        log.info("[Ear] 🔵 About to start volume sender")
         self._start_volume_sender()
 
     def on_release(self, key):
@@ -775,11 +802,11 @@ class Ear:
         if from_first_cmd_press_to_release_time_diff >= RECORDING_BUTTON_HOLD_THRESHOLD:
             # if user is pressin the cmd button for long time then from first cmd press to release time it large 
             # so if that is small that means the user is doing togglning 
-            print(f"\r[Ear] ⏹️  Right CMD released - finalizing now", flush=True)
+            log.info("\r[Ear] ⏹️  Right CMD released - finalizing now")
             self._stop_and_send(stop_session=True)
         else:
             self._toggle_active = True
-            print(f"\r\n⏸️  Toggle mode — tap Right CMD again to stop", flush=True)
+            log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
 
     def on_mouse_click(self, x, y, button, pressed):
         """
@@ -821,7 +848,7 @@ class Ear:
                     if not self.is_recording:
                         self._recording_from_hold = False
                         return
-                print("\r[Ear] ⏹️  Mouse released - finalizing now", flush=True)
+                log.info("\r[Ear] ⏹️  Mouse released - finalizing now")
                 self._stop_and_send(stop_session=True)
                 self._recording_from_hold = False
 
@@ -864,15 +891,15 @@ class Ear:
                 # Hold duration exceeded threshold - start recording
                 if self._is_no_streaming_mode():
                     if not self._open_brain_stream():
-                        print(f"\r[Ear] ❌ Failed to open brain stream", flush=True)
+                        log.info("\r[Ear] ❌ Failed to open brain stream")
                         with self._lock:
                             self._is_holding = False
                         return
 
                 self._start_recording_state(from_hold=True)
 
-                print("\r\n" + "─" * 50, flush=True)
-                print(f"\r🎙️  RECORDING via MOUSE HOLD ({self.active_mic_name})", flush=True)
+                log.info("\r\n" + "─" * 50)
+                log.info(f"\r🎙️  RECORDING via MOUSE HOLD ({self.active_mic_name})")
 
                 threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
                 self._start_volume_sender()
@@ -880,7 +907,7 @@ class Ear:
         # Display volume meter when recording
         if recording:
             meter = "█" * min(int(rms * 500), 50)
-            print(f"\r  Level: [{meter:<50}]", end="", flush=True)
+            log.info(f"\r  Level: [{meter:<50}]")
 
             if self._is_silence_streaming_mode():
                 now = time.time()
@@ -889,9 +916,8 @@ class Ear:
                     silence_elapsed = self._utterance_gate.silence_elapsed(now)
                     if silence_elapsed > 0.0:
                         self._silence_pending_logged = True
-                        print(
+                        log.info(
                             f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s)",
-                            flush=True,
                         )
 
                 if (
@@ -904,12 +930,11 @@ class Ear:
                         max_score = self._utterance_gate.max_score()
                     except Exception:
                         max_score = 0.0
-                    print(
+                    log.info(
                         f"[Ear] ⚠️  VAD has not entered speech state yet "
                         f"(max_score={max_score:.3f}, threshold={VAD_THRESHOLD:.2f}, "
                         f"last_energy={self._utterance_gate.last_energy():.4f}, "
                         f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
-                        flush=True,
                     )
                     self._vad_no_speech_warned = True
                 
@@ -926,9 +951,8 @@ class Ear:
                     silence_duration_seconds=silence_elapsed,
                 )
                 if split_decision.should_split_now:
-                    print(
+                    log.info(
                         f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
-                        flush=True,
                     )
                     self._stop_and_send(stop_session=False)
 
@@ -955,7 +979,7 @@ def start_ear():
     # Mouse listener for hold-to-record
     mouse_listener = mouse.Listener(on_click=ear.on_mouse_click)
     mouse_listener.start()
-    print("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record", flush=True)
+    log.info("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record")
 
     backend_label = {
         "faster_whisper": "faster-whisper + distil-large-v3 (INT8)",
@@ -964,25 +988,25 @@ def start_ear():
 
     mic_mode = "Voice Isolation (macOS)" if os.environ.get("VOICE_ISOLATION", "0") == "1" else "Standard (Raw Audio)"
 
-    print()
-    print("╔══════════════════════════════════════════════════╗")
-    print("║      🎙️  PARAKEET FLOW v2 — STREAMING MODE       ║")
-    print(f"║  Backend : {backend_label:<38}║")
-    print(f"║  Mic Mode: {mic_mode:<38}║")
-    print(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
-    print("╚══════════════════════════════════════════════════╝")
-    print(" Press [1] tiny.en      [2] base.en     [3] small.en")
-    print(" Press [4] distil-large [5] medium.en   [6] large-v2")
-    print(" Press [7] large-v3     [8] turbo       [9] Parakeet v2")
-    print(" Press [0] Parakeet v3  [t] Self-test")
-    print("─" * 52)
-    print(" Brain output prints directly in this terminal.\n")
-    print("─" * 52)
+    
+    log.info("╔══════════════════════════════════════════════════╗")
+    log.info("║      🎙️  PARAKEET FLOW v2 — STREAMING MODE       ║")
+    log.info(f"║  Backend : {backend_label:<38}║")
+    log.info(f"║  Mic Mode: {mic_mode:<38}║")
+    log.info(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
+    log.info("╚══════════════════════════════════════════════════╝")
+    log.info(" Press [1] tiny.en      [2] base.en     [3] small.en")
+    log.info(" Press [4] distil-large [5] medium.en   [6] large-v2")
+    log.info(" Press [7] large-v3     [8] turbo       [9] Parakeet v2")
+    log.info(" Press [0] Parakeet v3  [t] Self-test")
+    log.info("─" * 52)
+    log.info(" Brain output prints directly in this terminal.")
+    log.info("─" * 52)
 
     try:
         ear.record_loop()
     except KeyboardInterrupt:
-        print("\r\n\nShutting down Ear...")
+        log.info("\r\n\nShutting down Ear...")
     finally:
         menu.stop()
         ear.cleanup()

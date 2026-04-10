@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     # Core STT backend (primary)
     "faster-whisper>=1.1.0",
+    "onnxruntime==1.21.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 
     # Parakeet backend (optional, high accuracy)
     "sherpa-onnx>=1.10.0",
@@ -16,7 +17,7 @@ dependencies = [
 
     # Keyboard control (auto-type output)
     "pynput>=1.7.7",
-
+    "structlog",
     # Numerics (used for audio processing)
     "numpy>=1.26.0",
 

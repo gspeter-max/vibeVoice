@@ -3,11 +3,16 @@ import io
 import json
 import os
 from pathlib import Path
-from pprint import pprint
 from typing import Any
-
+from src import log 
 import numpy as np
 from src.streaming_shared_logic import (
+    DEFAULT_ENERGY_RATIO,
+    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+    DEFAULT_OVERLAP_SECONDS,
+    DEFAULT_SILENCE_TIMEOUT_SECONDS,
+    DEFAULT_VAD_ENERGY_THRESHOLD,
+    DEFAULT_VAD_SCORE_THRESHOLD,
     apply_previous_chunk_overlap,
     normalize_text_for_word_error_rate,
     remove_duplicate_chunk_prefix,
@@ -19,7 +24,7 @@ PARAKEET_V2_MODEL_NAME = "parakeet-tdt-0.6b-v2"
 DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_FRAME_SAMPLES = 512
 DEFAULT_DATASET_NAME = "hf-internal-testing/librispeech_asr_dummy"
-DEFAULT_DATASET_CONFIG_NAME = "clean"
+DEFAULT_DATASET_CONFIG_NAME = None
 DEFAULT_DATASET_SPLIT = "validation"
 DEFAULT_AUDIO_COLUMN_NAME = "audio"
 DEFAULT_TEXT_COLUMN_NAME = "text"
@@ -27,20 +32,26 @@ DEFAULT_EXAMPLE_INDEX = 0
 DEFAULT_START_EXAMPLE_INDEX = 0
 DEFAULT_MAX_EXAMPLE_COUNT = 1
 DEFAULT_VAD_MODEL_PATH = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
-DEFAULT_SILENCE_TIMEOUT_SECONDS = 0.65
-DEFAULT_VAD_THRESHOLD = 0.50
-DEFAULT_ENERGY_THRESHOLD = 0.05
-DEFAULT_ENERGY_RATIO = 2.5
-DEFAULT_OVERLAP_SECONDS = 0.50
 DEFAULT_MAX_OVERLAP_WORDS = 8
-DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS = 12.0
-DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/streaming_evaluation_last_run.json"
+DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run.json"
 
 
 def load_evaluation_model():
     from src.backend_parakeet import load_model
 
     return load_model(PARAKEET_V2_MODEL_NAME)
+
+
+def resolve_dataset_config_name_to_load(
+    *,
+    dataset_name: str,
+    dataset_config_name: str | None,
+) -> str | None:
+    if dataset_config_name:
+        return dataset_config_name
+    if dataset_name == DEFAULT_DATASET_NAME:
+        return "clean"
+    return None
 
 
 def load_one_dataset_item_audio_and_reference_text(
@@ -52,22 +63,80 @@ def load_one_dataset_item_audio_and_reference_text(
     text_column_name: str,
     example_index: int,
 ):
+    selected_dataset_items = load_selected_dataset_items_audio_and_reference_text(
+        dataset_name=dataset_name,
+        dataset_config_name=dataset_config_name,
+        dataset_split=dataset_split,
+        audio_column_name=audio_column_name,
+        text_column_name=text_column_name,
+        first_sample_number_to_load=example_index,
+        how_many_samples_to_load=1,
+        use_streaming_dataset_load=False,
+    )
+    selected_dataset_item = selected_dataset_items[0]
+    return selected_dataset_item["audio_array"], selected_dataset_item["reference_text"]
+
+
+def load_selected_dataset_items_audio_and_reference_text(
+    *,
+    dataset_name: str,
+    dataset_config_name: str | None,
+    dataset_split: str,
+    audio_column_name: str,
+    text_column_name: str,
+    first_sample_number_to_load: int,
+    how_many_samples_to_load: int,
+    use_streaming_dataset_load: bool,
+) -> list[dict[str, Any]]:
     from datasets import Audio, load_dataset
 
+    resolved_dataset_config_name = resolve_dataset_config_name_to_load(
+        dataset_name=dataset_name,
+        dataset_config_name=dataset_config_name,
+    )
     dataset = load_dataset(
         dataset_name,
-        dataset_config_name,
+        resolved_dataset_config_name,
         split=dataset_split,
+        streaming=use_streaming_dataset_load,
     )
     dataset = dataset.cast_column(
         audio_column_name,
         Audio(sampling_rate=DEFAULT_SAMPLE_RATE, decode=False),
     )
 
-    dataset_item = dataset[example_index]
-    audio_array = load_pcm16k_audio_array_from_audio_feature_value(dataset_item[audio_column_name])
-    reference_text = str(dataset_item[text_column_name]).strip()
-    return audio_array, reference_text
+    selected_dataset_items: list[dict[str, Any]] = []
+
+    if use_streaming_dataset_load:
+        streamed_dataset_items = dataset.skip(first_sample_number_to_load).take(how_many_samples_to_load)
+        for sample_offset, dataset_item in enumerate(streamed_dataset_items):
+            audio_array = load_pcm16k_audio_array_from_audio_feature_value(dataset_item[audio_column_name])
+            reference_text = str(dataset_item[text_column_name]).strip()
+            selected_dataset_items.append(
+                {
+                    "example_index": first_sample_number_to_load + sample_offset,
+                    "audio_array": audio_array,
+                    "reference_text": reference_text,
+                }
+            )
+        return selected_dataset_items
+
+    for example_index in range(
+        first_sample_number_to_load,
+        first_sample_number_to_load + how_many_samples_to_load,
+    ):
+        dataset_item = dataset[example_index]
+        audio_array = load_pcm16k_audio_array_from_audio_feature_value(dataset_item[audio_column_name])
+        reference_text = str(dataset_item[text_column_name]).strip()
+        selected_dataset_items.append(
+            {
+                "example_index": example_index,
+                "audio_array": audio_array,
+                "reference_text": reference_text,
+            }
+        )
+
+    return selected_dataset_items
 
 
 def load_pcm16k_audio_array_from_audio_feature_value(audio_feature_value: dict[str, Any]) -> np.ndarray:
@@ -182,7 +251,33 @@ def calculate_word_error_rate_for_final_streaming_text(
     reference_text: str,
     final_streaming_text: str,
 ) -> float:
-    import jiwer
+    try:
+        import jiwer
+    except ModuleNotFoundError:
+        reference_words = reference_text.split()
+        hypothesis_words = final_streaming_text.split()
+
+        if not reference_words:
+            return 0.0 if not hypothesis_words else 1.0
+
+        distances = [
+            list(range(len(hypothesis_words) + 1))
+        ]
+
+        for reference_index, reference_word in enumerate(reference_words, start=1):
+            current_row = [reference_index]
+            for hypothesis_index, hypothesis_word in enumerate(hypothesis_words, start=1):
+                substitution_cost = 0 if reference_word == hypothesis_word else 1
+                current_row.append(
+                    min(
+                        distances[reference_index - 1][hypothesis_index] + 1,
+                        current_row[hypothesis_index - 1] + 1,
+                        distances[reference_index - 1][hypothesis_index - 1] + substitution_cost,
+                    )
+                )
+            distances.append(current_row)
+
+        return distances[-1][-1] / len(reference_words)
 
     return jiwer.wer(reference_text, final_streaming_text)
 
@@ -232,37 +327,35 @@ def build_single_example_result_row(
         "chunk_count": int(streaming_result["chunk_count"]),
         "total_audio_seconds": round(sum(streaming_result["chunk_durations_seconds"]), 3),
         "final_word_error_rate": float(streaming_result["final_word_error_rate"]),
-        "final_streaming_text": str(streaming_result["final_streaming_text"]),
+         "final_streaming_text": str(streaming_result["final_streaming_text"]),
         "reference_text": str(streaming_result["reference_text"]),
     }
 
 
 def print_single_example_result_matrix(single_example_result_rows: list[dict[str, Any]]) -> None:
-    print(
+    log.info(
         "example_index | chunk_count | total_audio_seconds | final_word_error_rate | final_streaming_text",
-        flush=True,
     )
-    print("-" * 96, flush=True)
+    log.info("-" * 96)
     for single_example_result_row in single_example_result_rows:
         final_streaming_text = single_example_result_row["final_streaming_text"]
         shortened_final_streaming_text = (
             final_streaming_text[:57] + "..." if len(final_streaming_text) > 60 else final_streaming_text
         )
-        print(
+        log.info(
             f"{single_example_result_row['example_index']:>13} | "
             f"{single_example_result_row['chunk_count']:>11} | "
             f"{single_example_result_row['total_audio_seconds']:>19.3f} | "
             f"{single_example_result_row['final_word_error_rate']:>21.4f} | "
             f"{shortened_final_streaming_text}",
-            flush=True,
         )
 
 
 def print_multi_sample_summary(single_example_result_rows: list[dict[str, Any]]) -> None:
     if not single_example_result_rows:
-        print("average_final_word_error_rate: 0.0", flush=True)
-        print("average_chunk_count: 0.0", flush=True)
-        print("average_total_audio_seconds: 0.0", flush=True)
+        log.info("average_final_word_error_rate: 0.0")
+        log.info("average_chunk_count: 0.0")
+        log.info("average_total_audio_seconds: 0.0")
         return
 
     sample_count = len(single_example_result_rows)
@@ -270,11 +363,11 @@ def print_multi_sample_summary(single_example_result_rows: list[dict[str, Any]])
     average_chunk_count = sum(row["chunk_count"] for row in single_example_result_rows) / sample_count
     average_total_audio_seconds = sum(row["total_audio_seconds"] for row in single_example_result_rows) / sample_count
 
-    print("Summary", flush=True)
-    print(f"sample_count: {sample_count}", flush=True)
-    print(f"average_final_word_error_rate: {average_final_word_error_rate:.4f}", flush=True)
-    print(f"average_chunk_count: {average_chunk_count:.2f}", flush=True)
-    print(f"average_total_audio_seconds: {average_total_audio_seconds:.3f}", flush=True)
+    log.info("Summary")
+    log.info(f"sample_count: {sample_count}")
+    log.info(f"average_final_word_error_rate: {average_final_word_error_rate:.4f}")
+    log.info(f"average_chunk_count: {average_chunk_count:.2f}")
+    log.info(f"average_total_audio_seconds: {average_total_audio_seconds:.3f}")
 
 
 def run_fake_microphone_stream_for_one_dataset_item(
@@ -293,9 +386,9 @@ def run_fake_microphone_stream_for_one_dataset_item(
 ) -> dict[str, Any]:
     from src.vad_segmenter import SileroUtteranceGate, SileroVAD
 
-    print(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...", flush=True)
+    log.info(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...")
     parakeet_v2_model = load_evaluation_model()
-    print("[Evaluation] Loading Silero VAD model...", flush=True)
+    log.info("[Evaluation] Loading Silero VAD model...")
     vad_engine = SileroVAD(vad_model_path)
     utterance_gate = SileroUtteranceGate(
         vad_engine,
@@ -445,7 +538,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
         "reference_text": reference_text,
         "final_streaming_text": final_streaming_text,
         "final_word_error_rate": final_word_error_rate,
-        "chunk_count": len(chunk_texts),
+        "chunk_count": len(chunk_events),
         "chunk_texts": chunk_texts,
         "chunk_durations_seconds": chunk_durations_seconds,
         "chunk_events": chunk_events,
@@ -464,16 +557,22 @@ def build_command_line_argument_parser() -> argparse.ArgumentParser:
     command_line_argument_parser.add_argument("--single-sample-number-to-test", type=int, default=DEFAULT_EXAMPLE_INDEX)
     command_line_argument_parser.add_argument("--first-sample-number-to-test", type=int, default=DEFAULT_START_EXAMPLE_INDEX)
     command_line_argument_parser.add_argument("--how-many-samples-to-test", type=int, default=DEFAULT_MAX_EXAMPLE_COUNT)
+    command_line_argument_parser.add_argument("--use-streaming-dataset-load", action="store_true")
     command_line_argument_parser.add_argument("--vad-model-file-path", default=DEFAULT_VAD_MODEL_PATH)
     command_line_argument_parser.add_argument(
         "--silence-timeout-seconds-before-cutting-chunk",
         type=float,
         default=DEFAULT_SILENCE_TIMEOUT_SECONDS,
     )
-    command_line_argument_parser.add_argument("--voice-detection-score-threshold", type=float, default=DEFAULT_VAD_THRESHOLD)
-    command_line_argument_parser.add_argument("--energy-fallback-threshold", type=float, default=DEFAULT_ENERGY_THRESHOLD)
+    command_line_argument_parser.add_argument("--voice-detection-score-threshold", type=float, default=DEFAULT_VAD_SCORE_THRESHOLD)
+    command_line_argument_parser.add_argument("--energy-fallback-threshold", type=float, default=DEFAULT_VAD_ENERGY_THRESHOLD)
     command_line_argument_parser.add_argument("--energy-fallback-ratio", type=float, default=DEFAULT_ENERGY_RATIO)
     command_line_argument_parser.add_argument("--overlap-seconds-between-chunks", type=float, default=DEFAULT_OVERLAP_SECONDS)
+    command_line_argument_parser.add_argument(
+        "--minimum-chunk-age-before-silence-split-seconds",
+        type=float,
+        default=DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+    )
     command_line_argument_parser.add_argument("--maximum-overlap-words-to-remove", type=int, default=DEFAULT_MAX_OVERLAP_WORDS)
     command_line_argument_parser.add_argument("--microphone-frame-sample-count", type=int, default=DEFAULT_FRAME_SAMPLES)
     command_line_argument_parser.add_argument("--output-json-file-path", default=DEFAULT_OUTPUT_JSON_FILE_PATH)
@@ -489,23 +588,26 @@ def main(command_line_arguments: list[str] | None = None):
     single_example_result_rows: list[dict[str, Any]] = []
     sample_results: list[dict[str, Any]] = []
 
-    for example_index in range(
-        start_example_index,
-        start_example_index + parsed_command_line_arguments.how_many_samples_to_test,
-    ):
-        print(f"[Evaluation] Loading dataset item {example_index}...", flush=True)
-        audio_array, reference_text = load_one_dataset_item_audio_and_reference_text(
-            dataset_name=parsed_command_line_arguments.dataset_name_to_load,
-            dataset_config_name=parsed_command_line_arguments.dataset_config_name_to_load,
-            dataset_split=parsed_command_line_arguments.dataset_split_to_load,
-            audio_column_name=parsed_command_line_arguments.audio_column_name_to_load,
-            text_column_name=parsed_command_line_arguments.text_column_name_to_load,
-            example_index=example_index,
-        )
-        print("[Evaluation] Converting audio to PCM16 bytes...", flush=True)
+    selected_dataset_items = load_selected_dataset_items_audio_and_reference_text(
+        dataset_name=parsed_command_line_arguments.dataset_name_to_load,
+        dataset_config_name=parsed_command_line_arguments.dataset_config_name_to_load,
+        dataset_split=parsed_command_line_arguments.dataset_split_to_load,
+        audio_column_name=parsed_command_line_arguments.audio_column_name_to_load,
+        text_column_name=parsed_command_line_arguments.text_column_name_to_load,
+        first_sample_number_to_load=start_example_index,
+        how_many_samples_to_load=parsed_command_line_arguments.how_many_samples_to_test,
+        use_streaming_dataset_load=parsed_command_line_arguments.use_streaming_dataset_load,
+    )
+
+    for selected_dataset_item in selected_dataset_items:
+        example_index = selected_dataset_item["example_index"]
+        log.info(f"[Evaluation] Loading dataset item {example_index}...")
+        audio_array = selected_dataset_item["audio_array"]
+        reference_text = selected_dataset_item["reference_text"]
+        log.info("[Evaluation] Converting audio to PCM16 bytes...")
         pcm16_audio_bytes = convert_audio_array_to_pcm16_audio_bytes(audio_array)
 
-        print("[Evaluation] Running fake microphone stream...", flush=True)
+        log.info("[Evaluation] Running fake microphone stream...")
         streaming_result = run_fake_microphone_stream_for_one_dataset_item(
             pcm16_audio_bytes=pcm16_audio_bytes,
             reference_text=reference_text,
@@ -517,11 +619,13 @@ def main(command_line_arguments: list[str] | None = None):
             overlap_seconds=parsed_command_line_arguments.overlap_seconds_between_chunks,
             max_overlap_words=parsed_command_line_arguments.maximum_overlap_words_to_remove,
             frame_samples=parsed_command_line_arguments.microphone_frame_sample_count,
-            minimum_chunk_age_before_silence_split_seconds=DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+            minimum_chunk_age_before_silence_split_seconds=(
+                parsed_command_line_arguments.minimum_chunk_age_before_silence_split_seconds
+            ),
         )
 
-        print(f"[Evaluation] Final result for example {example_index}:", flush=True)
-        pprint(streaming_result)
+        log.info(f"[Evaluation] Final result for example {example_index}:")
+        log.info(streaming_result)
         sample_results.append(
             {
                 "example_index": example_index,

@@ -30,7 +30,7 @@ class MockPyAudio:
 
 sys.modules['pyaudio'] = MockPyAudio()
 
-from src.ear import Ear
+from src.ear import Ear, select_mic
 
 # Patch the _open_mic_stream method to avoid audio setup issues
 @pytest.fixture(autouse=True)
@@ -219,6 +219,53 @@ def test_ear_uses_shared_should_split_chunk_after_silence():
     assert ear_module.should_split_chunk_after_silence is should_split_chunk_after_silence
 
 
+def test_select_mic_shows_contiguous_choice_indexes_and_returns_selected_device_index(monkeypatch):
+    class FakePyAudio:
+        def get_default_input_device_info(self):
+            return {"index": 2}
+
+        def get_device_count(self):
+            return 5
+
+        def get_device_info_by_index(self, index):
+            devices = {
+                0: {"name": "ZEB-THUNDER PRO", "maxInputChannels": 1},
+                1: {"name": "Speaker", "maxInputChannels": 0},
+                2: {"name": "External Microphone", "maxInputChannels": 1},
+                3: {"name": "Monitor", "maxInputChannels": 0},
+                4: {"name": "MacBook Pro Microphone", "maxInputChannels": 1},
+            }
+            return devices[index]
+
+    captured_prompts = []
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt: captured_prompts.append(prompt) or "2",
+    )
+
+    assert select_mic(FakePyAudio()) == 4
+    assert captured_prompts == ["Select Mic Index [default 1]: "]
+
+
+def test_select_mic_returns_default_device_index_when_choice_is_blank(monkeypatch):
+    class FakePyAudio:
+        def get_default_input_device_info(self):
+            return {"index": 2}
+
+        def get_device_count(self):
+            return 3
+
+        def get_device_info_by_index(self, index):
+            return {
+                "name": f"Mic {index}",
+                "maxInputChannels": 1,
+            }
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+
+    assert select_mic(FakePyAudio()) == 2
+
+
 def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
     ear = Ear()
     ear.is_recording = True
@@ -281,7 +328,9 @@ def test_audio_callback_uses_conditioned_audio_for_vad():
     ear._audio_callback(raw, frame_count=4, time_info=None, status=None)
 
     gate.push.assert_called_once()
-    assert gate.push.call_args.args[0] != raw
+    assert gate.push.call_args.args == ()
+    assert gate.push.call_args.kwargs["pcm16_bytes"] == raw
+    assert gate.push.call_args.kwargs["analysis_pcm16_bytes"] != raw
 
 
 def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
