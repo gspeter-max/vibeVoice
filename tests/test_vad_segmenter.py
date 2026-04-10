@@ -1,4 +1,5 @@
-from src.vad_segmenter import SileroUtteranceGate
+import numpy as np
+from src.vad_segmenter import SileroUtteranceGate, SileroVAD
 
 
 class FakeVAD:
@@ -111,3 +112,106 @@ def test_gate_uses_current_raw_frame_for_energy_fallback_not_first_frame_forever
         now=0.1,
         analysis_pcm16_bytes=boosted_quiet_analysis_pcm16_bytes,
     ) is False
+
+
+def test_silero_v5_wrapper_prepends_64_sample_context_for_onnx_input(monkeypatch):
+    seen_inputs = []
+
+    class FakeInput:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
+    class FakeSession:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_inputs(self):
+            return [
+                FakeInput("input", [None, None]),
+                FakeInput("state", [2, None, 128]),
+                FakeInput("sr", []),
+            ]
+
+        def run(self, _output_names, ort_inputs):
+            seen_inputs.append(ort_inputs["input"].copy())
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+
+    monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
+
+    vad = SileroVAD("fake.onnx")
+    chunk = np.ones(512, dtype=np.float32) * 0.25
+    vad.is_speech(chunk, sample_rate=16000)
+
+    assert seen_inputs[0].shape == (1, 576)
+    assert np.allclose(seen_inputs[0][0, :64], 0.0)
+    assert np.allclose(seen_inputs[0][0, 64:], 0.25)
+
+
+def test_silero_v5_wrapper_updates_context_after_each_call(monkeypatch):
+    seen_inputs = []
+
+    class FakeInput:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
+    class FakeSession:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_inputs(self):
+            return [
+                FakeInput("input", [None, None]),
+                FakeInput("state", [2, None, 128]),
+                FakeInput("sr", []),
+            ]
+
+        def run(self, _output_names, ort_inputs):
+            seen_inputs.append(ort_inputs["input"].copy())
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+
+    monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
+
+    vad = SileroVAD("fake.onnx")
+    first = np.ones(512, dtype=np.float32) * 0.10
+    second = np.ones(512, dtype=np.float32) * 0.20
+
+    vad.is_speech(first, sample_rate=16000)
+    vad.is_speech(second, sample_rate=16000)
+
+    assert np.allclose(seen_inputs[1][0, :64], 0.10)
+    assert np.allclose(seen_inputs[1][0, 64:], 0.20)
+
+
+def test_silero_v5_wrapper_reset_clears_context(monkeypatch):
+    seen_inputs = []
+
+    class FakeInput:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
+    class FakeSession:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_inputs(self):
+            return [
+                FakeInput("input", [None, None]),
+                FakeInput("state", [2, None, 128]),
+                FakeInput("sr", []),
+            ]
+
+        def run(self, _output_names, ort_inputs):
+            seen_inputs.append(ort_inputs["input"].copy())
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+
+    monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
+
+    vad = SileroVAD("fake.onnx")
+    vad.is_speech(np.ones(512, dtype=np.float32) * 0.10, sample_rate=16000)
+    vad.reset()
+    vad.is_speech(np.ones(512, dtype=np.float32) * 0.20, sample_rate=16000)
+
+    assert np.allclose(seen_inputs[1][0, :64], 0.0)
