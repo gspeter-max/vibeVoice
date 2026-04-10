@@ -47,6 +47,9 @@ class SileroVAD:
             if state_shape is None:
                 state_shape = [2, 1, 128]
             self._state = np.zeros(state_shape, dtype=np.float32)
+            # 64-sample rolling context window required by Silero V5 ONNX streaming.
+            # Without it the model sees a cold start every frame and returns ~0.001.
+            self._context = np.zeros((1, 64), dtype=np.float32)
         else:
             self._version = 3
             self._h = np.zeros((2, 1, 64), dtype=np.float32)
@@ -56,6 +59,7 @@ class SileroVAD:
         """Clear the model state so the next utterance starts fresh."""
         if self._version == 5:
             self._state = np.zeros_like(self._state)
+            self._context = np.zeros_like(self._context)
         else:
             self._h = np.zeros_like(self._h)
             self._c = np.zeros_like(self._c)
@@ -77,13 +81,20 @@ class SileroVAD:
             audio_chunk = audio_chunk[:512]
 
         if self._version == 5:
+            # Silero V5 ONNX streaming expects the current 512 samples preceded
+            # by 64 samples of context from the previous frame. We maintain that
+            # rolling window in self._context and prepend it here.
+            audio_chunk_2d = audio_chunk.reshape(1, -1)
+            input_with_context = np.concatenate([self._context, audio_chunk_2d], axis=1)
             ort_inputs = {
-                "input": audio_chunk.reshape(1, -1),
+                "input": input_with_context,
                 "sr": np.array([sample_rate], dtype=np.int64),
                 "state": self._state,
             }
             out, new_state = self.session.run(None, ort_inputs)
             self._state = new_state
+            # Slide the context window forward: keep the last 64 samples.
+            self._context = input_with_context[:, -64:].copy()
         else:
             ort_inputs = {
                 "input": audio_chunk.reshape(1, -1),
