@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
+from src import log
 
 # These are the default settings for the system.
 # They control how long to wait for silence and how much audio to overlap.
 DEFAULT_VAD_SCORE_THRESHOLD = 0.50
-DEFAULT_SILENCE_TIMEOUT_SECONDS = 0.65
+DEFAULT_SILENCE_TIMEOUT_SECONDS = 0.63 
 DEFAULT_VAD_ENERGY_THRESHOLD = 0.05
 DEFAULT_ENERGY_RATIO = 2.5
-DEFAULT_OVERLAP_SECONDS = 0.50
+DEFAULT_OVERLAP_SECONDS = 1
 DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS = 8.0
-
+SEMANTIC_OVERLAPPING_THRESHOLD = 0.82
 
 @dataclass(frozen=True)
 class ChunkSplitDecision:
@@ -185,6 +187,101 @@ def should_skip_overlap_trim_because_result_is_too_small(
     )
 
 
+def character_similarity(words_a: list[str], words_b: list[str]) -> float:
+    """
+    Compare two word lists as joined strings.
+    Returns 0.0 (completely different) to 1.0 (identical).
+    
+    This handles:
+      "overlapping" vs "overlaping"  → ~0.95
+      "thinkin"     vs "thinking"    → ~0.93
+      "bout"        vs "about"       → ~0.80
+    """
+    if not words_a or not words_b:
+        return 0.0
+    
+    str_a = " ".join(words_a)
+    str_b = " ".join(words_b)
+    
+    score = SequenceMatcher(None, str_a, str_b).ratio()
+    log.debug(
+        f"[Dedup] char_similarity",
+        str_a=str_a,
+        str_b=str_b,
+        score=round(score, 4),
+    )
+    return score
+
+def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
+    """
+    Count what fraction of words appear in both lists.
+    
+    This handles:
+      ["all", "these", "things"] vs ["these", "all", "things"]
+      → 3/3 = 1.0  (perfect overlap despite order change)
+    """
+    if not words_a or not words_b:
+        return 0.0 
+    
+    set_a = set(words_a)
+    set_b = set(words_b)
+
+    intersection = set_a.intersection(set_b)
+    union = set_a.union(set_b)
+
+    score = len(intersection) / len(union)
+    log.debug(
+        f"[Dedup] token_overlap",
+        words_a=words_a,
+        words_b=words_b,
+        shared_words=sorted(intersection),
+        only_in_a=sorted(set_a - set_b),
+        only_in_b=sorted(set_b - set_a),
+        score=round(score, 4),
+    )
+    return score
+
+def combined_overlap_score(
+    words_a: list[str],
+    words_b: list[str],
+    char_weight: float = 0.6,
+    token_weight: float = 0.4,
+) -> float:
+    """
+    Blend character similarity and token overlap.
+    
+    Why both?
+    
+    Char-level alone:
+      "the big plan" vs "big plan the"  → 0.72 (misses reorder)
+    
+    Token-level alone:  
+      "overlapping" vs "overlaping"     → 0.50 (misses typo)
+    
+    Combined:
+      Both cases → caught correctly
+    """
+    char_score = character_similarity(
+        words_a=words_a,
+        words_b=words_b,
+    )
+
+    token_score = token_overlap_score(
+        words_a=words_a,
+        words_b=words_b,
+    )
+
+    combined = (char_score * char_weight) + (token_score * token_weight)
+    log.debug(
+        "[Dedup] combined_score",
+        char_score=round(char_score, 4),
+        token_score=round(token_score, 4),
+        char_weight=char_weight,
+        token_weight=token_weight,
+        combined=round(combined, 4),
+    )
+    return combined
+    
 def remove_duplicate_chunk_prefix(
     previous_chunk_text: str,
     current_chunk_text: str,
@@ -208,45 +305,101 @@ def remove_duplicate_chunk_prefix(
     """
     # If one of the texts is empty, there is nothing to compare.
     if not previous_chunk_text or not current_chunk_text:
+        log.debug("[Dedup] Skipping — one or both texts are empty")
         return current_chunk_text.strip()
 
     # Get the cleaned lists of words for both pieces of text.
-    previous_original_words, previous_overlap_matching_words = (
+    # normalized = punctuation removed and lowercased
+    prev_original, prev_normalized = (
         build_original_words_and_overlap_matching_words(previous_chunk_text)
     )
-    current_original_words, current_overlap_matching_words = (
+    curr_original, curr_normalized = (
         build_original_words_and_overlap_matching_words(current_chunk_text)
     )
-    
+
     # Decide the maximum number of words we should try to match.
     largest_possible_overlap = min(
-        len(previous_overlap_matching_words),
-        len(current_overlap_matching_words),
-        len(previous_original_words),
-        len(current_original_words),
+        len(prev_normalized),
+        len(curr_normalized),
+        len(prev_original),
+        len(curr_original),
         max_overlap_words,
     )
 
-    # Start searching for matches. We start from the biggest number 
-    # and count down to 0 so we can catch even a single repeated word.
-    for overlap_word_count in range(largest_possible_overlap, 0, -1):
-        # Compare the end of the old list to the start of the new list.
-        if previous_overlap_matching_words[-overlap_word_count:] == current_overlap_matching_words[:overlap_word_count]:
-            # If they ARE the same, we prepare to remove them.
-            trimmed_current_original_words = current_original_words[overlap_word_count:]
-            
-            # Run the safety check to make sure we aren't deleting too much.
+    log.debug(
+        "[Dedup] ─── Starting deduplication ───",
+        prev_tail_words=prev_normalized[-largest_possible_overlap:],
+        curr_head_words=curr_normalized[:largest_possible_overlap],
+        prev_total_words=len(prev_normalized),
+        curr_total_words=len(curr_normalized),
+        max_overlap_words=max_overlap_words,
+        largest_possible_overlap=largest_possible_overlap,
+        threshold=SEMANTIC_OVERLAPPING_THRESHOLD,
+    )
+
+    # Start searching for matches. We start from the biggest number
+    # and count down so we find the largest matching overlap.
+    for overlap_word_count in range(largest_possible_overlap, 1, -1):
+        prev_tail = prev_normalized[-overlap_word_count:]
+        curr_head = curr_normalized[:overlap_word_count]
+
+        log.debug(
+            f"[Dedup] Trying overlap_count={overlap_word_count}",
+            prev_tail=prev_tail,
+            curr_head=curr_head,
+        )
+
+        score = combined_overlap_score(prev_tail, curr_head)
+
+        if score >= SEMANTIC_OVERLAPPING_THRESHOLD:
+            trimmed = curr_original[overlap_word_count:]
+
+            log.debug(
+                "[Dedup] ✅ Score passed threshold — checking safety",
+                overlap_word_count=overlap_word_count,
+                score=round(score, 4),
+                threshold=SEMANTIC_OVERLAPPING_THRESHOLD,
+                words_to_remove=curr_original[:overlap_word_count],
+                words_remaining=trimmed,
+            )
+
             if should_skip_overlap_trim_because_result_is_too_small(
-                current_original_words,
-                trimmed_current_original_words,
+                curr_original,
+                trimmed,
                 overlap_word_count,
             ):
+                log.debug(
+                    "[Dedup] ⚠️  Safety check blocked trim — result would be too small",
+                    overlap_word_count=overlap_word_count,
+                    trimmed_word_count=len(trimmed),
+                )
                 return current_chunk_text.strip()
 
-            # Join the remaining words back into a sentence and return it.
-            return " ".join(trimmed_current_original_words).strip()
+            result = " ".join(trimmed).strip()
+            log.debug(
+                "[Dedup] ✂️  Duplicate removed",
+                removed_words=curr_original[:overlap_word_count],
+                removed_count=overlap_word_count,
+                score=round(score, 4),
+                result_preview=result[:120],
+            )
+            return result
 
-    # If no match was found after checking all numbers, return the text as is.
+        else:
+            log.debug(
+                f"[Dedup] ❌ Score below threshold at overlap_count={overlap_word_count}",
+                score=round(score, 4),
+                threshold=SEMANTIC_OVERLAPPING_THRESHOLD,
+                gap=round(SEMANTIC_OVERLAPPING_THRESHOLD - score, 4),
+            )
+
+    # No match found at any overlap count.
+    log.debug(
+        "[Dedup] 🔴 No match found — returning current text unchanged",
+        prev_tail_words=prev_normalized[-largest_possible_overlap:],
+        curr_head_words=curr_normalized[:largest_possible_overlap],
+        tried_counts=list(range(largest_possible_overlap, 1, -1)),
+    )
     return current_chunk_text.strip()
 
 
