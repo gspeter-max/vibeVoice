@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from streaming_shared_logic import remove_duplicate_chunk_prefix
 from src import log
+from text_refiner import TranscriptRefiner, load_refiner_settings
 try:
     from pynput.keyboard import Controller
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -53,6 +54,7 @@ backend_info = {"backend": None, "model": None}
 backend_lock = threading.Lock()
 session_store = {}
 session_store_lock = threading.Lock()
+text_refiner = TranscriptRefiner(load_refiner_settings())
 
 
 @dataclass
@@ -92,7 +94,66 @@ def _get_or_create_session(session_id: str) -> SessionState:
         session_store[session_id] = session
         return session
 
-_remove_duplicate_chunk_prefix = remove_duplicate_chunk_prefix
+
+def _refine_finalized_streaming_transcript_text(session_id: str, text: str) -> str:
+    original_text = text.strip()
+    if not original_text:
+        return ""
+
+    short_id = session_id[:8]
+    input_character_count = len(original_text)
+
+    if not text_refiner.settings.enabled:
+        log.info(
+            f"[Brain] session={short_id} refiner status=disabled "
+            f"elapsed=0.00s input_chars={input_character_count} output_chars={input_character_count}"
+        )
+        return original_text
+
+    try:
+        refinement_result = text_refiner.refine_with_result(original_text, session_id=short_id)
+    except Exception as exc:
+        log.info(
+            f"[Brain] session={short_id} refiner status=fallback_error "
+            f"elapsed=0.00s input_chars={input_character_count} output_chars={input_character_count} detail={exc}"
+        )
+        return original_text
+
+    refined_text = refinement_result.text.strip()
+    output_character_count = len(refined_text) if refined_text else len(original_text)
+    summary_prefix = (
+        f"[Brain] session={short_id} refiner status={refinement_result.status} "
+        f"elapsed={refinement_result.elapsed_seconds:.2f}s "
+        f"input_chars={input_character_count} "
+        f"output_chars={output_character_count}"
+    )
+
+    if refinement_result.status == "refined":
+        log.info(summary_prefix)
+        return refined_text
+
+    if refinement_result.status == "disabled":
+        log.info(summary_prefix)
+        return original_text
+
+    if refinement_result.status == "unchanged":
+        log.info(summary_prefix)
+        return refined_text
+
+    if refinement_result.status == "fallback_blank":
+        log.info(f"{summary_prefix} detail=blank response")
+        return original_text
+
+    if refinement_result.status == "fallback_error":
+        detail = refinement_result.detail or "unknown error"
+        log.info(f"{summary_prefix} detail={detail}")
+        return original_text
+
+    if not refined_text:
+        log.info(f"{summary_prefix} detail=empty text")
+        return original_text
+
+    return refined_text
 
 
 def _finalize_session_if_ready(session_id: str) -> None:
@@ -114,9 +175,13 @@ def _finalize_session_if_ready(session_id: str) -> None:
 
     short_id = session_id[:8]
     if text:
-        log.info(f"[Brain] 📝 [session {short_id} | {session.received_count} chunks] → \"{text}\"")
+        log.info(
+            f"[Brain] session={short_id} finalize chunks={session.received_count} "
+            f"input_chars={len(text)}"
+        )
         send_hud("process")
-        paste_instantly(text + " ")
+        final_text = _refine_finalized_streaming_transcript_text(session_id, text)
+        paste_instantly(final_text + " ")
         send_hud("done")
     else:
         log.info(f"[Brain] 🔇 [session {short_id}] Nothing detected")
@@ -197,8 +262,6 @@ def paste_instantly(text: str):
         if old_clipboard:
             process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
             process.communicate(input=old_clipboard.encode('utf-8'))
-        else:
-            pass 
             
     except Exception as e:
         log.info(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")

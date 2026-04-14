@@ -20,10 +20,9 @@ except Exception as exc:  # pragma: no cover - depends on platform wheels
 
 # Default model on startup if this backend is forced
 CURRENT_MODEL_NAME = "nemo-parakeet-tdt-0.6b-v3"
-_model_instance = None
 
 def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
-    global _model_instance, CURRENT_MODEL_NAME
+    global CURRENT_MODEL_NAME
 
     if sherpa_onnx is None:
         raise RuntimeError(
@@ -69,9 +68,8 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
         debug=False
     )
 
-    _model_instance = recognizer
     log.info(f"[sherpa-onnx] ✅ Model loaded.")
-    return _model_instance
+    return recognizer
 def transcribe(model: sherpa_onnx.OfflineRecognizer, audio_array: np.ndarray) -> str:
     """
     Transcribe a float32 numpy array (16kHz, mono, normalized -1..1).

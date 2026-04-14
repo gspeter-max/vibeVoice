@@ -110,7 +110,8 @@ VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = float(
 VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = float(os.environ.get("VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", "1.0"))
 VAD_ENERGY_THRESHOLD = float(os.environ.get("VAD_ENERGY_THRESHOLD", str(DEFAULT_VAD_ENERGY_THRESHOLD)))
 VAD_ENERGY_RATIO = float(os.environ.get("VAD_ENERGY_RATIO", str(DEFAULT_ENERGY_RATIO)))
-VAD_STATUS_LOG_INTERVAL = 0.5
+VAD_STATUS_LOG_INTERVAL = 5.0
+RECORDING_LEVEL_LOG_INTERVAL = 0.4
 OVERLAP_SECONDS = float(os.environ.get("OVERLAP_SECONDS", str(DEFAULT_OVERLAP_SECONDS)))
 MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = float(
     os.environ.get(
@@ -316,6 +317,7 @@ class Ear:
         self._chunk_speech_logged = False
         self._silence_pending_logged = False
         self._vad_state_log_time = 0.0
+        self._recording_level_log_time = 0.0
         self._vad_no_speech_warned = False
         self._current_session_id = None
         self._chunk_seq = 0
@@ -380,7 +382,7 @@ class Ear:
                 time.sleep(0.04)
             udp.close()
         threading.Thread(target=_sender, daemon=True).start()
-        log.info("[Ear] Volume sender thread started")
+        log.debug("[Ear] Volume sender thread started")
 
     def _is_no_streaming_mode(self) -> bool:
         return RECORDING_MODE == NO_STREAMING_MODE
@@ -633,7 +635,7 @@ class Ear:
                         dynamic_threshold = self._utterance_gate.last_dynamic_threshold()
                         started = self._utterance_gate.has_speech_started()
                         silence_elapsed = self._utterance_gate.silence_elapsed(now) if started else 0.0
-                        log.info(
+                        log.debug(
                             f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
                             f"started={started} silence={silence_elapsed:.2f}s "
                             f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
@@ -747,6 +749,7 @@ class Ear:
             self._chunk_speech_logged = False
             self._silence_pending_logged = False
             self._vad_no_speech_warned = False
+            self._recording_level_log_time = 0.0
 
         self._pending_chunk_overlap_audio = b""
         if self._is_silence_streaming_mode():
@@ -757,7 +760,7 @@ class Ear:
         if not _is_right_cmd(key):
             return
 
-        log.info("[Ear] 🔵 Right CMD pressed - on_press() called")
+        log.debug("[Ear] Right CMD pressed")
 
         if self._toggle_active:
             self._toggle_active = False
@@ -770,21 +773,18 @@ class Ear:
                 return
 
         if self._is_no_streaming_mode():
-            log.info("[Ear] 🔵 About to open brain stream")
+            log.debug("[Ear] About to open brain stream")
             if not self._open_brain_stream():
                 log.info("[Ear] ❌ Failed to open brain stream, aborting")
                 return
 
-        log.info("[Ear] 🔵 About to start recording")
         self._start_recording_state(from_hold=False)
 
         self._cmd_press_time = time.time()
         log.info("\r\n" + "─" * 50)
         log.info(f"\r🎙️  RECORDING ({self.active_mic_name})")
 
-        log.info("[Ear] 🔵 About to send 'listen' command to HUD")
         threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
-        log.info("[Ear] 🔵 About to start volume sender")
         self._start_volume_sender()
 
     def on_release(self, key):
@@ -906,12 +906,13 @@ class Ear:
 
         # Display volume meter when recording
         if recording:
-            meter = "█" * min(int(rms * 500), 50)
-            log.info(f"\r  Level: [{meter:<50}]")
+            now = time.time()
+            if now - self._recording_level_log_time >= RECORDING_LEVEL_LOG_INTERVAL:
+                meter = "█" * min(int(rms * 500), 50)
+                log.info(f"\r  Level: [{meter:<50}]")
+                self._recording_level_log_time = now
 
             if self._is_silence_streaming_mode():
-                now = time.time()
-
                 if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
                     silence_elapsed = self._utterance_gate.silence_elapsed(now)
                     if silence_elapsed > 0.0:

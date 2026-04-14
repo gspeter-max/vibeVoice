@@ -18,6 +18,18 @@
 
 set -euo pipefail
 
+log_info() {
+    echo "  $1"
+}
+
+log_warn() {
+    echo "⚠️  $1"
+}
+
+log_error() {
+    echo "❌ $1"
+}
+
 kill_pid_file_process() {
     local pid_file="$1"
     if [ -f "$pid_file" ]; then
@@ -43,8 +55,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 export BACKEND="${BACKEND:-faster_whisper}"
 export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
+export GROQ_API_KEY="${GROQ_API_KEY:-}"
+export GROQ_API_BASE_URL="${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}"
+export GROQ_REFINER_MODEL="${GROQ_REFINER_MODEL:-llama-3.1-8b-instant}"
+export TEXT_REFINER_TIMEOUT_SECONDS="${TEXT_REFINER_TIMEOUT_SECONDS:-4.0}"
+export TEXT_REFINER_MAX_TOKENS="${TEXT_REFINER_MAX_TOKENS:-128}"
+export TEXT_REFINER_TEMPERATURE="${TEXT_REFINER_TEMPERATURE:-0.0}"
+export TEXT_REFINER_TOP_P="${TEXT_REFINER_TOP_P:-1.0}"
+export TEXT_REFINER_SEED="${TEXT_REFINER_SEED:-7}"
 # Fix: ctranslate2 and residual torch/NeMo both bundle libiomp5.dylib — allow coexistence
 export KMP_DUPLICATE_LIB_OK=TRUE
 # Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this
@@ -67,6 +93,19 @@ fi
 
 export RECORDING_MODE
 
+if [ "$RECORDING_MODE" = "silence_streaming" ]; then
+    TEXT_REFINER_ENABLED=1
+else
+    TEXT_REFINER_ENABLED=0
+fi
+
+if [ "$TEXT_REFINER_ENABLED" = "1" ] && [ -z "$GROQ_API_KEY" ]; then
+    log_warn "GROQ_API_KEY is missing; refiner will stay disabled."
+    TEXT_REFINER_ENABLED=0
+fi
+
+export TEXT_REFINER_ENABLED
+
 VENV_PYTHON="./.venv/bin/python"
 
 echo ""
@@ -76,15 +115,23 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Backend  : $BACKEND"
 echo "  Mode     : $RECORDING_MODE"
+echo "  Refiner  : $([ "$TEXT_REFINER_ENABLED" = "1" ] && echo enabled || echo disabled)"
 echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
 echo "  Python   : $($VENV_PYTHON --version 2>&1)"
 echo "  Theme    : Dark with premium white waveform bars"
 echo "  Logs     : live terminal output"
 echo ""
 
+if [ "${START_SH_DRY_RUN:-0}" = "1" ]; then
+    echo "  Dry run  : requested"
+    echo "  Refiner  : $([ "$TEXT_REFINER_ENABLED" = "1" ] && echo enabled || echo disabled)"
+    echo "  Dry run  : exiting before Brain startup"
+    exit 0
+fi
+
 # ── Sanity check ────────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
-    echo "❌ .venv not found. Run:  uv venv && uv pip install -e ."
+    log_error ".venv not found. Run: uv venv && uv pip install -e ."
     exit 1
 fi
 
@@ -94,8 +141,6 @@ kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes
 rm -f /tmp/parakeet.sock /tmp/parakeet-brain.pid /tmp/parakeet-hud.pid
-
-# ── Ensure logs directory exists ─────────────────────────────────
 mkdir -p logs
 
 # ── Start Brain in background ────────────────────────────────────
@@ -109,7 +154,7 @@ echo "  Brain PID: $BRAIN_PID  |  live terminal output"
 echo ""
 echo "  Waiting for Brain to be ready..."
 if [ ! -d ~/.cache/parakeet-flow/models/deepdml ]; then
-    echo "  ⚠️  First run: Downloading model (~1.5 GB)..."
+    log_warn "First run: Downloading model (~1.5 GB)..."
     echo "  This may take 5-10 minutes depending on your internet speed."
     echo "  Subsequent starts will be much faster!"
     echo ""
@@ -129,14 +174,14 @@ while [ ! -S /tmp/parakeet.sock ]; do
 
     if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
         echo ""
-        echo "❌ Brain crashed on startup."
+        log_error "Brain crashed on startup."
         echo "Scroll up in this terminal for Brain's output."
         exit 1
     fi
 
     if [ $WAIT -ge $MAX_WAIT ]; then
         echo ""
-        echo "❌ Timed out waiting for Brain. Watch the terminal output above."
+        log_error "Timed out waiting for Brain. Watch the terminal output above."
         exit 1
     fi
 done

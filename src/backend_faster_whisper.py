@@ -21,7 +21,6 @@ except ImportError:  # pragma: no cover - test environments may not have the pac
 
 # Default model on startup
 CURRENT_MODEL_NAME = "deepdml/faster-whisper-large-v3-turbo-ct2"
-_model_instance = None
 
 if platform.machine() == "arm64":
     COMPUTE_TYPE = "default"
@@ -33,7 +32,7 @@ else:
     CPU_THREADS = 6
 
 def load_model(model_name=None) -> WhisperModel:
-    global _model_instance, CURRENT_MODEL_NAME
+    global CURRENT_MODEL_NAME
     
     if model_name:
         CURRENT_MODEL_NAME = model_name
@@ -41,7 +40,7 @@ def load_model(model_name=None) -> WhisperModel:
     log.info(f"\n[faster-whisper] 🚀 Optimizing for Intel i7 (Threads: {CPU_THREADS}, Mode: {COMPUTE_TYPE})")
     log.info(f"[faster-whisper] Loading {CURRENT_MODEL_NAME}...")
 
-    _model_instance = WhisperModel(
+    model = WhisperModel(
         CURRENT_MODEL_NAME,
         device="cpu",
         compute_type=COMPUTE_TYPE,
@@ -51,7 +50,7 @@ def load_model(model_name=None) -> WhisperModel:
     )
 
     log.info(f"[faster-whisper] ✅ Model loaded.")
-    return _model_instance
+    return model
 def transcribe(model: WhisperModel, audio_array: np.ndarray) -> str:
     """
     Transcribe a float32 numpy array (16kHz, mono, normalized -1..1).

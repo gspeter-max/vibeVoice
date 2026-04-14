@@ -27,14 +27,11 @@ TOGGLE: Run with  BACKEND=openvino ./start.sh
 import os
 import numpy as np
 from src import log
-_OPENVINO_AVAILABLE = False
 
 
 def _check_openvino():
-    global _OPENVINO_AVAILABLE
     try:
         import openvino  # noqa: F401
-        _OPENVINO_AVAILABLE = True
         return True
     except ImportError:
         return False
