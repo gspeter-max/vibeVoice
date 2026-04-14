@@ -55,6 +55,7 @@ backend_lock = threading.Lock()
 session_store = {}
 session_store_lock = threading.Lock()
 text_refiner = TranscriptRefiner(load_refiner_settings())
+_remove_duplicate_chunk_prefix = remove_duplicate_chunk_prefix
 
 
 @dataclass
