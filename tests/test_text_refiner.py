@@ -36,6 +36,20 @@ def test_load_refiner_settings_reads_env_defaults(monkeypatch):
     )
 
 
+def test_load_refiner_settings_enabled_when_silence_streaming(monkeypatch):
+    monkeypatch.setenv("RECORDING_MODE", "silence_streaming")
+    monkeypatch.setenv("TEXT_REFINER_ENABLED", "1")
+    settings = load_refiner_settings()
+    assert settings.enabled is True
+
+
+def test_load_refiner_settings_disabled_when_no_streaming(monkeypatch):
+    monkeypatch.setenv("RECORDING_MODE", "no_streaming")
+    monkeypatch.setenv("TEXT_REFINER_ENABLED", "1")
+    settings = load_refiner_settings()
+    assert settings.enabled is False
+
+
 def test_build_refiner_messages_uses_expected_prompt():
     messages = build_refiner_messages("hello world")
 

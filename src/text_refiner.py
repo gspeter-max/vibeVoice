@@ -49,8 +49,13 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def load_refiner_settings() -> RefinerSettings:
+    recording_mode = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
+    is_streaming_mode = recording_mode == "silence_streaming"
+    refiner_flag_enabled = _env_flag("TEXT_REFINER_ENABLED", False)
+    final_enabled_state = refiner_flag_enabled and is_streaming_mode
+
     return RefinerSettings(
-        enabled=_env_flag("TEXT_REFINER_ENABLED", False),
+        enabled=final_enabled_state,
         api_key=os.environ.get("GROQ_API_KEY", "").strip(),
         base_url=os.environ.get("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/"),
         model=os.environ.get("GROQ_REFINER_MODEL", "llama-3.1-8b-instant").strip(),
