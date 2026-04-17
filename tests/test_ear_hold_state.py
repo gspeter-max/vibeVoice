@@ -275,7 +275,7 @@ def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
     ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
     ear._total_frames = 4
 
-    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.2), \
+    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
          patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00\x05\x00\x06\x00"), \
          patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
          patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send:
@@ -293,7 +293,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
     ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
     ear._total_frames = 4
 
-    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.2), \
+    with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
          patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00"), \
          patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
          patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send, \
