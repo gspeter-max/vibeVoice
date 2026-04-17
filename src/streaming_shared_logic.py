@@ -94,6 +94,7 @@ def apply_previous_chunk_overlap(
     current_chunk_audio_bytes: bytes,
     previous_pending_overlap_audio_bytes: bytes,
     overlap_audio_byte_count: int,
+    silence_audio_byte_count: int = 0,
     sample_rate: int,
     stop_session: bool,
 ) -> OverlapApplicationResult:
@@ -119,8 +120,18 @@ def apply_previous_chunk_overlap(
     overlapped_audio_bytes = previous_pending_overlap_audio_bytes + current_chunk_audio_bytes
     
     # Save the end of the current audio to use for the NEXT chunk.
+    # We skip 'silence_audio_byte_count' at the end to anchor overlap to actual speech.
     if overlap_audio_byte_count > 0:
-        next_pending_overlap_audio_bytes = current_chunk_audio_bytes[-overlap_audio_byte_count:]
+        # STRATEGY: Find where the actual speech ended.
+        # Since the chunk was split after a silence timeout, the end of the 
+        # buffer is pure silence. We subtract 'silence_audio_byte_count' 
+        # to find the "speech tail," ensuring the overlap contains high-signal 
+        # audio for the transcription engine's deduplication algorithm.
+        
+        end_index = len(current_chunk_audio_bytes) - silence_audio_byte_count
+        start_index = max(0, end_index - overlap_audio_byte_count)
+        
+        next_pending_overlap_audio_bytes = current_chunk_audio_bytes[start_index:end_index]
     else:
         next_pending_overlap_audio_bytes = b""
 

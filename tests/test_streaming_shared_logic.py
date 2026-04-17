@@ -34,6 +34,22 @@ def test_apply_previous_chunk_overlap_keeps_first_chunk_clean():
     assert overlap_application_result.overlap_seconds_added_from_previous_chunk == 0.0
 
 
+def test_apply_previous_chunk_overlap_skips_silence():
+    # 16 bytes total. 4 bytes of "silence" at the end. 4 bytes of overlap requested.
+    audio = b"\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00\x00\x00\x00\x00"
+    result = apply_previous_chunk_overlap(
+        current_chunk_audio_bytes=audio,
+        previous_pending_overlap_audio_bytes=b"",
+        overlap_audio_byte_count=4,
+        silence_audio_byte_count=4,
+        sample_rate=16000,
+        stop_session=False,
+    )
+    # Should take bytes from index 8 to 12 (0x05 0x00 0x06 0x00)
+    # Index 12 to 16 is the "silence" (0x00 0x00 0x00 0x00)
+    assert result.next_pending_overlap_audio_bytes == b"\x05\x00\x06\x00"
+
+
 def test_remove_duplicate_chunk_prefix_removes_exact_overlap_only():
     assert remove_duplicate_chunk_prefix(
         "things are happening fine",
