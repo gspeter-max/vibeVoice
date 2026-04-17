@@ -99,27 +99,7 @@ When the app starts, microphone choices are shown as simple menu numbers such as
 **Model Switching:**
 - **Press 1 through 0**: Switch models instantly in the terminal.
 
-### 4. Optional Transcript Refiner
-Parakeet Flow can optionally run a transcript cleanup pass after a streaming session is finalized. This step runs automatically in `silence_streaming` mode and stays off in `no_streaming` mode.
-
-In `silence_streaming` mode, `start.sh` enables the refiner only when `GROQ_API_KEY` is present. The app sends the finalized transcript text to Groq's OpenAI-compatible `/chat/completions` endpoint, then pastes the cleaned result back into the active app. The refiner only touches finalized streaming transcripts. The one-shot raw-audio fallback path still pastes the original ASR text unchanged.
-
-Example:
-```bash
-RECORDING_MODE=silence_streaming \
-GROQ_API_KEY="..." \
-./start.sh
-```
-
-To keep the refiner off, choose `no_streaming`:
-```bash
-RECORDING_MODE=no_streaming ./start.sh
-```
-
-If `GROQ_API_KEY` is missing, `start.sh` disables the refiner and continues startup.
-You can put `GROQ_API_KEY` in a local `.env` file at the repo root if you do not want to export it in your shell.
-
-### 5. Advanced Configuration
+### 4. Advanced Configuration
 
 #### Streaming Defaults
 The live streaming path currently uses these defaults:
@@ -133,19 +113,6 @@ The live streaming path currently uses these defaults:
 - `MIN_CHUNK_SECONDS=8.0`
 
 The capture path also applies a mild microphone gain before sending audio to ASR. The current in-code default is `1.2x`.
-
-#### Text Refiner Defaults
-The refiner uses deterministic settings and a short timeout:
-
-- `TEXT_REFINER_ENABLED=0`
-- `GROQ_API_BASE_URL=https://api.groq.com/openai/v1`
-- `GROQ_REFINER_MODEL=llama-3.1-8b-instant`
-- `TEXT_REFINER_TIMEOUT_SECONDS=4.0`
-- `TEXT_REFINER_MAX_TOKENS=128`
-- `TEXT_REFINER_TEMPERATURE=0.0`
-- `TEXT_REFINER_TOP_P=1.0`
-- `TEXT_REFINER_SEED=7`
-- `GROQ_API_KEY=<required when enabled>`
 
 #### Thread Count Tuning
 For Parakeet models, you can manually configure the number of threads used for transcription:
@@ -171,11 +138,9 @@ Test different values to find the optimal setting for your hardware. The thread 
 
 - **`ear.py`**: The input/controller layer. It opens the microphone, listens for keyboard and mouse gestures, applies streaming VAD, cuts speech into chunks on silence, sends each chunk to Brain over a Unix socket, and sends HUD volume telemetry over UDP.
 - **`brain.py`**: The inference server. In streaming session mode it decodes chunks as they arrive, deduplicates overlap against the previous chunk, waits for session commit, then pastes the stitched final text into the active app. It also still supports one-shot fallback decoding when raw audio is sent without chunk/session headers.
-- **`text_refiner.py`**: Optional transcript cleanup client. It sends finalized streaming text to Groq and falls back to the original text if the refiner is disabled or unavailable.
 - **`hud.py`**: The always-on-top Qt HUD. It listens for state commands on TCP `57234` and volume/frequency packets on UDP `57235`.
 - **`backend_faster_whisper.py`**: Default CPU backend for Whisper-style models.
 - **`backend_parakeet.py`**: Optional sherpa-onnx backend for Parakeet-TDT models.
-- **`backend_openvino.py`**: Optional OpenVINO backend for Intel iGPU systems.
 
 ---
 

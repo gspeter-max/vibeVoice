@@ -19,6 +19,8 @@ brain.log
 output.log
 startup.log
 
+logs/
+logs/streaming_sessions/
 evaluation/results  
 evaluation/__pycache__
 # Audio files (Test data)
@@ -38,6 +40,7 @@ build/
 .eggs/
 
 # IDEs & Editors
+
 .idea/
 .vscode/
 *.swp

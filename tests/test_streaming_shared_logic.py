@@ -1,5 +1,6 @@
 from streaming_shared_logic import (
     apply_previous_chunk_overlap,
+    analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,
     remove_duplicate_chunk_prefix,
     should_split_chunk_after_silence,
@@ -55,6 +56,19 @@ def test_remove_duplicate_chunk_prefix_keeps_text_when_overlap_trim_would_be_too
         "once in my life.",
         max_overlap_words=8,
     ) == "once in my life."
+
+
+def test_analyze_duplicate_chunk_prefix_reports_trim_details():
+    result = analyze_duplicate_chunk_prefix(
+        "things are happening fine",
+        "things are happening fine and more",
+        max_overlap_words=8,
+    )
+
+    assert result.trim_applied is True
+    assert result.overlap_word_count == 4
+    assert result.cleaned_text == "and more"
+    assert result.combined_score >= 0.82
 
 
 def test_normalize_text_for_word_error_rate_removes_case_and_punctuation_noise():

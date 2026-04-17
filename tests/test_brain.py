@@ -185,6 +185,7 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
 
     brain._handle_session_event(blob)
 
-    payload = (tmp_path / "session123.json").read_text(encoding="utf-8")
-    assert '"type": "vad_no_speech_warning"' in payload
+    json_files = list(tmp_path.glob("*session123*.json"))
+    assert len(json_files) == 1
+    payload = json_files[0].read_text(encoding="utf-8")
     assert '"vad_no_speech_warning_seen": true' in payload

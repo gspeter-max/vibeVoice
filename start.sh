@@ -1,40 +1,19 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  Parakeet Flow v2 — start.sh                                 ║
-# ║                                                              ║
-# ║  Backend toggle (set before running):                        ║
-# ║    BACKEND=faster_whisper ./start.sh   ← default             ║
-# ║    BACKEND=openvino       ./start.sh   ← Intel iGPU          ║
-# ║  Thread count for Parakeet (for testing/benchmarking):       ║
-# ║    PARAKEET_THREADS=2 ./start.sh   ← Use 2 threads           ║
-# ║    PARAKEET_THREADS=4 ./start.sh   ← Use 4 threads           ║
-# ║    PARAKEET_THREADS=6 ./start.sh   ← Use 6 threads           ║
-# ║    PARAKEET_THREADS=12 ./start.sh  ← Use 12 threads          ║
-# ║                                                              ║
-# ║  Voice Isolation toggle (for macOS):                         ║
-# ║    VOICE_ISOLATION=1 ./start.sh   ← enable (default off)     ║
-# ║  Brain logs always print in this terminal.                   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
 
-log_info() {
-    echo "  $1"
-}
-
-log_warn() {
-    echo "⚠️  $1"
-}
-
-log_error() {
-    echo "❌ $1"
-}
+log_info() { echo "  $1"; }
+log_warn() { echo "⚠️  $1"; }
+log_error() { echo "❌ $1"; }
 
 kill_pid_file_process() {
     local pid_file="$1"
     if [ -f "$pid_file" ]; then
-        kill "$(cat "$pid_file")" 2>/dev/null || true
-        kill -9 "$(cat "$pid_file")" 2>/dev/null || true
+        local pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
         rm -f "$pid_file"
     fi
 }
@@ -45,165 +24,107 @@ kill_hud_processes() {
 }
 
 cleanup() {
-    echo ""
-    echo "  Cleaning up..."
+    echo -e "\n  Cleaning up..."
     kill_pid_file_process /tmp/parakeet-brain.pid
     kill_pid_file_process /tmp/parakeet-hud.pid
     kill_hud_processes
     rm -f /tmp/parakeet.sock
-    echo "  Done. Goodbye."
+    log_info "Done. Goodbye."
 }
 trap cleanup EXIT INT TERM
 
-if [ -f .env ]; then
-    set -a
-    . ./.env
-    set +a
-fi
+# Load environment
+[ -f .env ] && { set -a; . ./.env; set +a; }
 
+# Configuration
 export BACKEND="${BACKEND:-faster_whisper}"
 export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
-export GROQ_API_KEY="${GROQ_API_KEY:-}"
-export GROQ_API_BASE_URL="${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}"
-export GROQ_REFINER_MODEL="${GROQ_REFINER_MODEL:-llama-3.1-8b-instant}"
-export TEXT_REFINER_TIMEOUT_SECONDS="${TEXT_REFINER_TIMEOUT_SECONDS:-4.0}"
-export TEXT_REFINER_MAX_TOKENS="${TEXT_REFINER_MAX_TOKENS:-128}"
-export TEXT_REFINER_TEMPERATURE="${TEXT_REFINER_TEMPERATURE:-0.0}"
-export TEXT_REFINER_TOP_P="${TEXT_REFINER_TOP_P:-1.0}"
-export TEXT_REFINER_SEED="${TEXT_REFINER_SEED:-7}"
-# Fix: ctranslate2 and residual torch/NeMo both bundle libiomp5.dylib — allow coexistence
-export KMP_DUPLICATE_LIB_OK=TRUE
-# Fix: Qt/PySide6 windows won't render on Intel Mac (Sonoma+) without this
-export QT_MAC_WANTS_LAYER=1
-
+export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
+export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-}"
+export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
+
+# Recording Mode Selection
 export RECORDING_MODE="${RECORDING_MODE:-}"
 if [ -z "$RECORDING_MODE" ]; then
     echo "Select recording mode:"
     echo "  [1] no_streaming"
-    echo "  [2] silence_streaming"
+    echo "  [2] silence_streaming (default)"
     read -r -p "Enter choice [1/2]: " mode_choice
-
-    case "$mode_choice" in
-        1) RECORDING_MODE="no_streaming" ;;
-        2|"") RECORDING_MODE="silence_streaming" ;;
-        *) RECORDING_MODE="silence_streaming" ;;
-    esac
+    [[ "$mode_choice" == "1" ]] && RECORDING_MODE="no_streaming" || RECORDING_MODE="silence_streaming"
 fi
 
-export RECORDING_MODE
-
-if [ "$RECORDING_MODE" = "silence_streaming" ]; then
-    TEXT_REFINER_ENABLED=1
-else
-    TEXT_REFINER_ENABLED=0
+if [ -z "$STREAMING_TELEMETRY_ENABLED" ]; then
+    if [[ "${START_SH_DRY_RUN:-0}" == "1" ]]; then
+        STREAMING_TELEMETRY_ENABLED="0"
+    else
+        echo "Enable streaming telemetry JSON capture?"
+        echo "  [1] no (default)"
+        echo "  [2] yes"
+        read -r -p "Enter choice [1/2]: " telemetry_choice
+        [[ "$telemetry_choice" == "2" ]] && STREAMING_TELEMETRY_ENABLED="1" || STREAMING_TELEMETRY_ENABLED="0"
+    fi
 fi
-
-if [ "$TEXT_REFINER_ENABLED" = "1" ] && [ -z "$GROQ_API_KEY" ]; then
-    log_warn "GROQ_API_KEY is missing; refiner will stay disabled."
-    TEXT_REFINER_ENABLED=0
-fi
-
-export TEXT_REFINER_ENABLED
 
 VENV_PYTHON="./.venv/bin/python"
 
-echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║        🎙️  PARAKEET FLOW  v2                      ║"
-echo "╚══════════════════════════════════════════════════╝"
-echo ""
-echo "  Backend  : $BACKEND"
-echo "  Mode     : $RECORDING_MODE"
-echo "  Refiner  : $([ "$TEXT_REFINER_ENABLED" = "1" ] && echo enabled || echo disabled)"
-echo "  Threads  : ${PARAKEET_THREADS:-auto (all cores)}"
-echo "  Python   : $($VENV_PYTHON --version 2>&1)"
-echo "  Theme    : Dark with premium white waveform bars"
-echo "  Logs     : live terminal output"
-echo ""
+# Startup Banner
+echo "
+╔══════════════════════════════════════════════════╗
+║        🎙️  PARAKEET FLOW  v2                      ║
+╚══════════════════════════════════════════════════╝
+  Backend  : $BACKEND
+  Mode     : $RECORDING_MODE
+  Telemetry: $([ "$STREAMING_TELEMETRY_ENABLED" = "1" ] && echo "enabled -> $STREAMING_TELEMETRY_DIR" || echo "disabled")
+  Threads  : ${PARAKEET_THREADS:-auto (all cores)}
+  Python   : $($VENV_PYTHON --version 2>&1)
+  Theme    : Dark with premium white waveform bars
+  Logs     : live terminal output
+"
 
-if [ "${START_SH_DRY_RUN:-0}" = "1" ]; then
-    echo "  Dry run  : requested"
-    echo "  Refiner  : $([ "$TEXT_REFINER_ENABLED" = "1" ] && echo enabled || echo disabled)"
-    echo "  Dry run  : exiting before Brain startup"
-    exit 0
-fi
+[[ "${START_SH_DRY_RUN:-0}" == "1" ]] && { log_info "Dry run: exiting before Brain startup"; exit 0; }
 
-# ── Sanity check ────────────────────────────────────────────────
-if [ ! -f "$VENV_PYTHON" ]; then
-    log_error ".venv not found. Run: uv venv && uv pip install -e ."
-    exit 1
-fi
+# Sanity Check
+[ -f "$VENV_PYTHON" ] || { log_error ".venv not found. Run: uv venv && uv pip install -e ."; exit 1; }
 
-# ── Kill any stale processes ─────────────────────────────────────
-echo "  Cleaning up old processes..."
+# Cleanup stale processes
+log_info "Cleaning up old processes..."
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes
-rm -f /tmp/parakeet.sock /tmp/parakeet-brain.pid /tmp/parakeet-hud.pid
+rm -f /tmp/parakeet.sock
 mkdir -p logs
 
-# ── Start Brain in background ────────────────────────────────────
-echo "  Starting Brain..."
-BACKEND="$BACKEND" "$VENV_PYTHON" src/brain.py &
+# Start Brain
+log_info "Starting Brain..."
+"$VENV_PYTHON" src/brain.py &
 BRAIN_PID=$!
 echo $BRAIN_PID > /tmp/parakeet-brain.pid
-echo "  Brain PID: $BRAIN_PID  |  live terminal output"
+log_info "Brain PID: $BRAIN_PID | live terminal output"
 
-# ── Wait for socket (up to 120s for first-run model download) ───
-echo ""
-echo "  Waiting for Brain to be ready..."
-if [ ! -d ~/.cache/parakeet-flow/models/deepdml ]; then
-    log_warn "First run: Downloading model (~1.5 GB)..."
-    echo "  This may take 5-10 minutes depending on your internet speed."
-    echo "  Subsequent starts will be much faster!"
-    echo ""
-fi
+# Wait for Brain
+echo -n "  Waiting for Brain to be ready"
+[ -d ~/.cache/parakeet-flow/models/deepdml ] || log_warn "First run: Downloading model (~1.5 GB)..."
+
 WAIT=0
-MAX_WAIT=300  # Increased to 5 minutes for first download
+MAX_WAIT=300
 while [ ! -S /tmp/parakeet.sock ]; do
     sleep 1
-    WAIT=$((WAIT + 1))
-
-    # Show progress indicator with time
-    if [ $((WAIT % 10)) -eq 0 ]; then
-        printf ". [%02ds/%02ds]\n" "$WAIT" "$MAX_WAIT"
-    else
-        printf "."
-    fi
-
-    if ! kill -0 "$BRAIN_PID" 2>/dev/null; then
-        echo ""
-        log_error "Brain crashed on startup."
-        echo "Scroll up in this terminal for Brain's output."
-        exit 1
-    fi
-
-    if [ $WAIT -ge $MAX_WAIT ]; then
-        echo ""
-        log_error "Timed out waiting for Brain. Watch the terminal output above."
-        exit 1
-    fi
+    ((WAIT++))
+    ((WAIT % 10 == 0)) && printf ". [%02ds/%02ds]\n  " "$WAIT" "$MAX_WAIT" || printf "."
+    kill -0 "$BRAIN_PID" 2>/dev/null || { echo; log_error "Brain crashed on startup."; exit 1; }
+    [[ $WAIT -ge $MAX_WAIT ]] && { echo; log_error "Timed out waiting for Brain."; exit 1; }
 done
+echo -e "\n\n  ✅ Brain is Online!\n══════════════════════════════════════════════════\n"
 
-echo ""
-echo ""
-echo "  ✅ Brain is Online!"
-echo "══════════════════════════════════════════════════"
-echo ""
-
-# ── Start HUD in background ──────────────────────────────────────
-# CRITICAL: must be launched directly from the shell here, NOT as a
-# subprocess of ear.py.  When Qt/PySide6 is spawned too deep in a
-# subprocess chain, macOS WindowServer rejects the GUI memory allocation
-# with SIGABRT (vm_map_enter failure).  Shell-level launch fixes this.
-echo "  Starting HUD..."
+# Start HUD
+log_info "Starting HUD..."
 kill_hud_processes
 "$VENV_PYTHON" src/hud.py > logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID > /tmp/parakeet-hud.pid
-echo "  HUD   PID: $HUD_PID  |  log: logs/hud.log"
-sleep 0.8   # give Qt/Cocoa time to connect to WindowServer
+log_info "HUD PID: $HUD_PID | log: logs/hud.log"
+sleep 0.8 # Allow Qt/Cocoa connection
 
-# ── Start Ear (foreground — Ctrl+C to stop) ─────────────────────
-BACKEND="$BACKEND" RECORDING_MODE="$RECORDING_MODE" "$VENV_PYTHON" src/ear.py
+# Start Ear
+"$VENV_PYTHON" src/ear.py

@@ -10,6 +10,7 @@ Hold RIGHT CMD → speak → silence splits chunk → release → final chunk + 
 import os
 import sys
 import socket
+import json
 import threading
 import time
 import uuid
@@ -94,6 +95,9 @@ except ImportError:
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
 BACKEND         = os.environ.get("BACKEND", "faster_whisper")
+# This chooses the send style:
+# - no_streaming: send raw audio and let Brain wait for socket close
+# - silence_streaming: split speech on silence and send chunks
 RECORDING_MODE  = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
 NO_STREAMING_MODE = "no_streaming"
 SILENCE_STREAMING_MODE = "silence_streaming"
@@ -122,15 +126,6 @@ MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = float(
 
 _RCMD_VK = 54
 
-def _is_right_cmd(key) -> bool:
-    if key == keyboard.Key.cmd_r:
-        return True
-    if hasattr(key, 'name') and getattr(key, 'name', None) == 'cmd_r':
-        return True
-    if hasattr(key, 'vk') and getattr(key, 'vk', None) == _RCMD_VK:
-        return True
-    return False
-
 FORMAT   = pyaudio.paInt16
 CHANNELS = 1
 RATE     = 16000
@@ -144,7 +139,31 @@ MODELS = [
     "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"
 ]
 
+def _is_right_cmd(key) -> bool:
+    """
+    Checks if a keyboard event corresponds to the Right Command key.
+    Since different operating systems and keyboard libraries represent keys
+    in various ways (using names, virtual key codes, or special objects),
+    this function provides a unified check. It ensures that the 'Ear' correctly
+    identifies the hotkey regardless of how the underlying system reports it.
+    """
+    if key == keyboard.Key.cmd_r:
+        return True
+    if hasattr(key, 'name') and getattr(key, 'name', None) == 'cmd_r':
+        return True
+    if hasattr(key, 'vk') and getattr(key, 'vk', None) == _RCMD_VK:
+        return True
+    return False
+
+
 def get_rms(block: bytes) -> float:
+    """
+    Calculates the Root Mean Square (RMS) volume level of an audio block.
+    This provides a numerical value representing the 'loudness' of the audio.
+    By converting raw bytes into normalized shorts and then averaging their
+    squared values, we get a consistent metric that can be used for VAD
+    (Voice Activity Detection) and for driving the visual volume meter.
+    """
     import struct
     count = len(block) // 2
     shorts = struct.unpack(f"{count}h", block[:count * 2])
@@ -153,7 +172,15 @@ def get_rms(block: bytes) -> float:
     sum_sq = sum((s / 32768.0) ** 2 for s in shorts)
     return math.sqrt(sum_sq / len(shorts))
 
+
 def send_switch_command(model_name):
+    """
+    Sends a request to the Brain to switch the active transcription model.
+    It opens a Unix domain socket connection to the Brain's server and
+    transmits a formatted command string containing the new model's name.
+    This allows the user to change models instantly via keyboard shortcuts
+    while the application is running, without needing to restart the Ear.
+    """
     log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -165,7 +192,15 @@ def send_switch_command(model_name):
     except Exception as e:
         log.info(f"\n❌ Failed to send switch command: {e}\n")
 
+
 def run_self_test():
+    """
+    Executes a diagnostic test by sending synthetic audio to the Brain.
+    It generates a 1-second sine wave at 440Hz and attempts to transmit it
+    over the Unix socket. This helps verify that the communication path
+    between the Ear and the Brain is working correctly and that the Brain
+    is ready to accept and process audio data without needing a microphone.
+    """
     log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
     duration = 1.0
     frequency = 440.0
@@ -214,6 +249,13 @@ def run_self_test():
 
 
 class TerminalMenu(threading.Thread):
+    """
+    Background thread that listens for keyboard input in the terminal.
+    This allows the user to switch models by pressing number keys (1-0)
+    or run a self-test by pressing 'T'. It runs in a separate thread
+    so that it doesn't block the main recording loop, providing a
+    simple but effective interactive control interface for the app.
+    """
     def __init__(self):
         super().__init__(daemon=True)
         self._stop = threading.Event()
@@ -244,6 +286,13 @@ class TerminalMenu(threading.Thread):
 
 
 def select_mic(p):
+    """
+    Interactive utility for selecting an input microphone from a list.
+    It scans the system for all available audio input devices and presents
+    them to the user in a numbered list. The user can then enter the
+    index of their preferred microphone, or just press Enter to use
+    the system default. This ensures the app records from the right source.
+    """
     log.info("\n🎤  SELECT YOUR MICROPHONE:")
     log.info("─" * 30)
     devices = []
@@ -277,6 +326,13 @@ def select_mic(p):
 
 # ── Main ear class (STREAMING) ─────────────────────────────────────────────────
 class Ear:
+    """
+    The main audio capture and processing engine for Parakeet Flow.
+    The Ear is responsible for opening the microphone stream, performing
+    real-time VAD (Voice Activity Detection), and splitting speech into
+    logical chunks. It coordinates with the Brain via sockets to send
+    audio data and with the HUD to provide visual feedback to the user.
+    """
     def __init__(self, input_device_index=None):
         self.pyaudio_libaray_for_capturing_audio = pyaudio.PyAudio()
         self.stream = None
@@ -308,6 +364,7 @@ class Ear:
         self._toggle_active = False
         self._brain_sock = None
         self._brain_sock_lock = threading.Lock()
+        self._telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
 
         # ★ MOUSE CONTROL: Hold-to-record for voice activation
         self._mouse_press_start_time = 0.0  # When mouse button was pressed
@@ -319,7 +376,10 @@ class Ear:
         self._vad_state_log_time = 0.0
         self._recording_level_log_time = 0.0
         self._vad_no_speech_warned = False
-        self._current_session_id = None
+        # Session ID is generated ONCE when the app launches — it never changes.
+        # _recording_index tracks how many times the user has pressed the record button.
+        self._current_session_id = uuid.uuid4().hex
+        self._recording_index = 0
         self._chunk_seq = 0
         self._chunk_started_at = 0.0
         self._chunk_overlap_audio_bytes = int(RATE * 2 * OVERLAP_SECONDS)
@@ -352,6 +412,13 @@ class Ear:
         log.info(f"[Ear] Mic selected: {self.active_mic_name} ✓")
 
     def _send_hud(self, cmd):
+        """
+        Sends state commands to the HUD over a TCP socket.
+        It updates the user interface by signaling whether the app is
+        currently listening, processing, or done. This keeps the user
+        informed about the AI's internal state without needing to look
+        at the terminal window, which is especially useful for a background tool.
+        """
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(0.2)
@@ -362,6 +429,13 @@ class Ear:
             log.info(f"[Ear] ❌ HUD command '{cmd}' failed: {e}")
 
     def _start_volume_sender(self):
+        """
+        Launches a background thread to stream volume data to the HUD.
+        This function uses UDP to send real-time RMS levels and frequency
+        band data (bass, mid, treble) approximately 25 times per second.
+        The HUD uses this data to drive its visual volume meter and
+        animations, providing a smooth and responsive user experience.
+        """
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         def _sender():
             packets_sent = 0
@@ -385,24 +459,75 @@ class Ear:
         log.debug("[Ear] Volume sender thread started")
 
     def _is_no_streaming_mode(self) -> bool:
+        """Return True when Ear should send raw audio to one open Brain socket."""
         return RECORDING_MODE == NO_STREAMING_MODE
 
     def _is_silence_streaming_mode(self) -> bool:
+        """Return True when Ear should split speech on silence."""
         return RECORDING_MODE == SILENCE_STREAMING_MODE
 
     def _begin_recording_session(self):
-        self._current_session_id = uuid.uuid4().hex
+        """
+        Initializes a new streaming session with a unique ID.
+        This function resets the chunk counters and records the start time,
+        then sends a 'session_started' event to the Brain. This ensures
+        that both the Ear and the Brain are synchronized and ready to
+        process a series of related audio chunks as a single conversation.
+        """
+        # session_id was already created in __init__; just reset the per-recording counters.
         self._chunk_seq = 0
         self._chunk_started_at = time.time()
+        self._send_session_event_to_brain(
+            "session_started",
+            {"recording_mode": RECORDING_MODE},
+        )
+
+    def _send_session_event_to_brain(self, event_type: str, fields: dict | None = None) -> bool:
+        """
+        Transmits a telemetry event from the Ear to the Brain's server.
+        It packs the event type and optional data fields into a JSON
+        message and sends it over the Unix domain socket. This allows
+        the Brain to keep track of microphone levels and VAD state
+        changes that happen on the Ear's side of the application.
+        """
+        if not self._telemetry_enabled or not self._current_session_id:
+            return False
+
+        payload = {"type": event_type}
+        if fields:
+            payload.update(fields)
+
+        # Header format: CMD_SESSION_EVENT:SESSION_ID:RECORDING_INDEX
+        header = f"CMD_SESSION_EVENT:{self._current_session_id}:{self._recording_index}\n\n".encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5.0)
+                client.connect(SOCKET_PATH)
+                client.sendall(header + body)
+                client.shutdown(socket.SHUT_WR)
+            return True
+        except Exception as e:
+            log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}': {e}")
+            return False
 
     def _send_audio_chunk_to_brain(self, utterance_bytes: bytes) -> bool:
+        """
+        Sends a single processed audio chunk to the Brain for transcription.
+        The chunk is prefixed with a session header and a sequence number
+        so the Brain can correctly stitch it back together with other chunks.
+        It also records a 'chunk_sent_to_brain' event to the telemetry log
+        to help debug any network latency or data loss between processes.
+        """
         if not utterance_bytes or not self._current_session_id:
             return False
 
         session_id = self._current_session_id
         seq = self._chunk_seq
         self._chunk_seq += 1
-        header = f"CMD_AUDIO_CHUNK:{session_id}:{seq}\n\n".encode("utf-8")
+        # Header format: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
+        header = f"CMD_AUDIO_CHUNK:{session_id}:{self._recording_index}:{seq}\n\n".encode("utf-8")
 
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -410,13 +535,27 @@ class Ear:
                 client.connect(SOCKET_PATH)
                 client.sendall(header + utterance_bytes)
                 client.shutdown(socket.SHUT_WR)
-            log.info(f"[Ear] 📤 Chunk {seq} sent to Brain ({len(utterance_bytes)} bytes)")
+            log.info("📤 Audio chunk sent", seq=seq, size=len(utterance_bytes), session=session_id[:8])
+            self._send_session_event_to_brain(
+                "chunk_sent_to_brain",
+                {
+                    "chunk_index": seq,
+                    "audio_bytes": len(utterance_bytes),
+                },
+            )
             return True
         except Exception as e:
-            log.info(f"\r❌ Failed to send chunk to Brain: {e}\n")
+            log.error("❌ Failed to send chunk", error=str(e))
             return False
 
     def _commit_recording_session(self) -> bool:
+        """
+        Signals to the Brain that the current recording session is finished.
+        This command is sent when the user releases the recording hotkey.
+        It tells the Brain that no more audio chunks will be arriving for
+        this session ID, allowing the Brain to finalize the transcription
+        and paste the text as soon as all pending chunks are processed.
+        """
         if not self._current_session_id:
             return False
 
@@ -425,15 +564,24 @@ class Ear:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(5.0)
                 client.connect(SOCKET_PATH)
-                client.sendall(f"CMD_SESSION_COMMIT:{session_id}".encode("utf-8"))
+                # Header format: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
+                client.sendall(f"CMD_SESSION_COMMIT:{session_id}:{self._recording_index}".encode("utf-8"))
                 client.shutdown(socket.SHUT_WR)
-            log.info(f"[Ear] ✅ Commit sent for session {session_id}")
+            log.info("✅ Session committed", session=session_id[:8], recording=self._recording_index)
+            self._recording_index += 1  # button released → next press gets the next recording slot
             return True
         except Exception as e:
-            log.info(f"\r❌ Failed to commit session: {e}\n")
+            log.error("❌ Failed to commit session", error=str(e))
             return False
 
     def _boost_pcm16_bytes(self, pcm16_bytes: bytes) -> bytes:
+        """
+        Applies a digital gain multiplier to raw 16-bit PCM audio data.
+        This is used to artificially increase the volume of the microphone
+        input before it is sent to the AI for transcription. By boosting
+        the signal, we can improve the accuracy of the transcription for
+        users with quiet microphones while ensuring the audio doesn't clip.
+        """
         if not pcm16_bytes:
             return pcm16_bytes
         if len(pcm16_bytes) % 2:
@@ -443,6 +591,14 @@ class Ear:
         return boosted.tobytes()
 
     def _prepare_vad_chunk(self, pcm16_bytes: bytes) -> bytes:
+        """
+        Conditions raw audio data specifically for the VAD engine.
+        It applies a separate sensitivity boost to the audio before
+        passing it to the Voice Activity Detector. This allows us to
+        fine-tune how easily the system 'wakes up' to speech without
+        affecting the actual audio quality that is sent to the Brain
+        for transcription, providing a more responsive user experience.
+        """
         if not pcm16_bytes:
             return pcm16_bytes
         if len(pcm16_bytes) % 2:
@@ -460,11 +616,27 @@ class Ear:
         return conditioned_bytes
 
     def _reset_chunk_tracking(self):
+        """
+        Resets internal flags and counters for a new audio chunk.
+        When a chunk is finalized or split, we need to clear the state
+        that tracks whether we've already logged speech or warned about
+        silence for that specific segment. This ensures that log messages
+        and telemetry events are correctly associated with each new
+        part of the user's ongoing speech.
+        """
         self._chunk_speech_logged = False
         self._silence_pending_logged = False
         self._vad_no_speech_warned = False
 
     def _prepend_pending_chunk_overlap(self, audio_chunk_for_brain: bytes, *, stop_session: bool) -> bytes:
+        """
+        Adds a small overlap from the previous chunk to the current one.
+        This technique ensures that speech isn't 'cut' exactly at a word
+        boundary, which can confuse the AI transcription model. By including
+        a tiny bit of context from the end of the last chunk, we provide
+        the Brain with enough surrounding information to maintain a smooth
+        and accurate flow of text across all chunks in a session.
+        """
         overlap_application_result = apply_previous_chunk_overlap(
             current_chunk_audio_bytes=audio_chunk_for_brain,
             previous_pending_overlap_audio_bytes=self._pending_chunk_overlap_audio,
@@ -476,6 +648,14 @@ class Ear:
         return overlap_application_result.overlapped_audio_bytes
 
     def _flush_current_chunk(self, *, stop_session: bool) -> bool:
+        """
+        Finalizes the current utterance and sends it to the Brain.
+        This function is called either when silence is detected or when
+        the user stops recording. It collects all buffered audio from the
+        VAD, applies gain and overlap, and then transmits the final result.
+        It also handles the session commit command if this was the last chunk
+        of the recording, effectively closing the loop on that session.
+        """
         now = time.time()
         silence_elapsed = self._utterance_gate.silence_elapsed(now)
         had_session = bool(self._current_session_id)
@@ -497,17 +677,20 @@ class Ear:
             if stop_session:
                 self._pending_chunk_overlap_audio = b""
                 log.info("[Ear] 🔇 No speech captured; stopping recording")
-                if had_session:
-                    self._commit_recording_session()
-                self._current_session_id = None
+                # Always commit so the Brain closes out this recording slot
+                self._commit_recording_session()
+                # Reset per-recording seq counter; session ID stays alive
                 self._chunk_seq = 0
             return False
 
         utterance_for_brain = self._boost_pcm16_bytes(utterance)
+        previous_pending_overlap_audio = self._pending_chunk_overlap_audio
         utterance_for_brain = self._prepend_pending_chunk_overlap(
             utterance_for_brain,
             stop_session=stop_session,
         )
+        overlap_seconds_added = len(previous_pending_overlap_audio) / 2.0 / RATE
+        chunk_age_seconds = max(0.0, now - self._chunk_started_at)
 
         duration = (total * CHUNK) / RATE
         if stop_session:
@@ -520,15 +703,35 @@ class Ear:
             )
 
         sent = self._send_audio_chunk_to_brain(utterance_for_brain)
+        if sent:
+            self._send_session_event_to_brain(
+                "silence_threshold_hit" if not stop_session else "session_stopped",
+                {
+                    "chunk_index": self._chunk_seq - 1,
+                    "chunk_age_seconds": round(chunk_age_seconds, 2),
+                    "silence_elapsed_seconds": round(silence_elapsed, 2),
+                    "split_reason": "silence_threshold_hit" if not stop_session else "session_stop",
+                    "overlap_seconds_added": round(overlap_seconds_added, 4),
+                    "audio_bytes": len(utterance_for_brain),
+                },
+            )
         if stop_session:
             self._commit_recording_session()
-            self._current_session_id = None
+            # Reset per-recording seq counter; session ID stays alive for the app lifetime
             self._chunk_seq = 0
         else:
             self._chunk_started_at = time.time()
         return sent
 
     def _stop_no_streaming(self):
+        """
+        Stops a non-streaming recording session and closes the Brain socket.
+        In legacy non-streaming mode, we don't split audio into chunks.
+        Instead, we wait until the user finishes and then signal the Brain
+        to process the entire buffer at once. This function manages that
+        transition by updating the recording state, notifying the HUD,
+        and cleanly shutting down the background socket connection.
+        """
         with self._lock:
             if not self.is_recording:
                 return
@@ -544,7 +747,14 @@ class Ear:
         threading.Thread(target=self._close_brain_stream, daemon=True).start()
 
     def _open_brain_stream(self) -> bool:
-        """Open a persistent socket to brain for no-streaming mode buffering."""
+        """
+        Opens a dedicated socket for non-streaming audio data.
+        If a connection to the Brain's Unix socket isn't already open,
+        this function attempts to establish one. It includes error handling
+        to inform the user if the Brain process isn't running or isn't
+        responding, ensuring the application fails gracefully instead
+        of crashing during a recording attempt.
+        """
         with self._brain_sock_lock:
             if self._brain_sock is not None:
                 return True
@@ -562,6 +772,7 @@ class Ear:
                 return False
 
     def _stream_chunk_to_brain(self, chunk_bytes: bytes):
+        """Send raw audio bytes over the open no_streaming socket."""
         with self._brain_sock_lock:
             if self._brain_sock is None:
                 return
@@ -583,6 +794,7 @@ class Ear:
                 self._brain_sock = None
 
     def _close_brain_stream(self):
+        """Close the raw-audio socket so Brain can process the full buffer."""
         with self._brain_sock_lock:
             if self._brain_sock is None:
                 return
@@ -594,6 +806,7 @@ class Ear:
             self._brain_sock = None
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
+        """Handle one microphone callback and route it to the active mode."""
         if status:
             pass # Suppress status printing in always-listening mode to avoid spam
 
@@ -611,9 +824,10 @@ class Ear:
             self.last_frequency_bands = self._analyze_frequency_bands(boosted)
 
             if self._is_no_streaming_mode():
+                # Raw mode: send bytes straight to Brain and wait for socket close.
                 self._stream_chunk_to_brain(chunk_bytes)
             else:
-                # ★ VAD BUFFERING: keep the full utterance locally until silence closes it
+                # Silence mode: keep the utterance locally until silence splits it.
                 now = time.time()
                 vad_bytes = self._prepare_vad_chunk(in_data)
                 
@@ -731,7 +945,14 @@ class Ear:
         log.info("[Ear] 🎤 Mic stream opened")
 
     def _close_mic_stream(self):
-        """Close mic stream after recording."""
+        """
+        Shuts down the active PyAudio microphone stream.
+        This function stops the audio input and releases the hardware
+        resources. It is called when the application is closing to ensure
+        that the microphone isn't left in an 'active' state by the OS,
+        which could prevent other applications from using it or cause
+        unnecessary battery drain on mobile devices like MacBooks.
+        """
         if self.stream is not None:
             try:
                 self.stream.stop_stream()
@@ -741,6 +962,13 @@ class Ear:
             self.stream = None
 
     def _start_recording_state(self, *, from_hold: bool) -> None:
+        """
+        Resets the internal state and prepares the Ear for a new recording.
+        It clears all volume and frame counters, sets the recording flag,
+        and determines if this recording was triggered by a sustained hold
+        or a single keypress. In streaming mode, it also resets the VAD
+        engine and starts a fresh telemetry session to track the new recording.
+        """
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0
@@ -757,6 +985,14 @@ class Ear:
             self._begin_recording_session()
 
     def on_press(self, key):
+        """
+        Keyboard event handler for when a key is pressed down.
+        It specifically listens for the Right Command key to trigger the
+        recording state. Depending on whether the app is in streaming or
+        non-streaming mode, it will either start buffering chunks locally
+        or open a persistent socket to the Brain. It also notifies the HUD
+        to display the 'listening' state to provide visual confirmation.
+        """
         if not _is_right_cmd(key):
             return
 
@@ -788,6 +1024,14 @@ class Ear:
         self._start_volume_sender()
 
     def on_release(self, key):
+        """
+        Keyboard event handler for when a key is released.
+        If the Right Command key is released after being held for more
+        than a short threshold, it stops the recording and signals the
+        Brain to finalize. If the release happens very quickly, the app
+        enters 'toggle mode', where recording continues until the key
+        is pressed again, allowing for hands-free dictation when needed.
+        """
         if not _is_right_cmd(key):
             return
 
@@ -800,8 +1044,6 @@ class Ear:
 
         from_first_cmd_press_to_release_time_diff = time.time() - self._cmd_press_time
         if from_first_cmd_press_to_release_time_diff >= RECORDING_BUTTON_HOLD_THRESHOLD:
-            # if user is pressin the cmd button for long time then from first cmd press to release time it large 
-            # so if that is small that means the user is doing togglning 
             log.info("\r[Ear] ⏹️  Right CMD released - finalizing now")
             self._stop_and_send(stop_session=True)
         else:
@@ -811,21 +1053,11 @@ class Ear:
     def on_mouse_click(self, x, y, button, pressed):
         """
         Handle mouse button press/release for hold-to-record recording control.
-
-        Press behavior (pressed=True):
-            - Record press timestamp
-            - Set holding flag
-            - No visual feedback during hold delay
-
-        Release behavior (pressed=False):
-            - Clear holding flag
-            - If recording started from this hold: stop recording
-            - Early release (< 1s): silent reset (no action)
-
-        Args:
-            x, y: Mouse coordinates (unused)
-            button: Which mouse button (only Button.right matters)
-            pressed: True for press, False for release
+        This allows the user to trigger recording using the Right Mouse Button.
+        Like the keyboard hotkey, it supports hold-to-record behavior, where
+        releasing the mouse button after a sustained hold will stop the
+        recording. This provides an alternative input method for users who
+        prefer using their mouse over keyboard shortcuts for voice activation.
         """
         # Only right button triggers hold logic (avoids text selection from left button)
         if button != mouse.Button.right:
@@ -853,26 +1085,38 @@ class Ear:
                 self._recording_from_hold = False
 
     def _stop_and_send(self, *, stop_session: bool = True):
+        """
+        Unified method to stop recording and transmit the final data.
+        It routes the stop command to either the streaming or non-streaming
+        handler depending on the current configuration. This ensures that
+        all recording logic follows the same cleanup path, whether it was
+        triggered by a keyboard release, a mouse release, or a toggle click.
+        """
         if self._is_no_streaming_mode():
             self._stop_no_streaming()
             return
         self._flush_current_chunk(stop_session=stop_session)
 
     def record_loop(self):
-        """Main recording loop.
-
-        Checks for hold duration >= 1.0s to start recording.
-        Displays volume meter when recording.
+        """
+        Main background loop that manages the active recording state.
+        This loop runs continuously while the Ear is active, checking for
+        mouse hold durations and updating the visual volume meter in the
+        terminal. It also monitors the VAD engine for silence timeouts to
+        automatically split speech into chunks during long dictation sessions.
         """
         while True:
             time.sleep(0.05)
             self._record_loop_tick()
 
     def _record_loop_tick(self):
-        """Single iteration of record loop logic.
-
-        Checks hold duration and starts recording if threshold met.
-        Displays volume meter when recording.
+        """
+        Internal tick function called by the record loop to update state.
+        It checks if a mouse hold has reached the 1-second threshold to start
+        recording and handles the periodic logging of microphone levels.
+        In streaming mode, it also queries the VAD engine to see if a
+        silence threshold has been hit, triggering an automatic chunk split
+        to keep the transcription feedback fast and responsive.
         """
         with self._lock:
             recording = self.is_recording
@@ -913,6 +1157,7 @@ class Ear:
                 self._recording_level_log_time = now
 
             if self._is_silence_streaming_mode():
+                # Silence mode watches for speech ending so it can send a chunk.
                 if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
                     silence_elapsed = self._utterance_gate.silence_elapsed(now)
                     if silence_elapsed > 0.0:
@@ -937,6 +1182,16 @@ class Ear:
                         f"last_energy={self._utterance_gate.last_energy():.4f}, "
                         f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
                     )
+                    self._send_session_event_to_brain(
+                        "vad_no_speech_warning",
+                        {
+                            "chunk_index": self._chunk_seq,
+                            "max_score": round(max_score, 3),
+                            "threshold": round(VAD_THRESHOLD, 2),
+                            "last_energy": round(self._utterance_gate.last_energy(), 4),
+                            "energy_threshold": round(self._utterance_gate.last_dynamic_threshold(), 4),
+                        },
+                    )
                     self._vad_no_speech_warned = True
                 
                 silence_elapsed = (
@@ -958,12 +1213,28 @@ class Ear:
                     self._stop_and_send(stop_session=False)
 
     def cleanup(self):
+        """
+        Performs a clean shutdown of all Ear resources.
+        It closes the microphone stream, terminates the PyAudio instance,
+        and ensures that any open network sockets to the Brain are
+        disconnected. This function is vital for preventing 'zombie'
+        processes or locked audio hardware when the user exits the
+        application using Ctrl+C or by closing the terminal window.
+        """
         self._close_brain_stream()
         self._close_mic_stream()
         self.pyaudio_libaray_for_capturing_audio.terminate()
 
 
 def start_ear():
+    """
+    The main entry point for the Ear process.
+    It handles initial microphone selection, starts the background
+    terminal menu, and initializes the Ear engine. It also sets up
+    keyboard and mouse listeners to capture user input and enters
+    the main recording loop. This function coordinates all the
+    moving parts required to turn your voice into digital text.
+    """
     p_temp = pyaudio.PyAudio()
     selected_mic_index = select_mic(p_temp)
     p_temp.terminate()
@@ -984,7 +1255,6 @@ def start_ear():
 
     backend_label = {
         "faster_whisper": "faster-whisper + distil-large-v3 (INT8)",
-        "openvino":       "whisper.cpp + OpenVINO (Intel iGPU)",
     }.get(BACKEND, BACKEND)
 
     mic_mode = "Voice Isolation (macOS)" if os.environ.get("VOICE_ISOLATION", "0") == "1" else "Standard (Raw Audio)"

@@ -72,6 +72,23 @@ class OverlapApplicationResult:
     overlap_seconds_added_from_previous_chunk: float
 
 
+@dataclass(frozen=True)
+class ChunkDeduplicationResult:
+    """Hold the cleaned chunk text and the scores used to decide the trim.
+
+    Brain uses this to write telemetry without recalculating the overlap.
+    The inputs are two chunk texts, and the output is the cleaned text plus scores.
+    """
+
+    cleaned_text: str
+    overlap_word_count: int
+    char_score: float
+    token_score: float
+    combined_score: float
+    trim_applied: bool
+    skipped_because_result_too_small: bool
+
+
 def apply_previous_chunk_overlap(
     *,
     current_chunk_audio_bytes: bytes,
@@ -189,13 +206,12 @@ def should_skip_overlap_trim_because_result_is_too_small(
 
 def character_similarity(words_a: list[str], words_b: list[str]) -> float:
     """
-    Compare two word lists as joined strings.
-    Returns 0.0 (completely different) to 1.0 (identical).
-    
-    This handles:
-      "overlapping" vs "overlaping"  → ~0.95
-      "thinkin"     vs "thinking"    → ~0.93
-      "bout"        vs "about"       → ~0.80
+    Measures how similar two lists of words are based on their characters.
+    It joins the words into strings and compares them using a sequence
+    matching algorithm, returning a score from 0.0 to 1.0. This helps
+    the system catch cases where the AI might have slightly different
+    spellings for the same words in overlapping audio segments,
+    ensuring that small typos don't prevent successful deduplication.
     """
     if not words_a or not words_b:
         return 0.0
@@ -214,11 +230,12 @@ def character_similarity(words_a: list[str], words_b: list[str]) -> float:
 
 def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
     """
-    Count what fraction of words appear in both lists.
-    
-    This handles:
-      ["all", "these", "things"] vs ["these", "all", "things"]
-      → 3/3 = 1.0  (perfect overlap despite order change)
+    Calculates the percentage of words that are identical in both lists.
+    By converting the word lists into 'sets', this function ignores the
+    specific order of the words and focuses on whether the same unique
+    vocabulary appears in both segments. This is particularly useful for
+    catching overlaps where the AI might have reordered words slightly
+    but is still clearly describing the same spoken phrase.
     """
     if not words_a or not words_b:
         return 0.0 
@@ -248,18 +265,12 @@ def combined_overlap_score(
     token_weight: float = 0.4,
 ) -> float:
     """
-    Blend character similarity and token overlap.
-    
-    Why both?
-    
-    Char-level alone:
-      "the big plan" vs "big plan the"  → 0.72 (misses reorder)
-    
-    Token-level alone:  
-      "overlapping" vs "overlaping"     → 0.50 (misses typo)
-    
-    Combined:
-      Both cases → caught correctly
+    Combines character and token scores into a single confidence metric.
+    By blending both character similarity and word-set overlap, we create
+    a robust detection system that isn't easily fooled by typos or word
+    reordering. This weighted average provides the final 'truth' score that
+    the Brain uses to decide if it should delete a chunk of text as a
+    duplicate, ensuring the final transcript remains clean and accurate.
     """
     char_score = character_similarity(
         words_a=words_a,
@@ -281,7 +292,80 @@ def combined_overlap_score(
         combined=round(combined, 4),
     )
     return combined
-    
+
+
+def analyze_duplicate_chunk_prefix(
+    previous_chunk_text: str,
+    current_chunk_text: str,
+    *,
+    max_overlap_words: int = 8,
+) -> ChunkDeduplicationResult:
+    """
+    Analyzes two pieces of text to find and report any duplicated words.
+    This function compares the end of the last transcript with the start
+    of the new one, looking for overlapping words caused by audio overlap.
+    It returns a detailed result containing the cleaned text, the number of
+    words trimmed, and the confidence scores used for the decision. This
+    detailed report is essential for both the Brain's logic and telemetry.
+    """
+    if not previous_chunk_text or not current_chunk_text:
+        return ChunkDeduplicationResult(
+            cleaned_text=current_chunk_text.strip(),
+            overlap_word_count=0,
+            char_score=0.0,
+            token_score=0.0,
+            combined_score=0.0,
+            trim_applied=False,
+            skipped_because_result_too_small=False,
+        )
+
+    prev_original, prev_normalized = build_original_words_and_overlap_matching_words(previous_chunk_text)
+    curr_original, curr_normalized = build_original_words_and_overlap_matching_words(current_chunk_text)
+
+    largest_possible_overlap = min(
+        len(prev_normalized),
+        len(curr_normalized),
+        len(prev_original),
+        len(curr_original),
+        max_overlap_words,
+    )
+
+    for overlap_word_count in range(largest_possible_overlap, 1, -1):
+        prev_tail = prev_normalized[-overlap_word_count:]
+        curr_head = curr_normalized[:overlap_word_count]
+        char_score = character_similarity(prev_tail, curr_head)
+        token_score = token_overlap_score(prev_tail, curr_head)
+        combined_score = (char_score * 0.6) + (token_score * 0.4)
+
+        if combined_score >= SEMANTIC_OVERLAPPING_THRESHOLD:
+            trimmed = curr_original[overlap_word_count:]
+            skipped = should_skip_overlap_trim_because_result_is_too_small(
+                curr_original,
+                trimmed,
+                overlap_word_count,
+            )
+            cleaned_text = current_chunk_text.strip() if skipped else " ".join(trimmed).strip()
+            return ChunkDeduplicationResult(
+                cleaned_text=cleaned_text,
+                overlap_word_count=overlap_word_count,
+                char_score=char_score,
+                token_score=token_score,
+                combined_score=combined_score,
+                trim_applied=not skipped,
+                skipped_because_result_too_small=skipped,
+            )
+
+    return ChunkDeduplicationResult(
+        cleaned_text=current_chunk_text.strip(),
+        overlap_word_count=0,
+        char_score=0.0,
+        token_score=0.0,
+        combined_score=0.0,
+        trim_applied=False,
+        skipped_because_result_too_small=False,
+    )
+
+
 def remove_duplicate_chunk_prefix(
     previous_chunk_text: str,
     current_chunk_text: str,
@@ -303,57 +387,21 @@ def remove_duplicate_chunk_prefix(
     4. If not, try 7 words, then 6, then 5, then 4, then 3, then 2.
     5. If a match is found, return the new text without those words.
     """
-    # If one of the texts is empty, there is nothing to compare.
-    if not previous_chunk_text or not current_chunk_text:
-        return current_chunk_text.strip()
-
-    # Get the cleaned lists of words for both pieces of text.
-    # normalized = punctuation removed and lowercased
-    prev_original, prev_normalized = (
-        build_original_words_and_overlap_matching_words(previous_chunk_text)
+    analysis = analyze_duplicate_chunk_prefix(
+        previous_chunk_text,
+        current_chunk_text,
+        max_overlap_words=max_overlap_words,
     )
-    curr_original, curr_normalized = (
-        build_original_words_and_overlap_matching_words(current_chunk_text)
-    )
-
-    # Decide the maximum number of words we should try to match.
-    largest_possible_overlap = min(
-        len(prev_normalized),
-        len(curr_normalized),
-        len(prev_original),
-        len(curr_original),
-        max_overlap_words,
-    )
-
-    # Start searching for matches. We start from the biggest number
-    # and count down so we find the largest matching overlap.
-    for overlap_word_count in range(largest_possible_overlap, 1, -1):
-        prev_tail = prev_normalized[-overlap_word_count:]
-        curr_head = curr_normalized[:overlap_word_count]
-
-        score = combined_overlap_score(prev_tail, curr_head)
-
-        if score >= SEMANTIC_OVERLAPPING_THRESHOLD:
-            trimmed = curr_original[overlap_word_count:]
-
-            if should_skip_overlap_trim_because_result_is_too_small(
-                curr_original,
-                trimmed,
-                overlap_word_count,
-            ):
-                return current_chunk_text.strip()
-
-            result = " ".join(trimmed).strip()
-            log.debug(
-                "[Dedup] trimmed overlap",
-                removed_count=overlap_word_count,
-                score=round(score, 4),
-                previous_words=len(prev_normalized),
-                current_words=len(curr_normalized),
-                result_words=len(split_text_into_comparable_words(result)),
-            )
-            return result
-    return current_chunk_text.strip()
+    if analysis.trim_applied:
+        log.debug(
+            "[Dedup] trimmed overlap",
+            removed_count=analysis.overlap_word_count,
+            score=round(analysis.combined_score, 4),
+            previous_words=len(split_text_into_comparable_words(previous_chunk_text)),
+            current_words=len(split_text_into_comparable_words(current_chunk_text)),
+            result_words=len(split_text_into_comparable_words(analysis.cleaned_text)),
+        )
+    return analysis.cleaned_text
 
 
 def normalize_text_for_word_error_rate(text: str) -> str:

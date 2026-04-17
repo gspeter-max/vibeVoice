@@ -27,8 +27,10 @@ def test_socket_communication(sample_audio_bytes):
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
 
-    chunk = b"CMD_AUDIO_CHUNK:session123:0\n\n" + sample_audio_bytes
-    commit = b"CMD_SESSION_COMMIT:session123"
+    # New 4-part header: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
+    chunk = b"CMD_AUDIO_CHUNK:session123:0:0\n\n" + sample_audio_bytes
+    # New 3-part header: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
+    commit = b"CMD_SESSION_COMMIT:session123:0"
 
     mock_backend.transcribe.return_value = "integrated test result"
 

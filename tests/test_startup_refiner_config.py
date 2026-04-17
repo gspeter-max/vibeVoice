@@ -1,28 +1,55 @@
-import os
 import subprocess
-from pathlib import Path
+import os
 
-
-def test_start_sh_dry_run_warns_and_disables_refiner_when_groq_key_missing():
-    repo_root = Path(__file__).resolve().parents[1]
+def test_start_sh_dry_run_no_refiner_output():
+    """
+    Ensure that start.sh no longer mentions the transcript refiner
+    or llama-server in its banner/config output, even in dry-run mode.
+    """
     env = os.environ.copy()
-    env.update(
-        {
-            "START_SH_DRY_RUN": "1",
-            "RECORDING_MODE": "silence_streaming",
-            "GROQ_API_KEY": "",
-        }
+    env["START_SH_DRY_RUN"] = "1"
+    env["RECORDING_MODE"] = "silence_streaming"
+    
+    # We explicitly unset these to ensure we aren't getting them from the environment
+    env.pop("TEXT_REFINER_ENABLED", None)
+    
+    result = subprocess.run(
+        ["./start.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True
     )
+    
+    output = result.stdout
+    
+    # Negative assertions: these should NOT be in the output anymore
+    assert "Refiner" not in output
+    assert "LLAMA_PORT" not in output
+    assert "TEXT_REFINER" not in output
+    assert "llama-server" not in output
+    assert "Qwen2.5" not in output
+
+    # Positive assertions: core info should still be there
+    assert "Backend" in output
+    assert "Mode" in output
+    assert "silence_streaming" in output
+    assert "Dry run" in output
+
+
+def test_start_sh_dry_run_prints_streaming_telemetry_banner_when_enabled():
+    env = os.environ.copy()
+    env["START_SH_DRY_RUN"] = "1"
+    env["RECORDING_MODE"] = "silence_streaming"
+    env["STREAMING_TELEMETRY_ENABLED"] = "1"
 
     result = subprocess.run(
-        [str(repo_root / "start.sh")],
+        ["./start.sh"],
         env=env,
-        cwd="/tmp",
         capture_output=True,
         text=True,
         check=True,
     )
 
-    assert "Refiner  : disabled" in result.stdout
-    assert "GROQ_API_KEY is missing" in result.stdout
-    assert "llama-server" not in result.stdout
+    assert "Telemetry" in result.stdout
+    assert "enabled" in result.stdout

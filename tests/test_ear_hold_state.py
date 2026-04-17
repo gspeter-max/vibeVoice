@@ -2,6 +2,7 @@ import pytest
 import time
 import sys
 import os
+import json
 from unittest.mock import Mock, patch
 
 from streaming_shared_logic import should_split_chunk_after_silence
@@ -406,7 +407,8 @@ def test_flush_current_chunk_sends_commit_even_if_last_chunk_empty():
 
     assert sent is False
     mock_commit.assert_called_once()
-    assert ear._current_session_id is None
+    # After stop, session ID persists (it's created once at app launch)
+    assert ear._current_session_id is not None
     assert ear._chunk_seq == 0
 
 
@@ -447,8 +449,59 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
         sent = ear._send_audio_chunk_to_brain(b"\x01\x00" * 2)
 
     assert sent is True
-    assert captured["data"].startswith(b"CMD_AUDIO_CHUNK:session123:7\n\n")
+    # New 4-part header: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
+    assert captured["data"].startswith(b"CMD_AUDIO_CHUNK:session123:0:7\n\n")
     assert captured["data"].endswith(b"\x01\x00" * 2)
+
+
+def test_session_event_send_uses_json_payload_and_session_header():
+    """Test that Ear formats telemetry events with session id and JSON payload."""
+    ear = Ear()
+    ear._telemetry_enabled = True
+    ear._current_session_id = "session123"
+
+    captured = {}
+
+    class FakeSocket:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _addr):
+            return None
+
+        def sendall(self, data):
+            captured["data"] = data
+
+        def shutdown(self, _how):
+            return None
+
+        def close(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+    with patch("src.ear.socket.socket", return_value=FakeSocket()):
+        sent = ear._send_session_event_to_brain(
+            "chunk_sent_to_brain",
+            {"chunk_index": 7, "audio_bytes": 42},
+        )
+
+    assert sent is True
+    # New 3-part header: CMD_SESSION_EVENT:SESSION_ID:RECORDING_INDEX
+    assert captured["data"].startswith(b"CMD_SESSION_EVENT:session123:0\n\n")
+    payload = json.loads(captured["data"].split(b"\n\n", 1)[1].decode("utf-8"))
+    assert payload == {
+        "type": "chunk_sent_to_brain",
+        "chunk_index": 7,
+        "audio_bytes": 42,
+    }
 
 
 def test_only_right_button_triggers_hold():
