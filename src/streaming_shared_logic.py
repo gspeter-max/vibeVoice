@@ -8,7 +8,7 @@ from src import log
 # These are the default settings for the system.
 # They control how long to wait for silence and how much audio to overlap.
 DEFAULT_VAD_SCORE_THRESHOLD = 0.50
-DEFAULT_SILENCE_TIMEOUT_SECONDS = 1.0
+DEFAULT_SILENCE_TIMEOUT_SECONDS = 0.8
 DEFAULT_VAD_ENERGY_THRESHOLD = 0.05
 DEFAULT_ENERGY_RATIO = 2.5
 DEFAULT_OVERLAP_SECONDS = 2.5

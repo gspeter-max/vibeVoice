@@ -131,7 +131,7 @@ def _telemetry_seed() -> dict:
             "silence_timeout_seconds": float(
                 os.environ.get(
                     "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
-                    "1.0",
+                    "0.8",
                 )
             ),
             "energy_threshold": float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05")),
