@@ -628,7 +628,13 @@ class Ear:
         self._silence_pending_logged = False
         self._vad_no_speech_warned = False
 
-    def _prepend_pending_chunk_overlap(self, audio_chunk_for_brain: bytes, *, stop_session: bool) -> bytes:
+    def _prepend_pending_chunk_overlap(
+        self, 
+        audio_chunk_for_brain: bytes, 
+        *, 
+        stop_session: bool,
+        silence_seconds: float = 0.0
+    ) -> bytes:
         """
         Adds a small overlap from the previous chunk to the current one.
         This technique ensures that speech isn't 'cut' exactly at a word
@@ -637,10 +643,12 @@ class Ear:
         the Brain with enough surrounding information to maintain a smooth
         and accurate flow of text across all chunks in a session.
         """
+        silence_audio_byte_count = int(silence_seconds * RATE * 2)
         overlap_application_result = apply_previous_chunk_overlap(
             current_chunk_audio_bytes=audio_chunk_for_brain,
             previous_pending_overlap_audio_bytes=self._pending_chunk_overlap_audio,
             overlap_audio_byte_count=self._chunk_overlap_audio_bytes,
+            silence_audio_byte_count=silence_audio_byte_count,
             sample_rate=RATE,
             stop_session=stop_session,
         )
@@ -688,6 +696,7 @@ class Ear:
         utterance_for_brain = self._prepend_pending_chunk_overlap(
             utterance_for_brain,
             stop_session=stop_session,
+            silence_seconds=silence_elapsed if not stop_session else 0.0
         )
         overlap_seconds_added = len(previous_pending_overlap_audio) / 2.0 / RATE
         chunk_age_seconds = max(0.0, now - self._chunk_started_at)
