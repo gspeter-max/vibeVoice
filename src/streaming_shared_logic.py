@@ -128,10 +128,10 @@ def apply_previous_chunk_overlap(
         # to find the "speech tail," ensuring the overlap contains high-signal 
         # audio for the transcription engine's deduplication algorithm.
         
-        end_index = len(current_chunk_audio_bytes) - silence_audio_byte_count
-        start_index = max(0, end_index - overlap_audio_byte_count)
+        speech_end = len(current_chunk_audio_bytes) - silence_audio_byte_count
+        speech_start = max(0, speech_end - overlap_audio_byte_count)
         
-        next_pending_overlap_audio_bytes = current_chunk_audio_bytes[start_index:end_index]
+        next_pending_overlap_audio_bytes = current_chunk_audio_bytes[speech_start:speech_end]
     else:
         next_pending_overlap_audio_bytes = b""
 
