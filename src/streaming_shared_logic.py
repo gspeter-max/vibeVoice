@@ -4,6 +4,7 @@ from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
 from src import log
+import numpy as np
 
 # These are the default settings for the system.
 # They control how long to wait for silence and how much audio to overlap.
@@ -13,7 +14,7 @@ DEFAULT_VAD_ENERGY_THRESHOLD = 0.05
 DEFAULT_ENERGY_RATIO = 2.5
 DEFAULT_OVERLAP_SECONDS = 2.5
 DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS = 8.0
-SEMANTIC_OVERLAPPING_THRESHOLD = 0.82
+SEMANTIC_OVERLAPPING_THRESHOLD = 0.55
 
 @dataclass(frozen=True)
 class ChunkSplitDecision:
@@ -89,6 +90,31 @@ class ChunkDeduplicationResult:
     skipped_because_result_too_small: bool
 
 
+def _equalize_energy(overlap_bytes: bytes, current_bytes: bytes) -> bytes:
+    """Boost overlap audio to match the RMS energy of the current chunk."""
+    if not overlap_bytes or not current_bytes:
+        return overlap_bytes
+
+    # Safety: PCM-16 audio must have an even number of bytes.
+    # We trim the buffers to the nearest word (2 bytes) to prevent frombuffer errors.
+    o_trimmed = overlap_bytes[: len(overlap_bytes) // 2 * 2]
+    c_trimmed = current_bytes[: len(current_bytes) // 2 * 2]
+
+    overlap = np.frombuffer(o_trimmed, dtype=np.int16).astype(np.float32)
+    current = np.frombuffer(c_trimmed, dtype=np.int16).astype(np.float32)
+
+    overlap_rms = float(np.sqrt(np.mean(overlap**2)))
+    current_rms = float(np.sqrt(np.mean(current**2)))
+
+    # Avoid division by zero or near-silence processing
+    if overlap_rms < 1.0 or current_rms < 1.0:
+        return overlap_bytes
+
+    # Cap gain to avoid distortion
+    gain = min(current_rms / overlap_rms, 3.0)
+    return (overlap * gain).clip(-32768, 32767).astype(np.int16).tobytes()
+
+
 def apply_previous_chunk_overlap(
     *,
     current_chunk_audio_bytes: bytes,
@@ -116,8 +142,13 @@ def apply_previous_chunk_overlap(
             overlap_seconds_added_from_previous_chunk=0.0,
         )
 
-    # Join the saved bit from last time to the start of the new audio.
-    overlapped_audio_bytes = previous_pending_overlap_audio_bytes + current_chunk_audio_bytes
+    # Equalize the energy of the overlap to match the new audio before joining
+    equalized_overlap = _equalize_energy(
+        previous_pending_overlap_audio_bytes, current_chunk_audio_bytes
+    )
+
+    # Join the equalized bit from last time to the start of the new audio.
+    overlapped_audio_bytes = equalized_overlap + current_chunk_audio_bytes
     
     # Save the end of the current audio to use for the NEXT chunk.
     # We skip 'silence_audio_byte_count' at the end to anchor overlap to actual speech.
@@ -183,12 +214,7 @@ def build_original_words_and_overlap_matching_words(
     
     # Create the cleaned list by running every word through the cleaning function.
     overlap_matching_words = [
-        normalized_word
-        for normalized_word in (
-            normalize_word_for_overlap_matching(original_word)
-            for original_word in original_words
-        )
-        if normalized_word
+        norm for w in original_words if (norm := normalize_word_for_overlap_matching(w))
     ]
     return original_words, overlap_matching_words
 
@@ -257,7 +283,7 @@ def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
     intersection = set_a.intersection(set_b)
     union = set_a.union(set_b)
 
-    score = len(intersection) / len(union)
+    score = len(intersection) / len(union) if union else 0.0
     log.debug(
         f"[Dedup] token_overlap",
         words_a=words_a,
@@ -283,23 +309,14 @@ def combined_overlap_score(
     the Brain uses to decide if it should delete a chunk of text as a
     duplicate, ensuring the final transcript remains clean and accurate.
     """
-    char_score = character_similarity(
-        words_a=words_a,
-        words_b=words_b,
-    )
-
-    token_score = token_overlap_score(
-        words_a=words_a,
-        words_b=words_b,
-    )
+    char_score = character_similarity(words_a, words_b)
+    token_score = token_overlap_score(words_a, words_b)
 
     combined = (char_score * char_weight) + (token_score * token_weight)
     log.debug(
         "[Dedup] combined_score",
         char_score=round(char_score, 4),
         token_score=round(token_score, 4),
-        char_weight=char_weight,
-        token_weight=token_weight,
         combined=round(combined, 4),
     )
     return combined
@@ -309,7 +326,7 @@ def analyze_duplicate_chunk_prefix(
     previous_chunk_text: str,
     current_chunk_text: str,
     *,
-    max_overlap_words: int = 8,
+    max_overlap_words: int = 15,
 ) -> ChunkDeduplicationResult:
     """
     Analyzes two pieces of text to find and report any duplicated words.
@@ -319,16 +336,19 @@ def analyze_duplicate_chunk_prefix(
     words trimmed, and the confidence scores used for the decision. This
     detailed report is essential for both the Brain's logic and telemetry.
     """
+    # Initialize a result with no trim applied.
+    result = ChunkDeduplicationResult(
+        cleaned_text=current_chunk_text.strip(),
+        overlap_word_count=0,
+        char_score=0.0,
+        token_score=0.0,
+        combined_score=0.0,
+        trim_applied=False,
+        skipped_because_result_too_small=False,
+    )
+
     if not previous_chunk_text or not current_chunk_text:
-        return ChunkDeduplicationResult(
-            cleaned_text=current_chunk_text.strip(),
-            overlap_word_count=0,
-            char_score=0.0,
-            token_score=0.0,
-            combined_score=0.0,
-            trim_applied=False,
-            skipped_because_result_too_small=False,
-        )
+        return result
 
     prev_original, prev_normalized = build_original_words_and_overlap_matching_words(previous_chunk_text)
     curr_original, curr_normalized = build_original_words_and_overlap_matching_words(current_chunk_text)
@@ -344,6 +364,8 @@ def analyze_duplicate_chunk_prefix(
     for overlap_word_count in range(largest_possible_overlap, 1, -1):
         prev_tail = prev_normalized[-overlap_word_count:]
         curr_head = curr_normalized[:overlap_word_count]
+        
+        # Use individual scores for telemetry reporting.
         char_score = character_similarity(prev_tail, curr_head)
         token_score = token_overlap_score(prev_tail, curr_head)
         combined_score = (char_score * 0.6) + (token_score * 0.4)
@@ -351,13 +373,11 @@ def analyze_duplicate_chunk_prefix(
         if combined_score >= SEMANTIC_OVERLAPPING_THRESHOLD:
             trimmed = curr_original[overlap_word_count:]
             skipped = should_skip_overlap_trim_because_result_is_too_small(
-                curr_original,
-                trimmed,
-                overlap_word_count,
+                curr_original, trimmed, overlap_word_count
             )
-            cleaned_text = current_chunk_text.strip() if skipped else " ".join(trimmed).strip()
+            
             return ChunkDeduplicationResult(
-                cleaned_text=cleaned_text,
+                cleaned_text=current_chunk_text.strip() if skipped else " ".join(trimmed).strip(),
                 overlap_word_count=overlap_word_count,
                 char_score=char_score,
                 token_score=token_score,
@@ -366,22 +386,14 @@ def analyze_duplicate_chunk_prefix(
                 skipped_because_result_too_small=skipped,
             )
 
-    return ChunkDeduplicationResult(
-        cleaned_text=current_chunk_text.strip(),
-        overlap_word_count=0,
-        char_score=0.0,
-        token_score=0.0,
-        combined_score=0.0,
-        trim_applied=False,
-        skipped_because_result_too_small=False,
-    )
+    return result
 
 
 def remove_duplicate_chunk_prefix(
     previous_chunk_text: str,
     current_chunk_text: str,
     *,
-    max_overlap_words: int = 8,
+    max_overlap_words: int = 15,
 ) -> str:
     """
     This is the main function that prevents words from appearing twice 
@@ -392,10 +404,10 @@ def remove_duplicate_chunk_prefix(
     
     Step-by-step:
     1. Break both texts into cleaned words.
-    2. Look for the largest possible match (up to 8 words).
-    3. If the last 8 words of the old text match the first 8 of the new text, 
-       delete those 8 from the new text.
-    4. If not, try 7 words, then 6, then 5, then 4, then 3, then 2.
+    2. Look for the largest possible match (up to 15 words).
+    3. If the last 15 words of the old text match the first 15 of the new text, 
+       delete those 15 from the new text.
+    4. If not, try 14 words, then 13, then 12... down to 2.
     5. If a match is found, return the new text without those words.
     """
     analysis = analyze_duplicate_chunk_prefix(
