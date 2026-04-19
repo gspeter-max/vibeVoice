@@ -67,7 +67,6 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
             cached_decoder=f"{model_dir}/cached_decode.int8.onnx",
             tokens=f"{model_dir}/tokens.txt",
             num_threads=num_threads,
-            sample_rate=16000,
             debug=False,
         )
     else:
