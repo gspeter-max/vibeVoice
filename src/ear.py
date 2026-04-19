@@ -133,7 +133,7 @@ CHUNK    = 1024
 
 MODELS = [
     "tiny.en", "base.en", "small.en",
-    "Systran/faster-distil-whisper-large-v3",
+    "parakeet-tdt-0.6b-v3",
     "medium.en", "large-v2", "moonshine-base",
     "deepdml/faster-whisper-large-v3-turbo-ct2",
     "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"
@@ -1276,7 +1276,7 @@ def start_ear():
     log.info(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
     log.info("╚══════════════════════════════════════════════════╝")
     log.info(" Press [1] tiny.en      [2] base.en     [3] small.en")
-    log.info(" Press [4] distil-large [5] medium.en   [6] large-v2")
+    log.info(" Press [4] Unified      [5] medium.en   [6] large-v2")
     log.info(" Press [7] Moonshine    [8] turbo       [9] Parakeet v2")
     log.info(" Press [0] Parakeet v3  [t] Self-test")
     log.info("─" * 52)

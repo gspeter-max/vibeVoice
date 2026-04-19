@@ -21,6 +21,56 @@ except Exception as exc:  # pragma: no cover - depends on platform wheels
 # Default model on startup if this backend is forced
 CURRENT_MODEL_NAME = "nemo-parakeet-tdt-0.6b-v3"
 
+
+def _get_model_details(model_name: str) -> tuple[str, str]:
+    """
+    Centralized logic for mapping model names to folder names and download URLs.
+    This ensures that the loader and the downloader always look in the same place.
+    """
+    name = model_name.replace("nemo-", "")
+    is_moonshine = "moonshine" in name
+
+    # Folder naming convention used by k2-fsa/sherpa-onnx releases
+    if is_moonshine:
+        folder = f"sherpa-onnx-{name}-en-int8"
+    else:
+        folder = f"sherpa-onnx-nemo-{name}-int8"
+
+    base_path = os.path.expanduser("~/.cache/parakeet-flow/models")
+    model_dir = os.path.join(base_path, folder)
+    download_url = (
+        f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{folder}.tar.bz2"
+    )
+
+    return model_dir, download_url
+
+
+def _download_and_extract(url: str, dest_dir: str):
+    """
+    Downloads a .tar.bz2 model archive and extracts it to the cache directory.
+    """
+    import tarfile
+    import urllib.request
+
+    filename = url.split("/")[-1]
+    archive_path = os.path.join(dest_dir, filename)
+
+    os.makedirs(dest_dir, exist_ok=True)
+
+    log.info(f"⬇️ Downloading {filename} (this may take a minute)...")
+    try:
+        urllib.request.urlretrieve(url, archive_path)
+
+        log.info(f"📦 Extracting {filename}...")
+        with tarfile.open(archive_path, "r:bz2") as tar:
+            tar.extractall(path=dest_dir)
+
+        log.info("✅ Done.")
+    finally:
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
+
+
 def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     global CURRENT_MODEL_NAME
 
@@ -29,36 +79,25 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
             "sherpa-onnx is unavailable in this environment"
             + (f": {_SHERPA_ONNX_IMPORT_ERROR}" if _SHERPA_ONNX_IMPORT_ERROR else "")
         )
-    
-    if model_name:
-        # Strip 'nemo-' prefix if user passed it, as we add it in the path
-        CURRENT_MODEL_NAME = model_name.replace("nemo-", "")
-        
-    is_moonshine = "moonshine" in CURRENT_MODEL_NAME
-    if is_moonshine:
-        # Moonshine models follow a slightly different naming convention
-        model_dir = os.path.expanduser(f"~/.cache/parakeet-flow/models/sherpa-onnx-{CURRENT_MODEL_NAME}-en-int8")
-    else:
-        model_dir = os.path.expanduser(f"~/.cache/parakeet-flow/models/sherpa-onnx-nemo-{CURRENT_MODEL_NAME}-int8")
-    
+
+    target_name = model_name or CURRENT_MODEL_NAME
+    model_dir, download_url = _get_model_details(target_name)
+    CURRENT_MODEL_NAME = target_name.replace("nemo-", "")
+
     if not os.path.exists(model_dir):
-         raise RuntimeError(f"Model directory not found: {model_dir}")
+        log.info(f"Model not found. Initiating auto-download for {CURRENT_MODEL_NAME}...")
+        cache_base = os.path.dirname(model_dir)
+        _download_and_extract(download_url, cache_base)
 
     log.info(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_dir}...")
 
     # Use PARAKEET_THREADS env var, or default to all cores
-    # NOTE: os.environ.get() returns empty string if var is set but empty
-    # We must check the string BEFORE converting to int
     thread_env = os.environ.get("PARAKEET_THREADS")
-
-    if thread_env:  # Check if string has a value (not empty/None)
-        num_threads = int(thread_env)  # Only then convert to int
-    else:
-        # OPTIMIZATION: On Intel i7, using 6 physical cores is faster than 12 logical cores
-        num_threads = 6
+    num_threads = int(thread_env) if thread_env else 6
 
     log.info(f"[sherpa-onnx] Using {num_threads} threads")
 
+    is_moonshine = "moonshine" in CURRENT_MODEL_NAME
     if is_moonshine:
         recognizer = sherpa_onnx.OfflineRecognizer.from_moonshine(
             preprocessor=f"{model_dir}/preprocess.onnx",
@@ -80,8 +119,8 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
             sample_rate=16000,
             feature_dim=80,
             decoding_method="greedy_search",
-            model_type="nemo_transducer", # CRITICAL for Parakeet-TDT
-            debug=False
+            model_type="nemo_transducer",  # CRITICAL for Parakeet-TDT
+            debug=False,
         )
 
     log.info(f"[sherpa-onnx] ✅ Model loaded.")
