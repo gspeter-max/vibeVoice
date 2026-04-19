@@ -255,8 +255,8 @@ def load_backend(model_name="base.en"):
     object, allowing the Brain to switch models dynamically during runtime
     whenever the user requests a change from the terminal.
     """
-    if "parakeet-tdt" in model_name:
-        log.info(f"[Brain] Backend: NVIDIA Parakeet-TDT (via sherpa-onnx)")
+    if "parakeet-tdt" in model_name or "moonshine" in model_name:
+        log.info(f"[Brain] Backend: sherpa-onnx (Parakeet/Moonshine)")
         import backend_parakeet as backend
 
         return backend, backend.load_model(model_name)

@@ -34,7 +34,12 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
         # Strip 'nemo-' prefix if user passed it, as we add it in the path
         CURRENT_MODEL_NAME = model_name.replace("nemo-", "")
         
-    model_dir = os.path.expanduser(f"~/.cache/parakeet-flow/models/sherpa-onnx-nemo-{CURRENT_MODEL_NAME}-int8")
+    is_moonshine = "moonshine" in CURRENT_MODEL_NAME
+    if is_moonshine:
+        # Moonshine models follow a slightly different naming convention
+        model_dir = os.path.expanduser(f"~/.cache/parakeet-flow/models/sherpa-onnx-{CURRENT_MODEL_NAME}-en-int8")
+    else:
+        model_dir = os.path.expanduser(f"~/.cache/parakeet-flow/models/sherpa-onnx-nemo-{CURRENT_MODEL_NAME}-int8")
     
     if not os.path.exists(model_dir):
          raise RuntimeError(f"Model directory not found: {model_dir}")
@@ -54,19 +59,31 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
 
     log.info(f"[sherpa-onnx] Using {num_threads} threads")
 
-    # Use the from_transducer factory method which is available in the Python API
-    recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-        encoder=f"{model_dir}/encoder.int8.onnx",
-        decoder=f"{model_dir}/decoder.int8.onnx",
-        joiner=f"{model_dir}/joiner.int8.onnx",
-        tokens=f"{model_dir}/tokens.txt",
-        num_threads=num_threads,
-        sample_rate=16000,
-        feature_dim=80,
-        decoding_method="greedy_search",
-        model_type="nemo_transducer", # CRITICAL for Parakeet-TDT
-        debug=False
-    )
+    if is_moonshine:
+        recognizer = sherpa_onnx.OfflineRecognizer.from_moonshine(
+            preprocessor=f"{model_dir}/preprocess.onnx",
+            encoder=f"{model_dir}/encode.int8.onnx",
+            uncached_decoder=f"{model_dir}/uncached_decode.int8.onnx",
+            cached_decoder=f"{model_dir}/cached_decode.int8.onnx",
+            tokens=f"{model_dir}/tokens.txt",
+            num_threads=num_threads,
+            sample_rate=16000,
+            debug=False,
+        )
+    else:
+        # Use the from_transducer factory method which is available in the Python API
+        recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=f"{model_dir}/encoder.int8.onnx",
+            decoder=f"{model_dir}/decoder.int8.onnx",
+            joiner=f"{model_dir}/joiner.int8.onnx",
+            tokens=f"{model_dir}/tokens.txt",
+            num_threads=num_threads,
+            sample_rate=16000,
+            feature_dim=80,
+            decoding_method="greedy_search",
+            model_type="nemo_transducer", # CRITICAL for Parakeet-TDT
+            debug=False
+        )
 
     log.info(f"[sherpa-onnx] ✅ Model loaded.")
     return recognizer
