@@ -41,7 +41,7 @@ HUD_HOST, HUD_PORT = "127.0.0.1", 57234
 keyboard = Controller()
 
 # Environment Config
-BACKEND = os.environ.get("BACKEND", "faster_whisper").lower().strip()
+BACKEND = os.environ.get("BACKEND", "parakeet").lower().strip()
 RECORDING_MODE = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
 STREAMING_TELEMETRY_ENABLED = (
     os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
@@ -246,23 +246,13 @@ def _is_no_streaming_mode() -> bool:
     return RECORDING_MODE == NO_STREAMING_MODE
 
 
-def load_backend(model_name="base.en"):
+def load_backend(model_name="parakeet-tdt-0.6b-v2"):
     """
     Loads the requested ASR (Automatic Speech Recognition) model into memory.
-    This function acts as a factory that chooses between the faster-whisper
-    engine or the NVIDIA Parakeet-TDT engine depending on the model name.
-    It returns a tuple containing the backend module and the loaded model
-    object, allowing the Brain to switch models dynamically during runtime
-    whenever the user requests a change from the terminal.
+    We are now exclusively using the sherpa-onnx backend.
     """
-    if "parakeet" in model_name or "moonshine" in model_name:
-        log.info(f"[Brain] Backend: sherpa-onnx (Parakeet/Moonshine)")
-        import backend_parakeet as backend
-
-        return backend, backend.load_model(model_name)
-
-    log.info(f"[Brain] Backend: faster-whisper + {model_name} + INT8 (CPU)")
-    import backend_faster_whisper as backend
+    log.info(f"[Brain] Backend: sherpa-onnx ({model_name})")
+    import backend_parakeet as backend
 
     return backend, backend.load_model(model_name)
 
@@ -452,11 +442,17 @@ def _handle_audio_chunk(
         rec.transcript_parts[seq] = analysis.cleaned_text
         rec.done_count += 1
 
+    audio_file_path = None
+    recorder = _telemetry_recorder_for_session(session_id)
+    if recorder:
+        audio_file_path = recorder.save_chunk_audio(rec_idx, seq, audio_bytes)
+
     _update_chunk_telemetry_summary(
         session_id,
         rec_idx,
         seq,
         {
+            "audio_file_path": audio_file_path,
             "decode_seconds": round(elapsed, 2),
             "previous_chunk_text": prev_text,
             "raw_text": text,

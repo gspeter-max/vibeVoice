@@ -33,6 +33,8 @@ def _get_model_details(model_name: str) -> tuple[str, str]:
     # Folder naming convention used by k2-fsa/sherpa-onnx releases
     if is_moonshine:
         folder = f"sherpa-onnx-{name}-en-int8"
+    elif "streaming" in name:
+        folder = f"sherpa-onnx-nemo-{name}-int8"
     else:
         folder = f"sherpa-onnx-nemo-{name}-int8"
 
@@ -98,6 +100,8 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
     log.info(f"[sherpa-onnx] Using {num_threads} threads")
 
     is_moonshine = "moonshine" in CURRENT_MODEL_NAME
+    is_ctc = "ctc" in CURRENT_MODEL_NAME
+
     if is_moonshine:
         recognizer = sherpa_onnx.OfflineRecognizer.from_moonshine(
             preprocessor=f"{model_dir}/preprocess.onnx",
@@ -106,6 +110,15 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
             cached_decoder=f"{model_dir}/cached_decode.int8.onnx",
             tokens=f"{model_dir}/tokens.txt",
             num_threads=num_threads,
+            debug=False,
+        )
+    elif is_ctc:
+        recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+            model=f"{model_dir}/model.int8.onnx",
+            tokens=f"{model_dir}/tokens.txt",
+            num_threads=num_threads,
+            sample_rate=16000,
+            feature_dim=80,
             debug=False,
         )
     else:

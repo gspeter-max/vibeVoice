@@ -40,7 +40,7 @@ build/
 .eggs/
 
 # IDEs & Editors
-
+parakeet.ipynb
 .idea/
 .vscode/
 *.swp

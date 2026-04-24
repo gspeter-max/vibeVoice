@@ -133,7 +133,7 @@ CHUNK    = 1024
 
 MODELS = [
     "tiny.en", "base.en", "small.en",
-    "parakeet-tdt-0.6b-v3",
+    "fast-conformer-ctc-en-24500",
     "medium.en", "large-v2", "moonshine-base",
     "deepdml/faster-whisper-large-v3-turbo-ct2",
     "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"

@@ -40,6 +40,7 @@ trap cleanup EXIT INT TERM
 export BACKEND="${BACKEND:-faster_whisper}"
 export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
+export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
 export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-}"
 export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"

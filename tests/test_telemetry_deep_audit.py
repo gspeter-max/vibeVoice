@@ -14,7 +14,7 @@ def test_telemetry_structural_audit(tmp_path: Path):
     recorder = StreamingSessionTelemetryRecorder(
         session_id="audit_session_001",
         output_dir=tmp_path,
-        summary_seed={"model": "base.en", "backend": "faster_whisper"},
+        summary_seed={"model": "parakeet-tdt-0.6b-v2", "backend": "sherpa-onnx"},
     )
 
     recorder.update_chunk_summary(

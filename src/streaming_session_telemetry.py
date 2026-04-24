@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import wave
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ class StreamingSessionTelemetryRecorder:
     summary_seed: dict[str, Any]
     payload: dict[str, Any] = field(init=False)
     _filename: str = field(init=False)
+    _audio_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         """
@@ -34,6 +36,8 @@ class StreamingSessionTelemetryRecorder:
 
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._filename = f"{ts}_{self.session_id}.json"
+        self._audio_dir = self.output_dir / f"{ts}_{self.session_id}_audio"
+        self._audio_dir.mkdir(parents=True, exist_ok=True)
 
         self.payload = {
             "session_summary": {
@@ -47,6 +51,25 @@ class StreamingSessionTelemetryRecorder:
             },
             "recordings": [],
         }
+
+    def save_chunk_audio(self, recording_index: int, chunk_index: int, pcm_bytes: bytes, sample_rate: int = 16000) -> str | None:
+        """
+        Saves raw PCM16 bytes to a standard WAV file in the session's audio directory.
+        Returns the relative path to the saved audio file.
+        """
+        if not pcm_bytes:
+            return None
+            
+        filename = f"rec{recording_index}_chunk{chunk_index}.wav"
+        file_path = self._audio_dir / filename
+        
+        with wave.open(str(file_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2) # 16-bit
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
+            
+        return f"{self._audio_dir.name}/{filename}"
 
     def _session_file_path(self) -> Path:
         """Generates the absolute file path for the session's JSON report."""

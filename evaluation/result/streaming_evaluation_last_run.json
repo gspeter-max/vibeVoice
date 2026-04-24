@@ -1,0 +1,36 @@
+{
+  "run_summary": {
+    "sample_count": 1,
+    "average_final_word_error_rate": 0.0,
+    "average_chunk_count": 1.0,
+    "average_total_audio_seconds": 5.855
+  },
+  "sample_results": [
+    {
+      "example_index": 0,
+      "reference_text": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "final_streaming_text": "mister Quilter is the Apostle of the Middle Classes, and we are glad to welcome his gospel.",
+      "final_word_error_rate": 0.0,
+      "chunk_count": 1,
+      "chunk_texts": [
+        "mister Quilter is the Apostle of the Middle Classes, and we are glad to welcome his gospel."
+      ],
+      "chunk_durations_seconds": [
+        5.855
+      ],
+      "chunk_events": [
+        {
+          "chunk_index": 0,
+          "split_reason": "final_flush_on_stop",
+          "chunk_age_seconds_when_split_happened": 5.856000000000004,
+          "silence_duration_seconds_when_split_happened": null,
+          "chunk_duration_seconds_before_overlap": 5.855,
+          "overlap_seconds_added_from_previous_chunk": 0.0,
+          "raw_chunk_text_without_overlap": "mister Quilter is the Apostle of the Middle Classes, and we are glad to welcome his gospel.",
+          "raw_chunk_text_with_overlap": "mister Quilter is the Apostle of the Middle Classes, and we are glad to welcome his gospel.",
+          "cleaned_chunk_text_after_dedup": "mister Quilter is the Apostle of the Middle Classes, and we are glad to welcome his gospel."
+        }
+      ]
+    }
+  ]
+}
