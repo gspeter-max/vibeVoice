@@ -1,0 +1,206 @@
+{
+  "session_summary": {
+    "session_id": "5b97e6fe8e4642c8b1af9cd822290762",
+    "total_chunks_received": 4,
+    "total_decode_seconds": 3.79,
+    "final_text": "Okay, uh this is fine these things are okay but one thing I noticed when I actually store the audio Thing is that when I stole the audio and I see that the voice is very low because not on on exha on my you know mouth for that reason I think for that reason that is happening I'm not very close in the mic and the voice are very very you know low. I can give you the samples.",
+    "final_paste_success": true,
+    "flags": {
+      "vad_no_speech_warning_seen": true,
+      "dedup_trim_applied": true
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": [
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 270336,
+            "chunk_age_seconds": 8.48,
+            "silence_elapsed_seconds": 0.83,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec0_chunk0.wav",
+            "decode_seconds": 0.81,
+            "previous_chunk_text": "",
+            "raw_text": "No I want to check it out that uh the actually streaming mode is happening fine and uh things are uh",
+            "cleaned_text_after_dedup": "No I want to check it out that uh the actually streaming mode is happening fine and uh things are uh",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 108544,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec0_chunk1.wav",
+            "decode_seconds": 0.38,
+            "previous_chunk_text": "No I want to check it out that uh the actually streaming mode is happening fine and uh things are uh",
+            "raw_text": "Stone in that and I think I succeed to do this",
+            "cleaned_text_after_dedup": "Stone in that and I think I succeed to do this",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 442368,
+            "chunk_age_seconds": 13.85,
+            "silence_elapsed_seconds": 0.81,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec1_chunk0.wav",
+            "decode_seconds": 1.21,
+            "previous_chunk_text": "",
+            "raw_text": "Yeah I want to check it out that what is the actual you know voice when I put over here then what exactly what the things are should happening over here and uh",
+            "cleaned_text_after_dedup": "Yeah I want to check it out that what is the actual you know voice when I put over here then what exactly what the things are should happening over here and uh",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 274432,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec1_chunk1.wav",
+            "decode_seconds": 0.67,
+            "previous_chunk_text": "Yeah I want to check it out that what is the actual you know voice when I put over here then what exactly what the things are should happening over here and uh",
+            "raw_text": "I think things are getting over here and uh things are more fine because I really like it I think so",
+            "cleaned_text_after_dedup": "I think things are getting over here and uh things are more fine because I really like it I think so",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 288768,
+            "chunk_age_seconds": 9.01,
+            "silence_elapsed_seconds": 0.81,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec2_chunk0.wav",
+            "decode_seconds": 0.85,
+            "previous_chunk_text": "",
+            "raw_text": "Okay, uh this is fine these things are okay but one thing I noticed when I actually store the audio",
+            "cleaned_text_after_dedup": "Okay, uh this is fine these things are okay but one thing I noticed when I actually store the audio",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 392576,
+            "chunk_age_seconds": 8.75,
+            "silence_elapsed_seconds": 0.8,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 3.5,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec2_chunk1.wav",
+            "decode_seconds": 1.13,
+            "previous_chunk_text": "Okay, uh this is fine these things are okay but one thing I noticed when I actually store the audio",
+            "raw_text": "Thing is that when I stole the audio and I see that the voice is very low because",
+            "cleaned_text_after_dedup": "Thing is that when I stole the audio and I see that the voice is very low because",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 419200,
+            "chunk_age_seconds": 9.62,
+            "silence_elapsed_seconds": 0.82,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 3.5,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec2_chunk2.wav",
+            "decode_seconds": 1.14,
+            "previous_chunk_text": "Thing is that when I stole the audio and I see that the voice is very low because",
+            "raw_text": "The voice is very low because it's not on on exha on my you know mouth for that reason I think for that reason that is happening",
+            "cleaned_text_after_dedup": "not on on exha on my you know mouth for that reason I think for that reason that is happening",
+            "dedup_stats": {
+              "overlap_word_count": 7,
+              "trim_applied": true,
+              "combined_score": 0.8118,
+              "char_score": 0.8529,
+              "token_score": 0.75,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 223232,
+            "audio_file_path": "2026-04-24_13-19-43_5b97e6fe8e4642c8b1af9cd822290762_audio/rec2_chunk3.wav",
+            "decode_seconds": 0.68,
+            "previous_chunk_text": "not on on exha on my you know mouth for that reason I think for that reason that is happening",
+            "raw_text": "I'm not very close in the mic and the voice are very very you know low. I can give you the samples.",
+            "cleaned_text_after_dedup": "I'm not very close in the mic and the voice are very very you know low. I can give you the samples.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

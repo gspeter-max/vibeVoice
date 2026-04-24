@@ -1,0 +1,26 @@
+{
+  "session_summary": {
+    "session_id": "session123",
+    "total_chunks_received": 0,
+    "total_decode_seconds": 0.0,
+    "final_text": "",
+    "final_paste_success": null,
+    "flags": {
+      "vad_no_speech_warning_seen": false,
+      "dedup_trim_applied": false
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": []
+}

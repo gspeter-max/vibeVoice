@@ -1,0 +1,95 @@
+{
+  "session_summary": {
+    "session_id": "e984fdf5f3bf496fa0a11701fd4336bb",
+    "total_chunks_received": 2,
+    "total_decode_seconds": 1.54,
+    "final_text": "No, I created a new session and in this session I will see exactly the voice is very very clear and actually that is too too long over here. And uh I think this is the reason why the my like the whole",
+    "final_paste_success": true,
+    "flags": {
+      "vad_no_speech_warning_seen": false,
+      "dedup_trim_applied": false
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": [
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 59392,
+            "audio_file_path": "2026-04-24_13-25-13_e984fdf5f3bf496fa0a11701fd4336bb_audio/rec0_chunk0.wav",
+            "decode_seconds": 0.23,
+            "previous_chunk_text": "",
+            "raw_text": "Hi, what are you doing?",
+            "cleaned_text_after_dedup": "Hi, what are you doing?",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 344064,
+            "chunk_age_seconds": 10.75,
+            "silence_elapsed_seconds": 0.82,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-25-13_e984fdf5f3bf496fa0a11701fd4336bb_audio/rec1_chunk0.wav",
+            "decode_seconds": 0.94,
+            "previous_chunk_text": "",
+            "raw_text": "No, I created a new session and in this session I will see exactly the voice is very very clear and actually that is too too long over here.",
+            "cleaned_text_after_dedup": "No, I created a new session and in this session I will see exactly the voice is very very clear and actually that is too too long over here.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 194560,
+            "audio_file_path": "2026-04-24_13-25-13_e984fdf5f3bf496fa0a11701fd4336bb_audio/rec1_chunk1.wav",
+            "decode_seconds": 0.59,
+            "previous_chunk_text": "No, I created a new session and in this session I will see exactly the voice is very very clear and actually that is too too long over here.",
+            "raw_text": "And uh I think this is the reason why the my like the whole",
+            "cleaned_text_after_dedup": "And uh I think this is the reason why the my like the whole",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

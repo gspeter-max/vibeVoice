@@ -1,0 +1,73 @@
+{
+  "session_summary": {
+    "session_id": "663d1685a0b94a5393f9c4dbe09a788c",
+    "total_chunks_received": 1,
+    "total_decode_seconds": 2.72,
+    "final_text": "Like you tell me, is there any another way so that I I take a very like you know uh the issue I fix now that you told I just increase the input volume in my system. But I can see the noises in the background, uh hand voice and these kind of things. Like how to convert a very smooth, very beautiful, very lightly audio. So the model become very very good. How can I do this?",
+    "final_paste_success": true,
+    "flags": {
+      "vad_no_speech_warning_seen": false,
+      "dedup_trim_applied": false
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": [
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 292864,
+            "audio_file_path": "2026-04-24_13-34-59_663d1685a0b94a5393f9c4dbe09a788c_audio/rec0_chunk0.wav",
+            "decode_seconds": 0.9,
+            "previous_chunk_text": "",
+            "raw_text": "This model is taking very long and I think this is better to use it. I'm not pretty sure about that. So what do you think about that?",
+            "cleaned_text_after_dedup": "This model is taking very long and I think this is better to use it. I'm not pretty sure about that. So what do you think about that?",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 968704,
+            "audio_file_path": "2026-04-24_13-34-59_663d1685a0b94a5393f9c4dbe09a788c_audio/rec1_chunk0.wav",
+            "decode_seconds": 2.72,
+            "previous_chunk_text": "",
+            "raw_text": "Like you tell me, is there any another way so that I I take a very like you know uh the issue I fix now that you told I just increase the input volume in my system. But I can see the noises in the background, uh hand voice and these kind of things. Like how to convert a very smooth, very beautiful, very lightly audio. So the model become very very good. How can I do this?",
+            "cleaned_text_after_dedup": "Like you tell me, is there any another way so that I I take a very like you know uh the issue I fix now that you told I just increase the input volume in my system. But I can see the noises in the background, uh hand voice and these kind of things. Like how to convert a very smooth, very beautiful, very lightly audio. So the model become very very good. How can I do this?",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

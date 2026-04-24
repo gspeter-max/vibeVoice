@@ -1,0 +1,142 @@
+{
+  "session_summary": {
+    "session_id": "c0c9db1efcc445e9a82a15b2a0cc5fc4",
+    "total_chunks_received": 1,
+    "total_decode_seconds": 0.64,
+    "final_text": "Now if I take this whole thing then what exactly happening",
+    "final_paste_success": true,
+    "flags": {
+      "vad_no_speech_warning_seen": false,
+      "dedup_trim_applied": false
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": [
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 434176,
+            "audio_file_path": "2026-04-24_13-27-40_c0c9db1efcc445e9a82a15b2a0cc5fc4_audio/rec0_chunk0.wav",
+            "decode_seconds": 1.22,
+            "previous_chunk_text": "",
+            "raw_text": "I'm facing this issue and you tell me why this issue is happening over here so that I can identify what exactly the solution of this do not implement anything yet. First explain me so that I can make decisions.",
+            "cleaned_text_after_dedup": "I'm facing this issue and you tell me why this issue is happening over here so that I can identify what exactly the solution of this do not implement anything yet. First explain me so that I can make decisions.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 139264,
+            "audio_file_path": "2026-04-24_13-27-40_c0c9db1efcc445e9a82a15b2a0cc5fc4_audio/rec1_chunk0.wav",
+            "decode_seconds": 0.49,
+            "previous_chunk_text": "",
+            "raw_text": "Something I understand the problem because",
+            "cleaned_text_after_dedup": "Something I understand the problem because",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 1077248,
+            "audio_file_path": "2026-04-24_13-27-40_c0c9db1efcc445e9a82a15b2a0cc5fc4_audio/rec2_chunk0.wav",
+            "decode_seconds": 3.35,
+            "previous_chunk_text": "",
+            "raw_text": "I think the problem is that because I am using my headphone my uh my microphone and I see the voice are not clear in that and that reason the uh the quality of the text is not very good and because a low voice that reason the party is dropping over here So I think this is the reason of this What do you think about that and what kind of solution we can put over here Give me your three top industrial best accuracy solution Think very long and hard to g to get the answer",
+            "cleaned_text_after_dedup": "I think the problem is that because I am using my headphone my uh my microphone and I see the voice are not clear in that and that reason the uh the quality of the text is not very good and because a low voice that reason the party is dropping over here So I think this is the reason of this What do you think about that and what kind of solution we can put over here Give me your three top industrial best accuracy solution Think very long and hard to g to get the answer",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 249856,
+            "audio_file_path": "2026-04-24_13-27-40_c0c9db1efcc445e9a82a15b2a0cc5fc4_audio/rec3_chunk0.wav",
+            "decode_seconds": 0.82,
+            "previous_chunk_text": "",
+            "raw_text": "And here uh my my had headphone microphone audio to so you can understand.",
+            "cleaned_text_after_dedup": "And here uh my my had headphone microphone audio to so you can understand.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 159744,
+            "audio_file_path": "2026-04-24_13-27-40_c0c9db1efcc445e9a82a15b2a0cc5fc4_audio/rec4_chunk0.wav",
+            "decode_seconds": 0.64,
+            "previous_chunk_text": "",
+            "raw_text": "Now if I take this whole thing then what exactly happening",
+            "cleaned_text_after_dedup": "Now if I take this whole thing then what exactly happening",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

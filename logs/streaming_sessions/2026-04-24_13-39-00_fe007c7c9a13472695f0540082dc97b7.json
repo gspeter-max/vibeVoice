@@ -1,0 +1,591 @@
+{
+  "session_summary": {
+    "session_id": "fe007c7c9a13472695f0540082dc97b7",
+    "total_chunks_received": 1,
+    "total_decode_seconds": 0.99,
+    "final_text": "Okay, I decided we will remove this model because this caused the problem and I am not longer using this model large V3 turbo we're not using this so we should remove it",
+    "final_paste_success": true,
+    "flags": {
+      "vad_no_speech_warning_seen": true,
+      "dedup_trim_applied": true
+    },
+    "recording_mode": "silence_streaming",
+    "backend": "faster_whisper",
+    "model": "parakeet-tdt-0.6b-v3",
+    "telemetry_enabled": true,
+    "config": {
+      "vad_threshold": 0.5,
+      "silence_timeout_seconds": 0.8,
+      "energy_threshold": 0.05,
+      "energy_ratio": 2.5,
+      "overlap_seconds": 1.0,
+      "minimum_chunk_seconds": 8.0
+    }
+  },
+  "recordings": [
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 49152,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec0_chunk0.wav",
+            "decode_seconds": 0.19,
+            "previous_chunk_text": "",
+            "raw_text": "Like.",
+            "cleaned_text_after_dedup": "Like.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 1060864,
+            "chunk_age_seconds": 33.11,
+            "silence_elapsed_seconds": 0.84,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec1_chunk0.wav",
+            "decode_seconds": 3.1,
+            "previous_chunk_text": "",
+            "raw_text": "Like you tell me is there an any another way to uh so that I can I the I take away like you know the issue I fix now that you told I just increase the input volume in my system but I can see the noise in the background and fan voice and these things so things like how to convert a very smooth very beautiful very light audio so the the model very very good",
+            "cleaned_text_after_dedup": "Like you tell me is there an any another way to uh so that I can I the I take away like you know the issue I fix now that you told I just increase the input volume in my system but I can see the noise in the background and fan voice and these things so things like how to convert a very smooth very beautiful very light audio so the the model very very good",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 368000,
+            "chunk_age_seconds": 8.03,
+            "silence_elapsed_seconds": 1.85,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 3.5,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec1_chunk1.wav",
+            "decode_seconds": 0.97,
+            "previous_chunk_text": "Like you tell me is there an any another way to uh so that I can I the I take away like you know the issue I fix now that you told I just increase the input volume in my system but I can see the noise in the background and fan voice and these things so things like how to convert a very smooth very beautiful very light audio so the the model very very good",
+            "raw_text": "And uh how can I do this?",
+            "cleaned_text_after_dedup": "And uh how can I do this?",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 4096,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec1_chunk2.wav",
+            "decode_seconds": 0.11,
+            "previous_chunk_text": "",
+            "raw_text": "",
+            "cleaned_text_after_dedup": "",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 258048,
+            "chunk_age_seconds": 8.05,
+            "silence_elapsed_seconds": 0.81,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec2_chunk0.wav",
+            "decode_seconds": 0.72,
+            "previous_chunk_text": "",
+            "raw_text": "If I try to speak now then what should happen is anything bad will do that",
+            "cleaned_text_after_dedup": "If I try to speak now then what should happen is anything bad will do that",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 217088,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec2_chunk1.wav",
+            "decode_seconds": 0.64,
+            "previous_chunk_text": "If I try to speak now then what should happen is anything bad will do that",
+            "raw_text": "I want to just see that so that I can understand more better what is exactly happening.",
+            "cleaned_text_after_dedup": "I want to just see that so that I can understand more better what is exactly happening.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 1431552,
+            "chunk_age_seconds": 44.76,
+            "silence_elapsed_seconds": 0.83,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec3_chunk0.wav",
+            "decode_seconds": 4.09,
+            "previous_chunk_text": "",
+            "raw_text": "You can see the over here you exactly see that the you see because these are two chunks that is streaming part and I did a silence streaming where I detect the silence and according to that I split the chunks and then after that I do overlapping between both chunks for getting a better con for giving a better context to the model uh to do that. Okay, so you gonna tell me I think you understand the audio. You see in the overlapping part is dead. No words have on this because before silence and after sometimes silence have zero words, right? So but I added a way so that I can skip",
+            "cleaned_text_after_dedup": "You can see the over here you exactly see that the you see because these are two chunks that is streaming part and I did a silence streaming where I detect the silence and according to that I split the chunks and then after that I do overlapping between both chunks for getting a better con for giving a better context to the model uh to do that. Okay, so you gonna tell me I think you understand the audio. You see in the overlapping part is dead. No words have on this because before silence and after sometimes silence have zero words, right? So but I added a way so that I can skip",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 372096,
+            "chunk_age_seconds": 8.1,
+            "silence_elapsed_seconds": 0.81,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 3.5,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec3_chunk1.wav",
+            "decode_seconds": 1.1,
+            "previous_chunk_text": "You can see the over here you exactly see that the you see because these are two chunks that is streaming part and I did a silence streaming where I detect the silence and according to that I split the chunks and then after that I do overlapping between both chunks for getting a better con for giving a better context to the model uh to do that. Okay, so you gonna tell me I think you understand the audio. You see in the overlapping part is dead. No words have on this because before silence and after sometimes silence have zero words, right? So but I added a way so that I can skip",
+            "raw_text": "So but I added a way so that I can skip the silence and already only add words but this is fake. So how should I do this? I'm very you know very",
+            "cleaned_text_after_dedup": "and already only add words but this is fake. So how should I do this? I'm very you know very",
+            "dedup_stats": {
+              "overlap_word_count": 13,
+              "trim_applied": true,
+              "combined_score": 0.7357,
+              "char_score": 0.7647,
+              "token_score": 0.6923,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 329728,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec3_chunk2.wav",
+            "decode_seconds": 0.87,
+            "previous_chunk_text": "and already only add words but this is fake. So how should I do this? I'm very you know very",
+            "raw_text": "bad on this the how how I should do that how I should uh maintain the things and uh solve these kind of issues",
+            "cleaned_text_after_dedup": "bad on this the how how I should do that how I should uh maintain the things and uh solve these kind of issues",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 772096,
+            "chunk_age_seconds": 24.17,
+            "silence_elapsed_seconds": 0.83,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec4_chunk0.wav",
+            "decode_seconds": 2.69,
+            "previous_chunk_text": "",
+            "raw_text": "You know what the problem is? The problem is that key because sometimes what happen uh I am uh very close to the my laptop and then I speak and sometimes what happened I am very long or too long and for that according to that like some uncertainty is happened over here so that reason sometimes the threshold is hit sometimes is not hit",
+            "cleaned_text_after_dedup": "You know what the problem is? The problem is that key because sometimes what happen uh I am uh very close to the my laptop and then I speak and sometimes what happened I am very long or too long and for that according to that like some uncertainty is happened over here so that reason sometimes the threshold is hit sometimes is not hit",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 1126400,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec4_chunk1.wav",
+            "decode_seconds": 3.08,
+            "previous_chunk_text": "You know what the problem is? The problem is that key because sometimes what happen uh I am uh very close to the my laptop and then I speak and sometimes what happened I am very long or too long and for that according to that like some uncertainty is happened over here so that reason sometimes the threshold is hit sometimes is not hit",
+            "raw_text": "that kind of problem is happening every time uh okay and uh one more thing is that i totally mentioned for you that is uh about uh the silence overlapping the silent itself in the overlapping this is bad I want to remove this so what kind of solution you suggest me for this because I already put it a logic for this but it's not working right now I thought I don't know why and I think you see this logic in the logs uh also in uh in the file that I shared you. So what do you think about that",
+            "cleaned_text_after_dedup": "that kind of problem is happening every time uh okay and uh one more thing is that i totally mentioned for you that is uh about uh the silence overlapping the silent itself in the overlapping this is bad I want to remove this so what kind of solution you suggest me for this because I already put it a logic for this but it's not working right now I thought I don't know why and I think you see this logic in the logs uh also in uh in the file that I shared you. So what do you think about that",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 581632,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec5_chunk0.wav",
+            "decode_seconds": 1.52,
+            "previous_chunk_text": "",
+            "raw_text": "The better thing is that I should uh work with my A system that have the exact code. So you give me the prompt so that I can start the whole thing that we are discussing. The whing that uh you know you put inside of that this prompt so that I can pass to my E system.",
+            "cleaned_text_after_dedup": "The better thing is that I should uh work with my A system that have the exact code. So you give me the prompt so that I can start the whole thing that we are discussing. The whing that uh you know you put inside of that this prompt so that I can pass to my E system.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 1144832,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec6_chunk0.wav",
+            "decode_seconds": 3.53,
+            "previous_chunk_text": "",
+            "raw_text": "Now I want to train my uh new parkit v3 model speech to text model for my tech is like tech like uh I am use this for chatting with AI assistant and coding agents and like you uh so I not type I speak for my daily to daily engineering and this kind of system to prompt the assistant and cats so you give me a best dataset that I use so I can train more the V3 model to getting better results",
+            "cleaned_text_after_dedup": "Now I want to train my uh new parkit v3 model speech to text model for my tech is like tech like uh I am use this for chatting with AI assistant and coding agents and like you uh so I not type I speak for my daily to daily engineering and this kind of system to prompt the assistant and cats so you give me a best dataset that I use so I can train more the V3 model to getting better results",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 423936,
+            "chunk_age_seconds": 13.23,
+            "silence_elapsed_seconds": 0.81,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec7_chunk0.wav",
+            "decode_seconds": 1.08,
+            "previous_chunk_text": "",
+            "raw_text": "I only need this for English not for all the languages. I only need for English and make sure it have noises the data set have noises",
+            "cleaned_text_after_dedup": "I only need this for English not for all the languages. I only need for English and make sure it have noises the data set have noises",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 114688,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec7_chunk1.wav",
+            "decode_seconds": 0.33,
+            "previous_chunk_text": "I only need this for English not for all the languages. I only need for English and make sure it have noises the data set have noises",
+            "raw_text": "And uh Yeah.",
+            "cleaned_text_after_dedup": "And uh Yeah.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 421888,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec8_chunk0.wav",
+            "decode_seconds": 1.24,
+            "previous_chunk_text": "",
+            "raw_text": "You tell me who is the root cause of this. Tell me and why we are using PyTorch if if that is creating the problem. Because in the system we are not using PyTorch I think.",
+            "cleaned_text_after_dedup": "You tell me who is the root cause of this. Tell me and why we are using PyTorch if if that is creating the problem. Because in the system we are not using PyTorch I think.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 436224,
+            "chunk_age_seconds": 13.62,
+            "silence_elapsed_seconds": 0.84,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec9_chunk0.wav",
+            "decode_seconds": 1.32,
+            "previous_chunk_text": "",
+            "raw_text": "Can you give me the link wheel that is like in having case or whatever with that is and you give me also give me how I should train this like what kind of things I will use",
+            "cleaned_text_after_dedup": "Can you give me the link wheel that is like in having case or whatever with that is and you give me also give me how I should train this like what kind of things I will use",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 157696,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec9_chunk1.wav",
+            "decode_seconds": 0.49,
+            "previous_chunk_text": "Can you give me the link wheel that is like in having case or whatever with that is and you give me also give me how I should train this like what kind of things I will use",
+            "raw_text": "Uh give me what people say about this, how we use that.",
+            "cleaned_text_after_dedup": "Uh give me what people say about this, how we use that.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 325632,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec10_chunk0.wav",
+            "decode_seconds": 1.0,
+            "previous_chunk_text": "",
+            "raw_text": "You give me all the uh all the data set link that you mentioned earlier so that I can navigate to all of them because someone is required access request",
+            "cleaned_text_after_dedup": "You give me all the uh all the data set link that you mentioned earlier so that I can navigate to all of them because someone is required access request",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 430080,
+            "chunk_age_seconds": 13.45,
+            "silence_elapsed_seconds": 0.8,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec11_chunk0.wav",
+            "decode_seconds": 1.8,
+            "previous_chunk_text": "",
+            "raw_text": "I decided I will use this data set and here the code that I have to load the model. So now you give me all the cod to load it",
+            "cleaned_text_after_dedup": "I decided I will use this data set and here the code that I have to load the model. So now you give me all the cod to load it",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 370048,
+            "chunk_age_seconds": 8.03,
+            "silence_elapsed_seconds": 1.03,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 3.5,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec11_chunk1.wav",
+            "decode_seconds": 0.93,
+            "previous_chunk_text": "I decided I will use this data set and here the code that I have to load the model. So now you give me all the cod to load it",
+            "raw_text": "strain it and also store this in my uh you know",
+            "cleaned_text_after_dedup": "strain it and also store this in my uh you know",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 180224,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec11_chunk2.wav",
+            "decode_seconds": 0.52,
+            "previous_chunk_text": "strain it and also store this in my uh you know",
+            "raw_text": "In my hugging face people.",
+            "cleaned_text_after_dedup": "In my hugging face people.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 438272,
+            "chunk_age_seconds": 13.69,
+            "silence_elapsed_seconds": 0.82,
+            "split_reason": "silence_threshold_hit",
+            "overlap_seconds_added": 0.0,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec12_chunk0.wav",
+            "decode_seconds": 1.26,
+            "previous_chunk_text": "",
+            "raw_text": "Basically I want a data set that really talking about text tech things like uh uh hugging face or these kind of things they are these things they are in tech",
+            "cleaned_text_after_dedup": "Basically I want a data set that really talking about text tech things like uh uh hugging face or these kind of things they are these things they are in tech",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        },
+        {
+          "summary": {
+            "audio_bytes": 301056,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec12_chunk1.wav",
+            "decode_seconds": 0.8,
+            "previous_chunk_text": "Basically I want a data set that really talking about text tech things like uh uh hugging face or these kind of things they are these things they are in tech",
+            "raw_text": "Okay, coding, these kind of things for writing the prompts because the related to A engineer. Okay, that data set I require.",
+            "cleaned_text_after_dedup": "Okay, coding, these kind of things for writing the prompts because the related to A engineer. Okay, that data set I require.",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {},
+      "chunks": [
+        {
+          "summary": {
+            "audio_bytes": 364544,
+            "audio_file_path": "2026-04-24_13-39-00_fe007c7c9a13472695f0540082dc97b7_audio/rec13_chunk0.wav",
+            "decode_seconds": 0.99,
+            "previous_chunk_text": "",
+            "raw_text": "Okay, I decided we will remove this model because this caused the problem and I am not longer using this model large V3 turbo we're not using this so we should remove it",
+            "cleaned_text_after_dedup": "Okay, I decided we will remove this model because this caused the problem and I am not longer using this model large V3 turbo we're not using this so we should remove it",
+            "dedup_stats": {
+              "overlap_word_count": 0,
+              "trim_applied": false,
+              "combined_score": 0.0,
+              "char_score": 0.0,
+              "token_score": 0.0,
+              "skipped_too_small": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

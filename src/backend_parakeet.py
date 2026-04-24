@@ -29,7 +29,7 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
             "sherpa-onnx is unavailable in this environment"
             + (f": {_SHERPA_ONNX_IMPORT_ERROR}" if _SHERPA_ONNX_IMPORT_ERROR else "")
         )
-    
+
     if model_name:
         # Strip 'nemo-' prefix if user passed it, as we add it in the path
         CURRENT_MODEL_NAME = model_name.replace("nemo-", "")

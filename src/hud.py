@@ -88,6 +88,20 @@ THINKING   = "thinking"
 PROCESSING = "processing"
 DONE       = "done"
 
+from ..quantization import (
+    QuantizedResult,
+    BaseQuantizer,
+    SplitResidualVectorQuantizer,
+    ResidualVectorQuantizer,
+)
+from ..modules.conv import pad_for_conv1d
+from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
+from ..modules.streaming import StreamingModule, State, StateT
+from ..utils.compile import CUDAGraphed
+
+
+logger = logging.getLogger()
+
 
 def runtime_signature() -> str:
     return (
