@@ -246,14 +246,21 @@ def _is_no_streaming_mode() -> bool:
     return RECORDING_MODE == NO_STREAMING_MODE
 
 
-def load_backend(model_name="parakeet-tdt-0.6b-v2"):
+def load_backend(model_name="parakeet-tdt-0.6b-v3"):
     """
     Loads the requested ASR (Automatic Speech Recognition) model into memory.
-    We are now exclusively using the sherpa-onnx backend.
+    Supports both standard sherpa-onnx backends and the new Nemotron stateful backend.
     """
-    log.info(f"[Brain] Backend: sherpa-onnx ({model_name})")
+    log.info(f"[Brain] Backend: {model_name}")
+    
+    # Check if the requested model is a Nemotron model
+    if "nemotron" in model_name.lower():
+        from streaming.nemotron import NemotronStreamingBackend
+        backend = NemotronStreamingBackend()
+        # For stateful backends, the backend object also acts as the model state
+        return backend, backend
+        
     import backend_parakeet as backend
-
     return backend, backend.load_model(model_name)
 
 
@@ -416,6 +423,13 @@ def _handle_audio_chunk(
     audio = _normalize_audio(audio_int16)
 
     text = ""
+    analysis_cleaned_text = ""
+    overlap_word_count = 0
+    trim_applied = False
+    combined_score = char_score = token_score = 0.0
+    skipped_because_result_too_small = False
+    prev_text = ""
+
     if audio is not None:
         try:
             backend, model = session.backend, session.model
@@ -423,23 +437,55 @@ def _handle_audio_chunk(
                 log.info("[Brain] ⚠️  No model loaded — skipping chunk")
             else:
                 t_start = time.perf_counter()
-                text = backend.transcribe(model, audio).strip()
-                elapsed = time.perf_counter() - t_start
+                
+                # Check if the backend is stateful (supports transcribe_chunk)
+                if hasattr(backend, "transcribe_chunk"):
+                    # Stateful backends return the full cumulative transcript
+                    text = backend.transcribe_chunk(audio).strip()
+                    elapsed = time.perf_counter() - t_start
+                    analysis_cleaned_text = text
+                    
+                    with session.lock:
+                        rec = session.get_or_create_recording(rec_idx)
+                        # For cumulative backends, we store the full text in part 0 and clear others
+                        # This ensures _finalize_recording_if_ready sees the full text
+                        rec.transcript_parts = {0: text}
+                        rec.stt_time += elapsed
+                        session.stt_time += elapsed
+                else:
+                    # Stateless backends (like Parakeet-TDT) transcribe chunks independently
+                    text = backend.transcribe(model, audio).strip()
+                    elapsed = time.perf_counter() - t_start
+                    
+                    with session.lock:
+                        rec = session.get_or_create_recording(rec_idx)
+                        prev_text = rec.transcript_parts.get(seq - 1, "")
+                        # Deduplicate the new chunk against the previous context
+                        from streaming_shared_logic import analyze_duplicate_chunk_prefix
+                        analysis = analyze_duplicate_chunk_prefix(prev_text, text)
+                        
+                        analysis_cleaned_text = analysis.cleaned_text
+                        overlap_word_count = analysis.overlap_word_count
+                        trim_applied = analysis.trim_applied
+                        combined_score = analysis.combined_score
+                        char_score = analysis.char_score
+                        token_score = analysis.token_score
+                        skipped_because_result_too_small = analysis.skipped_because_result_too_small
+                        
+                        rec.transcript_parts[seq] = analysis_cleaned_text
+                        rec.stt_time += elapsed
+                        session.stt_time += elapsed
+                        
                 log.info(
                     f"[Brain] 🎙️  [{session_id[:8]} rec={rec_idx} chunk={seq}] decode took {elapsed:.2f}s"
                 )
-                with session.lock:
-                    rec = session.get_or_create_recording(rec_idx)
-                    rec.stt_time += elapsed
-                    session.stt_time += elapsed
         except Exception as e:
             log.info(f"[Brain] ❌ Chunk decode error: {e}")
+            import traceback
+            traceback.print_exc()
 
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
-        prev_text = rec.transcript_parts.get(seq - 1, "")
-        analysis = analyze_duplicate_chunk_prefix(prev_text, text)
-        rec.transcript_parts[seq] = analysis.cleaned_text
         rec.done_count += 1
 
     audio_file_path = None
@@ -456,14 +502,14 @@ def _handle_audio_chunk(
             "decode_seconds": round(elapsed, 2),
             "previous_chunk_text": prev_text,
             "raw_text": text,
-            "cleaned_text_after_dedup": analysis.cleaned_text,
+            "cleaned_text_after_dedup": analysis_cleaned_text,
             "dedup_stats": {
-                "overlap_word_count": analysis.overlap_word_count,
-                "trim_applied": analysis.trim_applied,
-                "combined_score": round(analysis.combined_score, 4),
-                "char_score": round(analysis.char_score, 4),
-                "token_score": round(analysis.token_score, 4),
-                "skipped_too_small": analysis.skipped_because_result_too_small,
+                "overlap_word_count": overlap_word_count,
+                "trim_applied": trim_applied,
+                "combined_score": round(combined_score, 4),
+                "char_score": round(char_score, 4),
+                "token_score": round(token_score, 4),
+                "skipped_too_small": skipped_because_result_too_small,
             },
         },
     )
@@ -474,7 +520,7 @@ def _handle_audio_chunk(
                 r.received_count for r in session.recordings.values()
             ),
             "total_decode_seconds": round(session.stt_time, 2),
-            "flags": {"dedup_trim_applied": analysis.trim_applied},
+            "flags": {"dedup_trim_applied": trim_applied},
         },
     )
 
@@ -486,11 +532,18 @@ def _mark_session_closed(session_id: str, rec_idx: int) -> None:
     Marks a specific recording (button press) as closed — no more chunks are coming for it.
     This fires when the user releases the record hotkey. The Brain then waits for all
     in-flight chunks for that recording to finish decoding before pasting the result.
+    If the backend is stateful, it is reset here to prepare for the next recording.
     """
     session = _get_or_create_session(session_id)
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.closed = True
+        
+        # Reset stateful backends to clear internal RNN states/caches
+        if hasattr(session.backend, "reset"):
+            log.info(f"[Brain] 🔄 Resetting stateful backend for session {session_id[:8]}")
+            session.backend.reset()
+            
     _finalize_recording_if_ready(session_id, rec_idx)
 
 
@@ -738,7 +791,7 @@ def start_server():
     spawning a new thread for each one. This server is the central 'nervous system'
     that coordinates all audio processing and text output for the app.
     """
-    backend_info["backend"], backend_info["model"] = load_backend("base.en")
+    backend_info["backend"], backend_info["model"] = load_backend("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
         backend_info["backend"].transcribe(
