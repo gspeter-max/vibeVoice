@@ -21,6 +21,7 @@ from streaming_shared_logic import (
     remove_duplicate_chunk_prefix,
 )
 from streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from src.env_utils import get_float_from_environment
 from src import log
 from rich.console import Console
 from rich.table import Table
@@ -127,17 +128,15 @@ def _telemetry_seed() -> dict:
             "dedup_trim_applied": False,
         },
         "config": {
-            "vad_threshold": float(os.environ.get("VAD_THRESHOLD", "0.5")),
-            "silence_timeout_seconds": float(
-                os.environ.get(
-                    "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
-                    "0.8",
-                )
+            "vad_threshold": get_float_from_environment("VAD_THRESHOLD", 0.5),
+            "silence_timeout_seconds": get_float_from_environment(
+                "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
+                0.8,
             ),
-            "energy_threshold": float(os.environ.get("VAD_ENERGY_THRESHOLD", "0.05")),
-            "energy_ratio": float(os.environ.get("VAD_ENERGY_RATIO", "2.5")),
-            "overlap_seconds": float(os.environ.get("OVERLAP_SECONDS", "1")),
-            "minimum_chunk_seconds": float(os.environ.get("MIN_CHUNK_SECONDS", "8.0")),
+            "energy_threshold": get_float_from_environment("VAD_ENERGY_THRESHOLD", 0.05),
+            "energy_ratio": get_float_from_environment("VAD_ENERGY_RATIO", 2.5),
+            "overlap_seconds": get_float_from_environment("OVERLAP_SECONDS", 1.0),
+            "minimum_chunk_seconds": get_float_from_environment("MIN_CHUNK_SECONDS", 8.0),
         },
     }
 
@@ -246,19 +245,19 @@ def _is_no_streaming_mode() -> bool:
     return RECORDING_MODE == NO_STREAMING_MODE
 
 
-def load_backend(model_name="parakeet-tdt-0.6b-v3"):
+def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
     """
-    Loads the requested ASR (Automatic Speech Recognition) model into memory.
-    Supports both standard sherpa-onnx backends and the new Nemotron stateful backend.
+    Loads the requested AI model into memory.
+    Supports standard backends and the new Nemotron stateful engine.
     """
-    log.info(f"[Brain] Backend: {model_name}")
+    log.info(f"[Brain] Loading engine: {model_name}")
     
     # Check if the requested model is a Nemotron model
     if "nemotron" in model_name.lower():
-        from streaming.nemotron import NemotronStreamingBackend
-        backend = NemotronStreamingBackend()
-        # For stateful backends, the backend object also acts as the model state
-        return backend, backend
+        from streaming.nemotron import NemotronStreamingEngine
+        engine = NemotronStreamingEngine()
+        # For stateful engines, the engine object also acts as the model state
+        return engine, engine
         
     import backend_parakeet as backend
     return backend, backend.load_model(model_name)
@@ -396,6 +395,12 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         )
         send_hud("hide")
 
+    # Clear stateful engines now that we are completely finished processing chunks
+    with session.lock:
+        if hasattr(session.backend, "clear_internal_memory"):
+            log.info(f"[Brain] 🔄 Clearing engine memory for session {short_id} (Finalized)")
+            session.backend.clear_internal_memory()
+
 
 # Keep the old name as an alias so any test code referencing it still works during migration
 def _finalize_session_if_ready(session_id: str) -> None:
@@ -438,17 +443,16 @@ def _handle_audio_chunk(
             else:
                 t_start = time.perf_counter()
                 
-                # Check if the backend is stateful (supports transcribe_chunk)
-                if hasattr(backend, "transcribe_chunk"):
-                    # Stateful backends return the full cumulative transcript
-                    text = backend.transcribe_chunk(audio).strip()
+                # Check if the engine is stateful (supports add_audio_chunk_and_get_text)
+                if hasattr(backend, "add_audio_chunk_and_get_text"):
+                    # Stateful engines return the full cumulative text result
+                    text = backend.add_audio_chunk_and_get_text(audio).strip()
                     elapsed = time.perf_counter() - t_start
                     analysis_cleaned_text = text
                     
                     with session.lock:
                         rec = session.get_or_create_recording(rec_idx)
-                        # For cumulative backends, we store the full text in part 0 and clear others
-                        # This ensures _finalize_recording_if_ready sees the full text
+                        # For cumulative engines, we store the full text in part 0
                         rec.transcript_parts = {0: text}
                         rec.stt_time += elapsed
                         session.stt_time += elapsed
@@ -529,21 +533,13 @@ def _handle_audio_chunk(
 
 def _mark_session_closed(session_id: str, rec_idx: int) -> None:
     """
-    Marks a specific recording (button press) as closed — no more chunks are coming for it.
-    This fires when the user releases the record hotkey. The Brain then waits for all
-    in-flight chunks for that recording to finish decoding before pasting the result.
-    If the backend is stateful, it is reset here to prepare for the next recording.
+    Marks a specific recording as closed.
     """
     session = _get_or_create_session(session_id)
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.closed = True
         
-        # Reset stateful backends to clear internal RNN states/caches
-        if hasattr(session.backend, "reset"):
-            log.info(f"[Brain] 🔄 Resetting stateful backend for session {session_id[:8]}")
-            session.backend.reset()
-            
     _finalize_recording_if_ready(session_id, rec_idx)
 
 
@@ -736,7 +732,7 @@ def _handle_switch_model(blob: bytes):
 
             backend_info["model"] = None
             gc.collect()
-            backend_info["backend"], backend_info["model"] = load_backend(new_model)
+            backend_info["backend"], backend_info["model"] = load_transcription_engine(new_model)
             log.info("✅ Model switched", model=new_model)
     except Exception as e:
         log.error("❌ Switching failed", error=str(e))
@@ -785,13 +781,8 @@ def _handle_chunk_command(blob: bytes):
 def start_server():
     """
     Initializes the Brain server and begins listening for incoming connections.
-    It first loads the default AI model and performs a 'warm-up' transcription
-    to ensure everything is ready for the first real user input. Then, it
-    sets up a Unix domain socket and enters a loop to accept new connections,
-    spawning a new thread for each one. This server is the central 'nervous system'
-    that coordinates all audio processing and text output for the app.
     """
-    backend_info["backend"], backend_info["model"] = load_backend("parakeet-tdt-0.6b-v3")
+    backend_info["backend"], backend_info["model"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
         backend_info["backend"].transcribe(
