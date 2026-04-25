@@ -37,7 +37,7 @@ trap cleanup EXIT INT TERM
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
 # Configuration
-export BACKEND="${BACKEND:-faster_whisper}"
+export BACKEND="${BACKEND:-parakeet}"
 export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
 export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
@@ -90,6 +90,14 @@ echo "
 
 # Cleanup stale processes
 log_info "Cleaning up old processes..."
+
+# macOS Library Path Fix: Ensure the AI program can find its library files.
+# This solves the "@rpath/libonnxruntime" error for every new user automatically.
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    log_info "Verifying macOS library paths..."
+    "$VENV_PYTHON" scripts/fix_macos_deps.py
+fi
+
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes

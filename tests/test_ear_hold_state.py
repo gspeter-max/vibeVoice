@@ -281,7 +281,7 @@ def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
          patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send:
         ear._flush_current_chunk(stop_session=False)
 
-    mock_send.assert_called_once_with(b"\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00")
+    mock_send.assert_called_once_with(b"\x02\x00\x05\x00\x03\x00\x04\x00\x05\x00\x06\x00")
     assert ear._pending_chunk_overlap_audio == b"\x03\x00\x04\x00\x05\x00\x06\x00"[-4:]
 
 

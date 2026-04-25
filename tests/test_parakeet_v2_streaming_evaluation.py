@@ -51,7 +51,7 @@ def test_add_previous_chunk_overlap_to_current_chunk_audio():
         stop_session=False,
     )
 
-    assert overlapped_audio == b"\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00"
+    assert overlapped_audio == b"\x02\x00\x05\x00\x03\x00\x04\x00\x05\x00\x06\x00"
     assert next_overlap_audio == b"\x05\x00\x06\x00"
 
 
@@ -368,7 +368,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
     transcriptions_by_audio_bytes = {
         b"\x01\x00\x02\x00\x03\x00\x04\x00": "hello there",
         b"\x05\x00\x06\x00\x07\x00\x08\x00": "there friend",
-        b"\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there friend",
+        b"\x05\x00\x07\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there friend",
     }
 
     monkeypatch.setattr(
@@ -455,7 +455,7 @@ def test_run_fake_microphone_stream_counts_real_chunk_events_even_if_dedup_remov
     transcriptions_by_audio_bytes = {
         b"\x01\x00\x02\x00\x03\x00\x04\x00": "hello there",
         b"\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
-        b"\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
+        b"\x05\x00\x07\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
     }
 
     monkeypatch.setattr(

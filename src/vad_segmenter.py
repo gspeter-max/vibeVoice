@@ -46,16 +46,10 @@ class SileroVAD:
         options.inter_op_num_threads = 1
         self.session = ort.InferenceSession(model_path, options, providers=["CPUExecutionProvider"])
 
-        input_names = [inp.name for inp in self.session.get_inputs()]
-        if "state" in input_names:
+        state_input = next((inp for inp in self.session.get_inputs() if inp.name == "state"), None)
+        if state_input:
             self._version = 5
-            state_shape = None
-            for inp in self.session.get_inputs():
-                if inp.name == "state":
-                    state_shape = [dim if isinstance(dim, int) else 1 for dim in inp.shape]
-                    break
-            if state_shape is None:
-                state_shape = [2, 1, 128]
+            state_shape = [dim if isinstance(dim, int) else 1 for dim in state_input.shape] if state_input.shape else [2, 1, 128]
             self._state = np.zeros(state_shape, dtype=np.float32)
             # 64-sample rolling context window required by Silero V5 ONNX streaming.
             # Without it the model sees a cold start every frame and returns ~0.001.
@@ -242,10 +236,7 @@ class SileroUtteranceGate:
         if not pcm16_bytes:
             return False
         self._raw_analysis_buffer.extend(pcm16_bytes)
-        if analysis_pcm16_bytes is not None:
-            self._analysis_buffer.extend(analysis_pcm16_bytes)
-        else:
-            self._analysis_buffer.extend(pcm16_bytes)
+        self._analysis_buffer.extend(analysis_pcm16_bytes if analysis_pcm16_bytes is not None else pcm16_bytes)
         # Keep the full utterance audio so it can be flushed later.
         self._buffer.extend(pcm16_bytes)
 
@@ -282,10 +273,7 @@ class SileroUtteranceGate:
                 self._last_voice_time = now
             else:
                 # Frames that are not speech help us slowly learn background noise.
-                if self._noise_floor == 0.0:
-                    self._noise_floor = frame_rms
-                else:
-                    self._noise_floor = (0.95 * self._noise_floor) + (0.05 * frame_rms)
+                self._noise_floor = frame_rms if self._noise_floor == 0.0 else (0.95 * self._noise_floor) + (0.05 * frame_rms)
 
         return speech_detected
 
