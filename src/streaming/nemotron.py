@@ -9,234 +9,274 @@ from scipy.signal import get_window
 from src import log
 
 # Hardware Acceleration: Apple Accelerate
-# This section attempts to load the Accelerate framework for faster argmax operations on macOS.
+# This section loads a system library to make finding the highest number faster.
 try:
-    ACCELERATE = ctypes.CDLL('/System/Library/Frameworks/Accelerate.framework/Accelerate')
-    # void vDSP_maxvi(const float *__v1, vDSP_Stride __v2, float *__v3, vDSP_Length *__v4, vDSP_Length __v5);
-    ACCELERATE.vDSP_maxvi.argtypes = [
+    ACCELERATE_LIBRARY = ctypes.CDLL('/System/Library/Frameworks/Accelerate.framework/Accelerate')
+    # vDSP_maxvi is a function that finds the largest number and its position in a list.
+    ACCELERATE_LIBRARY.vDSP_maxvi.argtypes = [
         ctypes.POINTER(ctypes.c_float), ctypes.c_long,
         ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_ulong), ctypes.c_ulong
     ]
-    HAS_ACCELERATE = True
+    HAS_HARDWARE_ACCELERATION = True
 except Exception:
-    HAS_ACCELERATE = False
+    HAS_HARDWARE_ACCELERATION = False
 
-def optimized_argmax(arr):
+def find_maximum_value_index(numbers_array):
     """
-    Finds the index of the maximum value in a float array using hardware acceleration if available.
+    Finds the position of the largest number in an array.
     
     Args:
-        arr (np.ndarray): Input array to find the argmax of.
+        numbers_array (np.ndarray): The list of numbers to check.
         
     Returns:
-        int: The index of the maximum value.
+        int: The index position of the largest number.
     """
-    if not HAS_ACCELERATE: 
-        return np.argmax(arr)
+    if not HAS_HARDWARE_ACCELERATION: 
+        return np.argmax(numbers_array)
     
-    # vDSP needs contiguous float32 data
-    arr = np.ascontiguousarray(arr.flatten(), dtype=np.float32)
-    max_val, max_idx = ctypes.c_float(), ctypes.c_ulong()
+    # Ensure the data is in the correct format for the hardware library
+    contiguous_numbers = np.ascontiguousarray(numbers_array.flatten(), dtype=np.float32)
+    maximum_value = ctypes.c_float()
+    maximum_index = ctypes.c_ulong()
     
-    # Use vDSP_maxvi for hardware-accelerated maximum value and index search
-    ACCELERATE.vDSP_maxvi(
-        arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), 
+    # Use the hardware library to find the maximum value and its index
+    ACCELERATE_LIBRARY.vDSP_maxvi(
+        contiguous_numbers.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), 
         1, 
-        ctypes.byref(max_val), 
-        ctypes.byref(max_idx), 
-        arr.size
+        ctypes.byref(maximum_value), 
+        ctypes.byref(maximum_index), 
+        contiguous_numbers.size
     )
-    return int(max_idx.value)
+    return int(maximum_index.value)
 
-class MelPreprocessor:
+class AudioSpectrogramConverter:
     """
-    Preprocesses raw audio waveforms into Log-Mel Spectrograms.
-    Follows the specific configuration required by the Nemotron model.
+    Converts raw sound data into a mathematical picture called a spectrogram.
+    The Nemotron model needs this picture to understand the sound.
     """
-    def __init__(self, config, filterbank_path):
+    def __init__(self, model_configuration, filterbank_file_path):
         """
-        Initializes the preprocessor with model config and pre-computed filterbanks.
+        Sets up the converter with settings and a pre-made frequency map.
         
         Args:
-            config (dict): The model configuration containing preprocessor settings.
-            filterbank_path (str): Path to the binary filterbank file.
+            model_configuration (dict): Settings for processing sound.
+            filterbank_file_path (str): Path to the frequency map file.
         """
-        self.cfg = config['preprocessor']
-        # Create a Hann window for the STFT calculation
-        self.window = get_window(self.cfg['window'], self.cfg['win_length'], fftbins=True)
-        
-        # Load the pre-computed Mel filterbank (expected shape [1, 128, 257])
-        self.fb = np.fromfile(filterbank_path, dtype=np.float32).reshape(1, 128, 257)[0]
-
-    def process(self, audio):
-        """
-        Converts raw audio to a Log-Mel Spectrogram.
-        
-        Args:
-            audio (np.ndarray): Raw float32 audio samples.
-            
-        Returns:
-            np.ndarray: Log-Mel Spectrogram with shape [1, n_mels, n_frames].
-        """
-        # Pre-emphasis filter to boost high frequencies
-        audio = np.append(audio[0], audio[1:] - self.cfg['preemph'] * audio[:-1])
-        
-        # Framing: segment audio into overlapping frames
-        n_frames = 1 + (len(audio) - self.cfg['win_length']) // self.cfg['hop_length']
-        frames = np.lib.stride_tricks.as_strided(
-            audio, 
-            shape=(n_frames, self.cfg['win_length']), 
-            strides=(audio.strides[0] * self.cfg['hop_length'], audio.strides[0])
+        self.settings = model_configuration['preprocessor']
+        # Create a mathematical window to look at small pieces of sound
+        self.mathematical_window = get_window(
+            self.settings['window'], 
+            self.settings['win_length'], 
+            fftbins=True
         )
         
-        # STFT: Windowing and Real FFT
-        mag = np.abs(np.fft.rfft(frames * self.window, n=self.cfg['n_fft'])) ** 2
-        
-        # Apply Mel Filterbank and take the Log
-        mel_spec = np.dot(mag, self.fb.T)
-        log_mel = np.log(mel_spec + 1e-5)
-        
-        # Reshape to [1, 128, n_frames] as expected by the encoder
-        return log_mel.T[np.newaxis, :, :].astype(np.float32)
+        # Load the frequency map (filterbank) from a binary file
+        self.frequency_map = np.fromfile(filterbank_file_path, dtype=np.float32).reshape(1, 128, 257)[0]
 
-class NemotronStreamingBackend:
+    def convert_sound_to_spectrogram(self, raw_sound_data):
+        """
+        Changes raw sound samples into a log-mel spectrogram picture.
+        
+        Args:
+            raw_sound_data (np.ndarray): The sound samples as numbers.
+            
+        Returns:
+            np.ndarray: A 3D array representing the sound picture.
+        """
+        # Step 1: Make high sounds clearer
+        processed_sound = np.append(
+            raw_sound_data[0], 
+            raw_sound_data[1:] - self.settings['preemph'] * raw_sound_data[:-1]
+        )
+        
+        # Step 2: Cut the sound into small overlapping pieces
+        number_of_frames = 1 + (len(processed_sound) - self.settings['win_length']) // self.settings['hop_length']
+        sound_frames = np.lib.stride_tricks.as_strided(
+            processed_sound, 
+            shape=(number_of_frames, self.settings['win_length']), 
+            strides=(processed_sound.strides[0] * self.settings['hop_length'], processed_sound.strides[0])
+        )
+        
+        # Step 3: Use a mathematical formula (FFT) to find the volume of different pitches
+        pitch_volumes = np.abs(np.fft.rfft(sound_frames * self.mathematical_window, n=self.settings['n_fft'])) ** 2
+        
+        # Step 4: Map the pitches to the frequency map and take the logarithm
+        mel_volumes = np.dot(pitch_volumes, self.frequency_map.T)
+        log_mel_spectrogram = np.log(mel_volumes + 1e-5)
+        
+        # Return the final picture in the shape the model expects
+        return log_mel_spectrogram.T[np.newaxis, :, :].astype(np.float32)
+
+def download_nemotron_model(cache_directory_path):
     """
-    NVIDIA Nemotron 0.6B RNN-T Streaming Backend.
-    Maintains internal states for the encoder and decoder to allow continuous transcription.
+    Downloads the Nemotron AI model from Hugging Face.
+    It only downloads the specific files needed to run the AI.
+    """
+    from huggingface_hub import snapshot_download
+    
+    log.info("⬇️ Downloading Nemotron-0.6B model (this may take a minute)...")
+    snapshot_download(
+        repo_id="danielbodart/nemotron-speech-600m-onnx",
+        local_dir=cache_directory_path,
+        allow_patterns=[
+            "int8-dynamic/*", 
+            "shared/*", 
+            "config.json"
+        ]
+    )
+    log.info("✅ Download complete.")
+
+
+class NemotronStreamingEngine:
+    """
+    The main engine that turns spoken sound into written text in real-time.
+    It remembers what was said before so the text stays smooth.
     """
     def __init__(self):
         """
-        Initializes the ONNX sessions and loads the model configuration and tokens.
+        Loads the AI models and the list of words (tokens).
+        If the model isn't on the computer yet, it downloads it automatically.
         """
-        # Prioritize local models directory if it exists
-        local_dir = os.path.join(os.getcwd(), "models/nemotron-0.6b-onnx")
-        if os.path.exists(local_dir):
-            self.model_dir = local_dir
+        # Find where the model files are stored on the computer
+        local_models_directory = os.path.join(os.getcwd(), "models/nemotron-0.6b-onnx")
+        cache_models_directory = os.path.expanduser("~/.cache/parakeet-flow/models/nemotron-0.6b-onnx")
+        
+        if os.path.exists(local_models_directory):
+            self.models_directory = local_models_directory
         else:
-            self.model_dir = os.path.expanduser("~/.cache/parakeet-flow/models/nemotron-0.6b-onnx")
-            
-        log.info(f"[Nemotron] Initializing from: {self.model_dir}")
+            self.models_directory = cache_models_directory
+            # If the config file isn't in the cache, it means the model isn't downloaded yet.
+            config_file_path = os.path.join(self.models_directory, "config.json")
+            if not os.path.exists(config_file_path):
+                log.info(f"Model not found. Initiating auto-download to {self.models_directory}...")
+                download_nemotron_model(self.models_directory)
+                
+        log.info(f"[Nemotron] Loading from: {self.models_directory}")
         
-        # Load Model Configuration
-        config_path = os.path.join(self.model_dir, "config.json")
-        with open(config_path, "r") as f:
-            self.cfg = json.load(f)
+        # Load the configuration file which has settings for the AI
+        with open(os.path.join(self.models_directory, "config.json"), "r") as config_file:
+            self.configuration = json.load(config_file)
             
-        # Initialize ONNX Runtime sessions for Encoder and Decoder
-        self.encoder = ort.InferenceSession(
-            os.path.join(self.model_dir, "int8-dynamic/encoder_model.onnx"), 
+        # Load the two parts of the AI: the Encoder and the Decoder
+        self.encoder_model = ort.InferenceSession(
+            os.path.join(self.models_directory, "int8-dynamic/encoder_model.onnx"), 
             providers=["CPUExecutionProvider"]
         )
-        self.decoder = ort.InferenceSession(
-            os.path.join(self.model_dir, "int8-dynamic/decoder_model.onnx"), 
+        self.decoder_model = ort.InferenceSession(
+            os.path.join(self.models_directory, "int8-dynamic/decoder_model.onnx"), 
             providers=["CPUExecutionProvider"]
         )
         
-        # Load vocabulary tokens
-        tokens_path = os.path.join(self.model_dir, "shared/tokens.txt")
-        with open(tokens_path, "r", encoding="utf-8") as f:
-            self.tokens = [line.strip().split()[0] for line in f if line.strip()]
+        # Load the list of text pieces (tokens) that the AI can write
+        tokens_file_path = os.path.join(self.models_directory, "shared/tokens.txt")
+        with open(tokens_file_path, "r", encoding="utf-8") as tokens_file:
+            self.vocabulary_tokens = [line.strip().split()[0] for line in tokens_file if line.strip()]
             
-        # Initialize Preprocessor
-        filterbank_path = os.path.join(self.model_dir, "shared/filterbank.bin")
-        self.preprocessor = MelPreprocessor(self.cfg, filterbank_path)
+        # Set up the sound-to-picture converter
+        filterbank_file_path = os.path.join(self.models_directory, "shared/filterbank.bin")
+        self.sound_processor = AudioSpectrogramConverter(self.configuration, filterbank_file_path)
         
-        # Initialize streaming states
-        self.reset()
+        # Clear all memory to start fresh
+        self.clear_internal_memory()
 
-    def reset(self):
+    def clear_internal_memory(self):
         """
-        Resets the internal states of the encoder, decoder, and transcript.
-        Must be called between independent transcription sessions.
+        Clears the engine's memory so it is ready for a new person to speak.
         """
-        e_cfg, d_cfg = self.cfg['encoder'], self.cfg['decoder']
+        encoder_settings = self.configuration['encoder']
+        decoder_settings = self.configuration['decoder']
         
-        # Encoder states (Caches for the Conformer/RNN layers)
-        self.enc_cache = {
-            "cache_last_channel": np.zeros(e_cfg['cache_last_channel_shape'], dtype=np.float32),
-            "cache_last_time": np.zeros(e_cfg['cache_last_time_shape'], dtype=np.float32),
+        # Memory for the Encoder part of the AI
+        self.encoder_memory = {
+            "cache_last_channel": np.zeros(encoder_settings['cache_last_channel_shape'], dtype=np.float32),
+            "cache_last_time": np.zeros(encoder_settings['cache_last_time_shape'], dtype=np.float32),
             "cache_last_channel_len": np.array([0], dtype=np.int64)
         }
         
-        # Decoder states (LSTM hidden and cell states)
-        self.dec_states = {
-            "input_states_1": np.zeros((2, 1, d_cfg['prediction_hidden']), dtype=np.float32),
-            "input_states_2": np.zeros((2, 1, d_cfg['prediction_hidden']), dtype=np.float32)
+        # Memory for the Decoder part of the AI
+        self.decoder_memory = {
+            "input_states_1": np.zeros((2, 1, decoder_settings['prediction_hidden']), dtype=np.float32),
+            "input_states_2": np.zeros((2, 1, decoder_settings['prediction_hidden']), dtype=np.float32)
         }
         
-        # RNN-T decoding state
-        self.last_token = np.array([[0]], dtype=np.int32) # Starting token (usually 0/blank)
-        self.transcript = ""
+        # The last piece of text the AI wrote (starts at 0)
+        self.last_written_token = np.array([[0]], dtype=np.int32)
+        self.full_text_result = ""
         
-        # Mel Cache: necessary because of the overlapping nature of the preprocessor
-        self.mel_cache = np.zeros((1, 128, 9), dtype=np.float32)
+        # Small piece of sound saved from the last time to make the transition smooth
+        self.previous_sound_frames = np.zeros((1, 128, 9), dtype=np.float32)
 
-    def transcribe_chunk(self, audio):
+    def add_audio_chunk_and_get_text(self, new_sound_data):
         """
-        Processes a single chunk of audio and appends discovered text to the transcript.
+        Takes a new piece of sound and adds the new words to the text result.
         
         Args:
-            audio (np.ndarray): Raw float32 audio chunk.
+            new_sound_data (np.ndarray): The new piece of sound.
             
         Returns:
-            str: The full cumulative transcript for the current session.
+            str: All the text the AI has written so far in this session.
         """
-        # Convert audio to Mel Spectrogram
-        mel = self.preprocessor.process(audio)
+        # Convert the new sound into a mathematical picture
+        current_spectrogram = self.sound_processor.convert_sound_to_spectrogram(new_sound_data)
         
-        # Prepend cached mel frames from the previous chunk to ensure temporal continuity
-        full_mel = np.concatenate([self.mel_cache, mel], axis=2)
-        self.mel_cache = mel[:, :, -9:] # Update cache with the last 9 frames
+        # Combine the new picture with the small piece saved from last time
+        combined_spectrogram = np.concatenate([self.previous_sound_frames, current_spectrogram], axis=2)
+        self.previous_sound_frames = current_spectrogram[:, :, -9:] # Save the end of this picture for next time
         
-        # Run Encoder
-        enc_inputs = {
-            "audio_signal": full_mel, 
-            "length": np.array([full_mel.shape[2]], dtype=np.int64), 
-            **self.enc_cache
+        # Step 1: Run the Encoder part of the AI
+        encoder_inputs = {
+            "audio_signal": combined_spectrogram, 
+            "length": np.array([combined_spectrogram.shape[2]], dtype=np.int64), 
+            **self.encoder_memory
         }
-        enc_outputs = self.encoder.run(None, enc_inputs)
+        encoder_outputs = self.encoder_model.run(None, encoder_inputs)
         
-        # Update Encoder Cache
-        self.enc_cache.update({
-            "cache_last_channel": enc_outputs[2], 
-            "cache_last_time": enc_outputs[3], 
-            "cache_last_channel_len": enc_outputs[4]
+        # Update the Encoder's memory with what it just learned
+        self.encoder_memory.update({
+            "cache_last_channel": encoder_outputs[2], 
+            "cache_last_time": encoder_outputs[3], 
+            "cache_last_channel_len": encoder_outputs[4]
         })
         
-        # Greedily decode each frame emitted by the encoder
-        encoded_frames = enc_outputs[0]
-        blank_id = self.cfg['decoder']['blank_id']
+        # Step 2: Check each frame of the picture to find new words
+        encoded_frames = encoder_outputs[0]
+        blank_token_id = self.configuration['decoder']['blank_id']
+        max_words_per_frame = self.configuration['decoder']['max_symbols_per_frame']
         
-        for t in range(encoded_frames.shape[2]):
-            frame = encoded_frames[:, :, t:t+1]
+        for time_step in range(encoded_frames.shape[2]):
+            single_frame = encoded_frames[:, :, time_step:time_step+1]
             
-            # Sub-loop for RNN-T: allow multiple symbols to be emitted per frame
-            for _ in range(self.cfg['decoder']['max_symbols_per_frame']):
-                dec_inputs = {
-                    "encoder_outputs": frame, 
-                    "targets": self.last_token, 
+            # The AI can find multiple words in one small piece of sound
+            for _ in range(max_words_per_frame):
+                decoder_inputs = {
+                    "encoder_outputs": single_frame, 
+                    "targets": self.last_written_token, 
                     "target_length": np.array([1], dtype=np.int32), 
-                    **self.dec_states
+                    **self.decoder_memory
                 }
-                dec_outputs = self.decoder.run(None, dec_inputs)
+                decoder_outputs = self.decoder_model.run(None, decoder_inputs)
                 
-                # Get the most likely token
-                token = optimized_argmax(dec_outputs[0][0, 0, 0])
+                # Find the most likely word piece (token)
+                predicted_token_id = find_maximum_value_index(decoder_outputs[0][0, 0, 0])
                 
-                if token == blank_id:
-                    # Break the sub-loop if a blank symbol is predicted
+                if predicted_token_id == blank_token_id:
+                    # If the AI says 'blank', it means there are no more words in this frame
                     break
                 
-                # Process the predicted token
-                t_str = self.tokens[token]
-                # '▁' (u2581) is the SentencePiece separator indicating a new word/space
-                self.transcript += (" " + t_str[1:] if t_str.startswith("▁") else t_str)
+                # Turn the token ID into a piece of written text
+                token_text = self.vocabulary_tokens[predicted_token_id]
                 
-                # Update Decoder States
-                self.last_token = np.array([[token]], dtype=np.int32)
-                self.dec_states.update({
-                    "input_states_1": dec_outputs[2], 
-                    "input_states_2": dec_outputs[3]
+                # If the token starts with a special space character, add a space
+                if token_text.startswith("▁"):
+                    self.full_text_result += " " + token_text[1:]
+                else:
+                    self.full_text_result += token_text
+                
+                # Update the Decoder's memory so it knows what it just wrote
+                self.last_written_token = np.array([[predicted_token_id]], dtype=np.int32)
+                self.decoder_memory.update({
+                    "input_states_1": decoder_outputs[2], 
+                    "input_states_2": decoder_outputs[3]
                 })
                 
-        return self.transcript
+        return self.full_text_result
