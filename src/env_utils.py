@@ -16,9 +16,21 @@ def _get_parsed_value_from_environment(
     type_label: str
 ) -> T:
     """
-    Private helper that handles the common logic for retrieving and parsing 
-    environment variables. It manages whitespace stripping, empty checks,
-    and error logging.
+    Internal helper to centralize environment variable parsing logic.
+    ──────────────────────────────────────────────────────────────────
+    ARGUMENTS:
+      environment_variable_name : The key to find in the OS environment.
+      fallback_value           : Default numeric value returned on any failure.
+      parser_function          : The type constructor (int or float).
+      type_label               : Description of the type for log messages.
+    ──────────────────────────────────────────────────────────────────
+    INTERNAL LOGIC:
+      1. Fetches the raw value from the environment via os.environ.
+      2. Trims whitespace and checks if the value is empty.
+      3. Attempts to call the parser_function on the string.
+      4. Catches ValueError, logs a warning, and returns the fallback.
+    ──────────────────────────────────────────────────────────────────
+    RETURNS: T (The parsed numeric value or the fallback)
     """
     # Retrieve the value and remove any accidental leading or trailing whitespace.
     raw_environment_value = os.environ.get(environment_variable_name, "").strip()
@@ -40,18 +52,19 @@ def _get_parsed_value_from_environment(
 
 def get_integer_from_environment(environment_variable_name: str, fallback_value: int) -> int:
     """
-    Safely retrieves and parses an integer from the system's environment variables.
-    
-    This function handles cases where the variable might be missing, empty, 
-    or contain non-numeric characters. In such cases, it logs a warning 
-    and returns a safe default value to prevent the application from crashing.
-
-    Args:
-        environment_variable_name: The exact name of the environment variable to look up.
-        fallback_value: The integer value to return if lookup or parsing fails.
-
-    Returns:
-        The parsed integer from the environment, or the fallback_value on failure.
+    Retrieve an integer from the environment without risking a crash.
+    ──────────────────────────────────────────────────────────────────
+    ARGUMENTS:
+      environment_variable_name : The key to find in the OS environment.
+      fallback_value           : Default integer if key is missing/bad.
+    ──────────────────────────────────────────────────────────────────
+    INTERNAL LOGIC:
+      The function first removes whitespace using .strip(). If the 
+      remaining text is empty, it returns the fallback. It then tries 
+      to convert the text to an integer. If the text is invalid (like 
+      '10.5' or 'abc'), it logs a warning and returns the fallback.
+    ──────────────────────────────────────────────────────────────────
+    RETURNS: Integer
     """
     return _get_parsed_value_from_environment(
         environment_variable_name, 
@@ -62,17 +75,18 @@ def get_integer_from_environment(environment_variable_name: str, fallback_value:
 
 def get_float_from_environment(environment_variable_name: str, fallback_value: float) -> float:
     """
-    Safely retrieves and parses a decimal (float) from the system's environment variables.
-    
-    Similar to the integer version, this ensures that malformed decimal configurations 
-    do not stop the audio processing system.
-
-    Args:
-        environment_variable_name: The exact name of the environment variable to look up.
-        fallback_value: The float value to return if lookup or parsing fails.
-
-    Returns:
-        The parsed float from the environment, or the fallback_value on failure.
+    Retrieve a decimal (float) from the environment without risking a crash.
+    ──────────────────────────────────────────────────────────────────
+    ARGUMENTS:
+      environment_variable_name : The key to find in the OS environment.
+      fallback_value           : Default float if key is missing/bad.
+    ──────────────────────────────────────────────────────────────────
+    INTERNAL LOGIC:
+      This function is a safe wrapper around the float() constructor.
+      It strips whitespace and handles empty or non-numeric strings by 
+      returning the provided fallback value and logging a warning.
+    ──────────────────────────────────────────────────────────────────
+    RETURNS: Float
     """
     return _get_parsed_value_from_environment(
         environment_variable_name, 
