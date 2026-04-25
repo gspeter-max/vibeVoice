@@ -16,21 +16,18 @@ def _get_parsed_value_from_environment(
     type_label: str
 ) -> T:
     """
-    Internal helper to centralize environment variable parsing logic.
-    ──────────────────────────────────────────────────────────────────
-    ARGUMENTS:
-      environment_variable_name : The key to find in the OS environment.
-      fallback_value           : Default numeric value returned on any failure.
-      parser_function          : The type constructor (int or float).
-      type_label               : Description of the type for log messages.
-    ──────────────────────────────────────────────────────────────────
-    INTERNAL LOGIC:
-      1. Fetches the raw value from the environment via os.environ.
-      2. Trims whitespace and checks if the value is empty.
-      3. Attempts to call the parser_function on the string.
-      4. Catches ValueError, logs a warning, and returns the fallback.
-    ──────────────────────────────────────────────────────────────────
-    RETURNS: T (The parsed numeric value or the fallback)
+    This is an internal helper that safely gets a number from the computer's environment settings.
+
+    It handles the logic of finding the value, cleaning it, and turning it into a number
+    without letting the program crash if the value is wrong.
+
+    Step-by-step:
+    1. Look for the setting using the name provided (the environment variable).
+    2. Remove any extra spaces at the beginning or end of the value.
+    3. If the value is empty or doesn't exist, return the default fallback value.
+    4. Try to turn the text into a number (either an integer or a decimal).
+    5. If the text isn't a valid number, log a warning message so the developer knows.
+    6. Return the fallback value if anything went wrong, otherwise return the new number.
     """
     # Retrieve the value and remove any accidental leading or trailing whitespace.
     raw_environment_value = os.environ.get(environment_variable_name, "").strip()
@@ -52,19 +49,15 @@ def _get_parsed_value_from_environment(
 
 def get_integer_from_environment(environment_variable_name: str, fallback_value: int) -> int:
     """
-    Retrieve an integer from the environment without risking a crash.
-    ──────────────────────────────────────────────────────────────────
-    ARGUMENTS:
-      environment_variable_name : The key to find in the OS environment.
-      fallback_value           : Default integer if key is missing/bad.
-    ──────────────────────────────────────────────────────────────────
-    INTERNAL LOGIC:
-      The function first removes whitespace using .strip(). If the 
-      remaining text is empty, it returns the fallback. It then tries 
-      to convert the text to an integer. If the text is invalid (like 
-      '10.5' or 'abc'), it logs a warning and returns the fallback.
-    ──────────────────────────────────────────────────────────────────
-    RETURNS: Integer
+    This function looks for a whole number (integer) in your environment settings.
+
+    It ensures that if the setting is missing or contains text that isn't a number,
+    your program keeps running smoothly by using a safe default value.
+
+    Step-by-step:
+    1. Ask the internal helper to find the value and try to turn it into an integer.
+    2. If it works, you get the number from your settings.
+    3. If it fails or is missing, you get the fallback value instead.
     """
     return _get_parsed_value_from_environment(
         environment_variable_name, 
@@ -75,18 +68,16 @@ def get_integer_from_environment(environment_variable_name: str, fallback_value:
 
 def get_float_from_environment(environment_variable_name: str, fallback_value: float) -> float:
     """
-    Retrieve a decimal (float) from the environment without risking a crash.
-    ──────────────────────────────────────────────────────────────────
-    ARGUMENTS:
-      environment_variable_name : The key to find in the OS environment.
-      fallback_value           : Default float if key is missing/bad.
-    ──────────────────────────────────────────────────────────────────
-    INTERNAL LOGIC:
-      This function is a safe wrapper around the float() constructor.
-      It strips whitespace and handles empty or non-numeric strings by 
-      returning the provided fallback value and logging a warning.
-    ──────────────────────────────────────────────────────────────────
-    RETURNS: Float
+    This function looks for a decimal number (float) in your environment settings.
+
+    It works just like the integer version but allows for numbers with dots (like 10.5).
+    It prevents crashes by returning a default value if the setting is broken or empty.
+
+    Step-by-step:
+    1. Ask the internal helper to find the value and try to turn it into a decimal number.
+    2. If it works, you get the decimal number from your settings.
+    3. If it fails or is missing, you get the decimal number from your settings.
+    4. If it fails or is missing, you get the fallback value instead.
     """
     return _get_parsed_value_from_environment(
         environment_variable_name, 
