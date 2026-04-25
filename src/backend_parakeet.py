@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import numpy as np
 from src import log
+from src.env_utils import get_integer_from_environment
 
 try:
     import sherpa_onnx
@@ -31,12 +32,7 @@ def _get_model_details(model_name: str) -> tuple[str, str]:
     is_moonshine = "moonshine" in name
 
     # Folder naming convention used by k2-fsa/sherpa-onnx releases
-    if is_moonshine:
-        folder = f"sherpa-onnx-{name}-en-int8"
-    elif "streaming" in name:
-        folder = f"sherpa-onnx-nemo-{name}-int8"
-    else:
-        folder = f"sherpa-onnx-nemo-{name}-int8"
+    folder = f"sherpa-onnx-{name}-en-int8" if is_moonshine else f"sherpa-onnx-nemo-{name}-int8"
 
     base_path = os.path.expanduser("~/.cache/parakeet-flow/models")
     model_dir = os.path.join(base_path, folder)
@@ -93,9 +89,8 @@ def load_model(model_name=None) -> sherpa_onnx.OfflineRecognizer:
 
     log.info(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_dir}...")
 
-    # Use PARAKEET_THREADS env var, or default to all cores
-    thread_env = os.environ.get("PARAKEET_THREADS")
-    num_threads = int(thread_env) if thread_env else 6
+    # Use PARAKEET_THREADS env var, or default to 6 if missing or malformed
+    num_threads = get_integer_from_environment("PARAKEET_THREADS", 6)
 
     log.info(f"[sherpa-onnx] Using {num_threads} threads")
 
