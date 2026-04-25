@@ -22,6 +22,7 @@ def test_socket_communication(sample_audio_bytes):
     Test that a chunk sent by Ear is accumulated by Brain and only pasted on commit.
     """
     mock_backend = MagicMock()
+    del mock_backend.add_audio_chunk_and_get_text
     mock_model = MagicMock()
 
     brain.backend_info["backend"] = mock_backend

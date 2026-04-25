@@ -88,7 +88,7 @@ def test_handle_connection_switch_model_command():
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
     with patch(
-        "brain.load_backend", return_value=(mock_new_backend, mock_new_model)
+        "brain.load_transcription_engine", return_value=(mock_new_backend, mock_new_model)
     ) as mock_load:
         brain.handle_connection(conn)
 
@@ -120,11 +120,12 @@ def test_dedupe_with_previous_chunk_removes_repeated_prefix():
         "things are happening fine and doing H3 grid",
     )
 
-    assert cleaned == "and doing H3 grid"
+    assert cleaned == "doing H3 grid"
 
 
 def test_handle_audio_chunk_dedupes_against_previous_chunk_text():
     mock_backend = MagicMock()
+    del mock_backend.add_audio_chunk_and_get_text
     mock_model = MagicMock()
     mock_backend.transcribe.side_effect = [
         "I want to see that things are happening fine",
@@ -144,7 +145,7 @@ def test_handle_audio_chunk_dedupes_against_previous_chunk_text():
         session.recordings[0].transcript_parts[0]
         == "I want to see that things are happening fine"
     )
-    assert session.recordings[0].transcript_parts[1] == "and doing H3 grid"
+    assert session.recordings[0].transcript_parts[1] == "doing H3 grid"
 
 
 def test_finalize_session_pastes_stitched_text_directly():
