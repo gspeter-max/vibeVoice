@@ -94,7 +94,7 @@ except ImportError:
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
-BACKEND         = os.environ.get("BACKEND", "faster_whisper")
+BACKEND         = os.environ.get("BACKEND", "parakeet")
 # This chooses the send style:
 # - no_streaming: send raw audio and let Brain wait for socket close
 # - silence_streaming: split speech on silence and send chunks
@@ -132,11 +132,9 @@ RATE     = 16000
 CHUNK    = 1024
 
 MODELS = [
-    "tiny.en", "base.en", "small.en",
-    "fast-conformer-ctc-en-24500",
-    "medium.en", "large-v2", "moonshine-base",
-    "deepdml/faster-whisper-large-v3-turbo-ct2",
-    "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"
+    "fast-conformer-ctc-en-24500", "moonshine-base",
+    "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3",
+    "nemotron-streaming-0.6b"
 ]
 
 def _is_right_cmd(key) -> bool:
@@ -173,15 +171,16 @@ def get_rms(block: bytes) -> float:
     return math.sqrt(sum_sq / len(shorts))
 
 
-def send_switch_command(model_name):
+def send_switch_command(model_name, ear_instance=None):
     """
     Sends a request to the Brain to switch the active transcription model.
-    It opens a Unix domain socket connection to the Brain's server and
-    transmits a formatted command string containing the new model's name.
-    This allows the user to change models instantly via keyboard shortcuts
-    while the application is running, without needing to restart the Ear.
+    If an Ear instance is provided, its current_model state is updated to
+    allow for model-specific behavior changes (like heartbeat intervals).
     """
     log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
+    if ear_instance:
+        ear_instance.current_model = model_name
+        
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(SOCKET_PATH)
@@ -251,15 +250,13 @@ def run_self_test():
 class TerminalMenu(threading.Thread):
     """
     Background thread that listens for keyboard input in the terminal.
-    This allows the user to switch models by pressing number keys (1-0)
-    or run a self-test by pressing 'T'. It runs in a separate thread
-    so that it doesn't block the main recording loop, providing a
-    simple but effective interactive control interface for the app.
+    Allows switching models and running self-tests without blocking recording.
     """
-    def __init__(self):
+    def __init__(self, ear_instance=None):
         super().__init__(daemon=True)
         self._stop = threading.Event()
         self.fd = sys.stdin.fileno()
+        self.ear = ear_instance
 
     def run(self):
         if not sys.stdin.isatty():
@@ -270,9 +267,10 @@ class TerminalMenu(threading.Thread):
             while not self._stop.is_set():
                 if select.select([sys.stdin], [], [], 0.1)[0]:
                     c = sys.stdin.read(1)
-                    if c in '1234567890':
-                        idx = int(c) - 1 if c != '0' else 9
-                        send_switch_command(MODELS[idx])
+                    if c in '12345':
+                        idx = int(c) - 1
+                        if idx < len(MODELS):
+                            send_switch_command(MODELS[idx], self.ear)
                     elif c.lower() == 't':
                         threading.Thread(target=run_self_test, daemon=True).start()
                     elif c == '\x03':
@@ -382,6 +380,7 @@ class Ear:
         self._recording_index = 0
         self._chunk_seq = 0
         self._chunk_started_at = 0.0
+        self.current_model = "parakeet-tdt-0.6b-v3" # Default model
         self._chunk_overlap_audio_bytes = int(RATE * 2 * OVERLAP_SECONDS)
         self._pending_chunk_overlap_audio = b""
 
@@ -1166,6 +1165,16 @@ class Ear:
                 self._recording_level_log_time = now
 
             if self._is_silence_streaming_mode():
+                # --- Nemotron Heartbeat Logic ---
+                # Nemotron is a stateful RNN-T model that performs best with fixed 1.12s chunks.
+                # If active, we bypass the complex silence-detection logic.
+                if "nemotron" in self.current_model.lower():
+                    if (now - self._chunk_started_at) >= 1.12:
+                        log.info(f"\r[Ear] 💓 Nemotron heartbeat (1.12s); sending chunk")
+                        self._stop_and_send(stop_session=False)
+                    return
+                # --- End Nemotron Logic ---
+
                 # Silence mode watches for speech ending so it can send a chunk.
                 if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
                     silence_elapsed = self._utterance_gate.silence_elapsed(now)
@@ -1248,10 +1257,10 @@ def start_ear():
     selected_mic_index = select_mic(p_temp)
     p_temp.terminate()
 
-    menu = TerminalMenu()
-    menu.start()
-
     ear = Ear(input_device_index=selected_mic_index)
+
+    menu = TerminalMenu(ear_instance=ear)
+    menu.start()
 
     # Keyboard listener for Right CMD shortcut
     listener = keyboard.Listener(on_press=ear.on_press, on_release=ear.on_release)
@@ -1263,7 +1272,7 @@ def start_ear():
     log.info("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record")
 
     backend_label = {
-        "faster_whisper": "faster-whisper + distil-large-v3 (INT8)",
+        "parakeet": "sherpa-onnx + parakeet-tdt-v3 (INT8)",
     }.get(BACKEND, BACKEND)
 
     mic_mode = "Voice Isolation (macOS)" if os.environ.get("VOICE_ISOLATION", "0") == "1" else "Standard (Raw Audio)"
@@ -1275,10 +1284,9 @@ def start_ear():
     log.info(f"║  Mic Mode: {mic_mode:<38}║")
     log.info(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
     log.info("╚══════════════════════════════════════════════════╝")
-    log.info(" Press [1] tiny.en      [2] base.en     [3] small.en")
-    log.info(" Press [4] Unified      [5] medium.en   [6] large-v2")
-    log.info(" Press [7] Moonshine    [8] turbo       [9] Parakeet v2")
-    log.info(" Press [0] Parakeet v3  [t] Self-test")
+    log.info(" Press [1] Conformer    [2] Moonshine")
+    log.info(" Press [3] Parakeet v2  [4] Parakeet v3")
+    log.info(" Press [5] Nemotron     [t] Self-test")
     log.info("─" * 52)
     log.info(" Brain output prints directly in this terminal.")
     log.info("─" * 52)
