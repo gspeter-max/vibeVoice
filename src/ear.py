@@ -131,11 +131,26 @@ CHANNELS = 1
 RATE     = 16000
 CHUNK    = 1024
 
-MODELS = [
-    "fast-conformer-ctc-en-24500", "moonshine-base",
-    "parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3",
-    "nemotron-streaming-0.6b"
-]
+def get_active_models() -> list[str]:
+    """
+    Dynamically returns the list of available transcription models.
+    Nemotron is specifically designed for streaming audio, so we only
+    expose it if the user has explicitly selected the 'silence_streaming' mode.
+    This prevents users from selecting an incompatible model in standard mode.
+    """
+    models = [
+        "fast-conformer-ctc-en-24500", 
+        "moonshine-base",
+        "parakeet-tdt-0.6b-v2", 
+        "parakeet-tdt-0.6b-v3",
+    ]
+    
+    # Only append Nemotron if we are in streaming mode
+    recording_mode = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
+    if recording_mode == "silence_streaming":
+        models.append("nemotron-streaming-0.6b")
+        
+    return models
 
 def _is_right_cmd(key) -> bool:
     """
@@ -269,8 +284,9 @@ class TerminalMenu(threading.Thread):
                     c = sys.stdin.read(1)
                     if c in '12345':
                         idx = int(c) - 1
-                        if idx < len(MODELS):
-                            send_switch_command(MODELS[idx], self.ear)
+                        active_models = get_active_models()
+                        if idx < len(active_models):
+                            send_switch_command(active_models[idx], self.ear)
                     elif c.lower() == 't':
                         threading.Thread(target=run_self_test, daemon=True).start()
                     elif c == '\x03':
@@ -1165,12 +1181,13 @@ class Ear:
                 self._recording_level_log_time = now
 
             if self._is_silence_streaming_mode():
-                # --- Nemotron Heartbeat Logic ---
-                # Nemotron is a stateful RNN-T model that performs best with fixed 1.12s chunks.
-                # If active, we bypass the complex silence-detection logic.
+                # --- Nemotron Fixed Time Gap Logic ---
+                # Nemotron works best when we send sound every 1.12 seconds.
+                # If we are using Nemotron, we ignore silence and just use this time gap.
                 if "nemotron" in self.current_model.lower():
-                    if (now - self._chunk_started_at) >= 1.12:
-                        log.info(f"\r[Ear] 💓 Nemotron heartbeat (1.12s); sending chunk")
+                    time_since_last_chunk = now - self._chunk_started_at
+                    if time_since_last_chunk >= 1.12:
+                        log.info(f"\r[Ear] 💓 Nemotron time gap reached (1.12s); sending sound")
                         self._stop_and_send(stop_session=False)
                     return
                 # --- End Nemotron Logic ---
@@ -1286,7 +1303,12 @@ def start_ear():
     log.info("╚══════════════════════════════════════════════════╝")
     log.info(" Press [1] Conformer    [2] Moonshine")
     log.info(" Press [3] Parakeet v2  [4] Parakeet v3")
-    log.info(" Press [5] Nemotron     [t] Self-test")
+    
+    active_models = get_active_models()
+    if "nemotron-streaming-0.6b" in active_models:
+        log.info(" Press [5] Nemotron     [t] Self-test")
+    else:
+        log.info(" Press [t] Self-test")
     log.info("─" * 52)
     log.info(" Brain output prints directly in this terminal.")
     log.info("─" * 52)
