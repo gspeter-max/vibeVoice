@@ -823,12 +823,11 @@ class Ear:
             else:
                 # Silence mode: keep the utterance locally until silence splits it.
                 now = time.time()
-                vad_bytes = self._prepare_vad_chunk(in_data)
-                
+
                 speech_now = self._utterance_gate.push(
                     pcm16_bytes=in_data,
-                    now=now ,
-                    analysis_pcm16_bytes= vad_bytes 
+                    now=now,
+                    analysis_pcm16_bytes=chunk_bytes
                 )
 
                 if speech_now and not self._chunk_speech_logged:
