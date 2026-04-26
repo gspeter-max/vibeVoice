@@ -350,7 +350,6 @@ class Ear:
         self._lock = threading.Lock()
         self.last_rms = 0.0
         self.gain_multiplier = 1.2 # Increased from 1.1 to fix quiet mic issues
-        self.vad_sensitivity_boost = VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION
         self._total_frames = 0
         self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
         self._last_raw_rms = 0.0
@@ -413,7 +412,7 @@ class Ear:
         )
         log.info(
             f"[Ear] VAD config: threshold={VAD_THRESHOLD:.2f}, silence_timeout={VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s, "
-            f"vad_gain={self.vad_sensitivity_boost:.1f}x, energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
+            f"energy_threshold={VAD_ENERGY_THRESHOLD:.3f}, "
             f"energy_ratio={VAD_ENERGY_RATIO:.2f}"
         )
 
