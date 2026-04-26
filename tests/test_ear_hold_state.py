@@ -272,7 +272,7 @@ def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
     ear.is_recording = True
     ear._current_session_id = "sess"
     ear._chunk_overlap_audio_bytes = 4
-    ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
+    ear._last_chunk_tail_bytes = b"\x01\x00\x02\x00"
     ear._total_frames = 4
 
     with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
@@ -282,7 +282,7 @@ def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
         ear._flush_current_chunk(stop_session=False)
 
     mock_send.assert_called_once_with(b"\x02\x00\x05\x00\x03\x00\x04\x00\x05\x00\x06\x00")
-    assert ear._pending_chunk_overlap_audio == b"\x03\x00\x04\x00\x05\x00\x06\x00"[-4:]
+    assert ear._last_chunk_tail_bytes == b"\x03\x00\x04\x00\x05\x00\x06\x00"[-4:]
 
 
 def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
@@ -290,7 +290,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
     ear.is_recording = True
     ear._current_session_id = "sess"
     ear._chunk_overlap_audio_bytes = 4
-    ear._pending_chunk_overlap_audio = b"\x01\x00\x02\x00"
+    ear._last_chunk_tail_bytes = b"\x01\x00\x02\x00"
     ear._total_frames = 4
 
     with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
@@ -301,7 +301,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
         ear._flush_current_chunk(stop_session=True)
 
     mock_send.assert_called_once_with(b"\x03\x00\x04\x00")
-    assert ear._pending_chunk_overlap_audio == b""
+    assert ear._last_chunk_tail_bytes == b""
 
 
 def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
@@ -315,11 +315,11 @@ def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
     mock_stream.assert_called_once()
 
 
-def test_audio_callback_uses_conditioned_audio_for_vad():
-    """VAD should receive its own conditioned signal, not blindly raw bytes."""
+def test_audio_callback_uses_boosted_audio_for_vad():
+    """VAD should receive the boosted signal that's used for transcription."""
     ear = Ear()
     ear.is_recording = True
-    ear.vad_sensitivity_boost = 4.0
+    ear.gain_multiplier = 4.0
 
     raw = (b"\x01\x00" * 4)
     gate = Mock()
@@ -331,7 +331,8 @@ def test_audio_callback_uses_conditioned_audio_for_vad():
     gate.push.assert_called_once()
     assert gate.push.call_args.args == ()
     assert gate.push.call_args.kwargs["pcm16_bytes"] == raw
-    assert gate.push.call_args.kwargs["analysis_pcm16_bytes"] != raw
+    # analysis_pcm16_bytes should be the boosted version (1 * 4 = 4)
+    assert gate.push.call_args.kwargs["analysis_pcm16_bytes"] == (b"\x04\x00" * 4)
 
 
 def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
@@ -346,27 +347,6 @@ def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
 
     mock_open.assert_called_once_with()
     assert ear.is_recording is True
-
-
-def test_prepare_vad_chunk_does_not_amplify_true_silence():
-    """Near-silent chunks should remain effectively silent for VAD."""
-    ear = Ear()
-    silence = b"\x00\x00" * 8
-
-    prepared = ear._prepare_vad_chunk(silence)
-
-    assert prepared == silence
-
-
-def test_prepare_vad_chunk_amplifies_quiet_non_silent_audio():
-    """Quiet speech-like chunks should be lifted before VAD sees them."""
-    ear = Ear()
-    ear.vad_sensitivity_boost = 4.0
-    raw = b"\x01\x00" * 8
-
-    prepared = ear._prepare_vad_chunk(raw)
-
-    assert prepared != raw
 
 
 def test_flush_current_chunk_boosts_before_sending_to_brain():

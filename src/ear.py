@@ -352,8 +352,6 @@ class Ear:
         self.gain_multiplier = 1.2 # Increased from 1.1 to fix quiet mic issues
         self._total_frames = 0
         self.last_frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
-        self._last_raw_rms = 0.0
-        self._last_vad_rms = 0.0
 
         # Enable macOS Voice Isolation if requested
         if os.environ.get("VOICE_ISOLATION", "0") == "1":
@@ -845,7 +843,7 @@ class Ear:
                         log.debug(
                             f"[Ear] 🔎 VAD score={score:.3f} threshold={VAD_THRESHOLD:.2f} "
                             f"started={started} silence={silence_elapsed:.2f}s "
-                            f"raw_rms={self._last_raw_rms:.4f} vad_rms={self._last_vad_rms:.4f} "
+                            f"rms={self.last_rms:.4f} "
                             f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
                         )
                     except Exception:
