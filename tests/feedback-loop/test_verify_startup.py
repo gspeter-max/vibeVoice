@@ -142,3 +142,130 @@ def test_print_last_few_lines_of_error_log_when_read_fails(tmp_path):
             output = mock_print.call_args[0][0]
             assert "LOG DUMP FAILED: Could not read" in output
             assert "Permission denied" in output
+
+
+# -----------------------------------------------------------------------------
+# Tests for Task 4: start_main_application_in_background
+# -----------------------------------------------------------------------------
+
+def test_start_main_application_in_background_creates_process_group():
+    """
+    Ensures start_main_application_in_background sets the correct environment variables and calls Popen with setsid.
+    """
+    import verify_startup
+    
+    with patch('subprocess.Popen') as mock_popen:
+        with patch('os.makedirs'):
+            with patch('builtins.open', MagicMock()):
+                verify_startup.start_main_application_in_background()
+                
+                mock_popen.assert_called_once()
+                args, kwargs = mock_popen.call_args
+                
+                assert kwargs['env']['RECORDING_MODE'] == "silence_streaming"
+                assert kwargs['env']['STREAMING_TELEMETRY_ENABLED'] == "0"
+                assert kwargs['preexec_fn'] == os.setsid
+
+def test_start_main_application_in_background_handles_os_error():
+    """
+    Ensures that if os.makedirs throws an OSError, it raises properly.
+    """
+    import verify_startup
+    
+    with patch('os.makedirs', side_effect=OSError("Disk full")):
+        with pytest.raises(OSError):
+            verify_startup.start_main_application_in_background()
+
+
+# -----------------------------------------------------------------------------
+# Tests for Task 5: Check 1 & Check 2 (Brain PID and Socket)
+# -----------------------------------------------------------------------------
+
+def test_check_if_brain_program_is_running_from_file_avoids_stale_files(tmp_path):
+    """
+    Ensures check_brain_pid reads the integer and checks if the process is alive.
+    If the process is dead, it should keep waiting and eventually return False.
+    """
+    import verify_startup
+    
+    pid_file = tmp_path / "test-brain.pid"
+    pid_file.write_text("999999\n")
+    
+    # Mock no main app crash
+    verify_startup.main_app_process = None
+    
+    with patch('os.kill') as mock_kill:
+        # Mock os.kill to raise ProcessLookupError, meaning process is dead
+        mock_kill.side_effect = ProcessLookupError
+        
+        # Test should fail because the process is not alive, even though file exists
+        result = verify_startup.check_if_brain_program_is_running_from_file(timeout_seconds=0.1, pid_path=str(pid_file))
+        assert result == False
+
+def test_check_if_brain_program_is_running_fails_fast_on_main_crash():
+    """
+    Ensures that if the main application process crashes unexpectedly, it returns False immediately.
+    """
+    import verify_startup
+    
+    mock_process = MagicMock()
+    mock_process.poll.return_value = 1 # Not None means it crashed
+    verify_startup.main_app_process = mock_process
+    
+    result = verify_startup.check_if_brain_program_is_running_from_file(timeout_seconds=10)
+    assert result == False
+
+def test_check_if_brain_program_is_ready_to_receive_data_timeout():
+    """
+    Ensures it times out correctly when the socket is not found.
+    """
+    import verify_startup
+    
+    verify_startup.main_app_process = None
+    
+    with patch('os.path.exists', return_value=False):
+        result = verify_startup.check_if_brain_program_is_ready_to_receive_data(timeout_seconds=0.1)
+        assert result == False
+
+
+# -----------------------------------------------------------------------------
+# Tests for Task 6, 7: HUD Checks and Pings
+# -----------------------------------------------------------------------------
+
+def test_check_if_hud_display_program_is_ready_to_receive_data_refused():
+    """
+    Ensures HUD TCP check returns False if connection is refused constantly.
+    """
+    import verify_startup
+    verify_startup.main_app_process = None
+    
+    with patch('socket.socket') as mock_socket:
+        mock_instance = mock_socket.return_value
+        mock_instance.connect.side_effect = ConnectionRefusedError
+        
+        result = verify_startup.check_if_hud_display_program_is_ready_to_receive_data(timeout_seconds=0.1)
+        assert result == False
+
+def test_send_fake_audio_to_brain_and_see_if_it_survives_success():
+    """
+    Ensures a successful ping returns True.
+    """
+    import verify_startup
+    
+    with patch('socket.socket'):
+        with patch('time.sleep'):
+            with patch('verify_startup.check_if_brain_program_is_running_from_file', return_value=True):
+                result = verify_startup.send_fake_audio_to_brain_and_see_if_it_survives()
+                assert result == True
+
+def test_send_fake_command_to_hud_and_see_if_it_survives_crashes():
+    """
+    Ensures if HUD crashes post-ping, it returns False.
+    """
+    import verify_startup
+    
+    with patch('socket.socket'):
+        with patch('time.sleep'):
+            with patch('verify_startup.check_if_hud_display_program_is_running_from_file', return_value=False):
+                result = verify_startup.send_fake_command_to_hud_and_see_if_it_survives()
+                assert result == False

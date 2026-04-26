@@ -106,7 +106,7 @@ mkdir -p logs
 
 # Start Brain
 log_info "Starting Brain..."
-"$VENV_PYTHON" src/brain.py &
+"$VENV_PYTHON" src/backend/brain.py &
 BRAIN_PID=$!
 echo $BRAIN_PID > /tmp/parakeet-brain.pid
 log_info "Brain PID: $BRAIN_PID | live terminal output"
@@ -136,5 +136,6 @@ log_info "HUD PID: $HUD_PID | log: logs/hud.log"
 sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
-"$VENV_PYTHON" src/ear.py
+"$VENV_PYTHON" src/audio/ear.py
+y
 y
