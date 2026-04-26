@@ -21,7 +21,7 @@ def test_telemetry_structural_audit(tmp_path: Path):
         0,
         0,
         {
-            "previous_chunk_text": "hello",
+            "last_chunk_text": "hello",
             "raw_text": "hello world",
             "cleaned_text_after_dedup": "world",
             "dedup_stats": {
@@ -61,7 +61,7 @@ def test_telemetry_structural_audit(tmp_path: Path):
     chunk_summary = chunk["summary"]
 
     critical_keys = [
-        "previous_chunk_text",
+        "last_chunk_text",
         "raw_text",
         "cleaned_text_after_dedup",
         "dedup_stats",

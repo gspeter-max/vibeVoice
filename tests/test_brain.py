@@ -114,7 +114,7 @@ def test_handle_connection_skips_too_short_audio():
     mock_paste.assert_not_called()
 
 
-def test_dedupe_with_previous_chunk_removes_repeated_prefix():
+def test_dedupe_with_last_chunk_removes_repeated_prefix():
     cleaned = remove_duplicate_chunk_prefix(
         "I want to see that things are happening fine",
         "things are happening fine and doing H3 grid",
@@ -123,7 +123,7 @@ def test_dedupe_with_previous_chunk_removes_repeated_prefix():
     assert cleaned == "doing H3 grid"
 
 
-def test_handle_audio_chunk_dedupes_against_previous_chunk_text():
+def test_handle_audio_chunk_dedupes_against_last_chunk_text():
     mock_backend = MagicMock()
     del mock_backend.add_audio_chunk_and_get_text
     mock_model = MagicMock()

@@ -463,11 +463,11 @@ def _handle_audio_chunk(
                     
                     with session.lock:
                         rec = session.get_or_create_recording(rec_idx)
-                        prev_text = rec.transcript_parts.get(seq - 1, "")
-                        # Deduplicate the new chunk against the previous context
+                        last_chunk_text = rec.transcript_parts.get(seq - 1, "")
+                        # Deduplicate the new chunk against the last chunk text
                         from streaming_shared_logic import analyze_duplicate_chunk_prefix
-                        analysis = analyze_duplicate_chunk_prefix(prev_text, text)
-                        
+                        analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
+
                         analysis_cleaned_text = analysis.cleaned_text
                         overlap_word_count = analysis.overlap_word_count
                         trim_applied = analysis.trim_applied
@@ -504,7 +504,7 @@ def _handle_audio_chunk(
         {
             "audio_file_path": audio_file_path,
             "decode_seconds": round(elapsed, 2),
-            "previous_chunk_text": prev_text,
+            "last_chunk_text": prev_text,
             "raw_text": text,
             "cleaned_text_after_dedup": analysis_cleaned_text,
             "dedup_stats": {
@@ -733,6 +733,10 @@ def _handle_switch_model(blob: bytes):
             backend_info["model"] = None
             gc.collect()
             backend_info["backend"], backend_info["model"] = load_transcription_engine(new_model)
+            
+            with session_store_lock:
+                session_store.clear()
+                
             log.info("✅ Model switched", model=new_model)
     except Exception as e:
         log.error("❌ Switching failed", error=str(e))

@@ -267,7 +267,7 @@ def test_select_mic_returns_default_device_index_when_choice_is_blank(monkeypatc
     assert select_mic(FakePyAudio()) == 2
 
 
-def test_flush_current_chunk_prepends_previous_overlap_for_nonfinal_chunk():
+def test_flush_current_chunk_prepends_last_chunk_overlap_for_nonfinal_chunk():
     ear = Ear()
     ear.is_recording = True
     ear._current_session_id = "sess"

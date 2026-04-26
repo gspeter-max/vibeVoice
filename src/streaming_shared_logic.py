@@ -69,8 +69,8 @@ class OverlapApplicationResult:
     previous chunk's end with the current chunk's beginning.
     """
     overlapped_audio_bytes: bytes
-    next_pending_overlap_audio_bytes: bytes
-    overlap_seconds_added_from_previous_chunk: float
+    next_chunk_tail_bytes: bytes
+    overlap_seconds_from_last_chunk: float
 
 
 @dataclass(frozen=True)
@@ -115,10 +115,10 @@ def _equalize_energy(overlap_bytes: bytes, current_bytes: bytes) -> bytes:
     return (overlap * gain).clip(-32768, 32767).astype(np.int16).tobytes()
 
 
-def apply_previous_chunk_overlap(
+def apply_last_chunk_overlap(
     *,
     current_chunk_audio_bytes: bytes,
-    previous_pending_overlap_audio_bytes: bytes,
+    last_chunk_tail_bytes: bytes,
     overlap_audio_byte_count: int,
     silence_audio_byte_count: int = 0,
     sample_rate: int,
@@ -138,15 +138,15 @@ def apply_previous_chunk_overlap(
     if stop_session:
         return OverlapApplicationResult(
             overlapped_audio_bytes=current_chunk_audio_bytes,
-            next_pending_overlap_audio_bytes=b"",
-            overlap_seconds_added_from_previous_chunk=0.0,
+            next_chunk_tail_bytes=b"",
+            overlap_seconds_from_last_chunk=0.0,
         )
 
     # Equalize the energy of the overlap to match the new audio before joining
     equalized_overlap = _equalize_energy(
-        previous_pending_overlap_audio_bytes, current_chunk_audio_bytes
+        last_chunk_tail_bytes, current_chunk_audio_bytes
     )
-
+ 
     # Join the equalized bit from last time to the start of the new audio.
     overlapped_audio_bytes = equalized_overlap + current_chunk_audio_bytes
     
@@ -162,17 +162,17 @@ def apply_previous_chunk_overlap(
         speech_end = len(current_chunk_audio_bytes) - silence_audio_byte_count
         speech_start = max(0, speech_end - overlap_audio_byte_count)
         
-        next_pending_overlap_audio_bytes = current_chunk_audio_bytes[speech_start:speech_end]
+        next_chunk_tail_bytes = current_chunk_audio_bytes[speech_start:speech_end]
     else:
-        next_pending_overlap_audio_bytes = b""
+        next_chunk_tail_bytes = b""
 
     # Calculate how many seconds of audio we added from the previous chunk.
-    overlap_seconds_added_from_previous_chunk = len(previous_pending_overlap_audio_bytes) / 2.0 / sample_rate
+    overlap_seconds_from_last_chunk = len(last_chunk_tail_bytes) / 2.0 / sample_rate
     
     return OverlapApplicationResult(
         overlapped_audio_bytes=overlapped_audio_bytes,
-        next_pending_overlap_audio_bytes=next_pending_overlap_audio_bytes,
-        overlap_seconds_added_from_previous_chunk=overlap_seconds_added_from_previous_chunk,
+        next_chunk_tail_bytes=next_chunk_tail_bytes,
+        overlap_seconds_from_last_chunk=overlap_seconds_from_last_chunk,
     )
 
 
@@ -323,7 +323,7 @@ def combined_overlap_score(
 
 
 def analyze_duplicate_chunk_prefix(
-    previous_chunk_text: str,
+    last_chunk_text: str,
     current_chunk_text: str,
     *,
     max_overlap_words: int = 15,
@@ -347,10 +347,10 @@ def analyze_duplicate_chunk_prefix(
         skipped_because_result_too_small=False,
     )
 
-    if not previous_chunk_text or not current_chunk_text:
+    if not last_chunk_text or not current_chunk_text:
         return result
 
-    prev_original, prev_normalized = build_original_words_and_overlap_matching_words(previous_chunk_text)
+    prev_original, prev_normalized = build_original_words_and_overlap_matching_words(last_chunk_text)
     curr_original, curr_normalized = build_original_words_and_overlap_matching_words(current_chunk_text)
 
     largest_possible_overlap = min(
@@ -390,7 +390,7 @@ def analyze_duplicate_chunk_prefix(
 
 
 def remove_duplicate_chunk_prefix(
-    previous_chunk_text: str,
+    last_chunk_text: str,
     current_chunk_text: str,
     *,
     max_overlap_words: int = 15,
@@ -411,7 +411,7 @@ def remove_duplicate_chunk_prefix(
     5. If a match is found, return the new text without those words.
     """
     analysis = analyze_duplicate_chunk_prefix(
-        previous_chunk_text,
+        last_chunk_text,
         current_chunk_text,
         max_overlap_words=max_overlap_words,
     )
@@ -420,7 +420,7 @@ def remove_duplicate_chunk_prefix(
             "[Dedup] trimmed overlap",
             removed_count=analysis.overlap_word_count,
             score=round(analysis.combined_score, 4),
-            previous_words=len(split_text_into_comparable_words(previous_chunk_text)),
+            last_chunk_words=len(split_text_into_comparable_words(last_chunk_text)),
             current_words=len(split_text_into_comparable_words(current_chunk_text)),
             result_words=len(split_text_into_comparable_words(analysis.cleaned_text)),
         )
