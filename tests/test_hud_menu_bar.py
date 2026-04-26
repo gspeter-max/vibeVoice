@@ -1,4 +1,4 @@
-import hud
+import src.ui.hud as hud
 
 
 def test_menu_bar_waveform_layout_centers_bars():

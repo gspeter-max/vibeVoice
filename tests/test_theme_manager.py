@@ -1,7 +1,7 @@
 import pytest
 from PySide6.QtGui import QColor
-from theme_manager import ThemeManager, THEME_ORIGINAL
-import hud
+from src.ui.theme_manager import ThemeManager, THEME_ORIGINAL
+import src.ui.hud as hud
 
 
 def test_theme_manager_initialization():

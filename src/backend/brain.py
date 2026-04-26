@@ -259,7 +259,7 @@ def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
         # For stateful engines, the engine object also acts as the model state
         return engine, engine
         
-    import src.backend.backend_parakeet as backend_parakeet as backend
+    import src.backend.backend_parakeet as backend
     return backend, backend.load_model(model_name)
 
 

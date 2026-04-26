@@ -20,7 +20,7 @@ kill_pid_file_process() {
 
 kill_hud_processes() {
     lsof -ti :57234 | xargs kill -9 2>/dev/null || true
-    pkill -f "src/hud.py" 2>/dev/null || true
+    pkill -f "src/ui/hud.py" 2>/dev/null || true
 }
 
 cleanup() {
@@ -129,7 +129,7 @@ echo -e "\n\n  ✅ Brain is Online!\n══════════════�
 # Start HUD
 log_info "Starting HUD..."
 kill_hud_processes
-"$VENV_PYTHON" src/hud.py > logs/hud.log 2>&1 &
+"$VENV_PYTHON" src/ui/hud.py > logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID > /tmp/parakeet-hud.pid
 log_info "HUD PID: $HUD_PID | log: logs/hud.log"
@@ -137,3 +137,4 @@ sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
 "$VENV_PYTHON" src/ear.py
+y

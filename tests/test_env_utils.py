@@ -1,7 +1,7 @@
 import os
 import pytest
 from unittest.mock import patch
-from src.env_utils import get_integer_from_environment, get_float_from_environment
+from src.utils.env_utils import get_integer_from_environment, get_float_from_environment
 
 def test_get_integer_from_environment_returns_fallback_when_missing():
     """Verifies that a missing environment variable returns the provided default integer."""

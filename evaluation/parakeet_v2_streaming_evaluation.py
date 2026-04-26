@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from src import log 
 import numpy as np
-from src.streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
     DEFAULT_OVERLAP_SECONDS,
@@ -37,7 +37,7 @@ DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run
 
 
 def load_evaluation_model():
-    from src.backend_parakeet import load_model
+    from src.backend.backend_parakeet import load_model
 
     return load_model(PARAKEET_V2_MODEL_NAME)
 
@@ -240,7 +240,7 @@ def transcribe_one_audio_chunk(
     parakeet_v2_model,
     chunk_audio_bytes: bytes,
 ) -> str:
-    from src.backend_parakeet import transcribe
+    from src.backend.backend_parakeet import transcribe
 
     chunk_audio_array = np.frombuffer(chunk_audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     return transcribe(parakeet_v2_model, chunk_audio_array).strip()
@@ -384,7 +384,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
     frame_samples: int = DEFAULT_FRAME_SAMPLES,
     minimum_chunk_age_before_silence_split_seconds: float = DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
 ) -> dict[str, Any]:
-    from src.vad_segmenter import SileroUtteranceGate, SileroVAD
+    from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
     log.info(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...")
     parakeet_v2_model = load_evaluation_model()

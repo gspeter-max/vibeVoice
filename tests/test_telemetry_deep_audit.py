@@ -1,7 +1,7 @@
 import json
 import pytest
 from pathlib import Path
-from streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
 
 
 def test_telemetry_structural_audit(tmp_path: Path):

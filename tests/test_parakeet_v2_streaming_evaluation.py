@@ -2,7 +2,7 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
-from streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
     DEFAULT_OVERLAP_SECONDS,
@@ -381,7 +381,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 
@@ -468,7 +468,7 @@ def test_run_fake_microphone_stream_counts_real_chunk_events_even_if_dedup_remov
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 
@@ -521,7 +521,7 @@ def test_run_fake_microphone_stream_only_splits_when_silence_gate_says_finalize(
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 

@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-import brain
-from streaming_shared_logic import remove_duplicate_chunk_prefix
+import src.backend.brain as brain
+from src.streaming.streaming_shared_logic import remove_duplicate_chunk_prefix
 
 
 class MockConn:
@@ -41,8 +41,8 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     conn = MockConn(sample_audio_bytes)
 
     with (
-        patch("brain.send_hud") as mock_hud,
-        patch("brain.paste_instantly") as mock_paste,
+        patch("src.backend.brain.send_hud") as mock_hud,
+        patch("src.backend.brain.paste_instantly") as mock_paste,
     ):
         brain.handle_connection(conn)
 
@@ -69,7 +69,7 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     conn = MockConn(sample_audio_bytes)
 
-    with patch("brain.send_hud"), patch("brain.paste_instantly") as mock_paste:
+    with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
     mock_backend.transcribe.assert_called_once()
@@ -88,7 +88,7 @@ def test_handle_connection_switch_model_command():
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
     with patch(
-        "brain.load_transcription_engine", return_value=(mock_new_backend, mock_new_model)
+        "src.backend.brain.load_transcription_engine", return_value=(mock_new_backend, mock_new_model)
     ) as mock_load:
         brain.handle_connection(conn)
 
@@ -107,7 +107,7 @@ def test_handle_connection_skips_too_short_audio():
     short_audio = b"\x00\x00" * 1600
     conn = MockConn(short_audio)
 
-    with patch("brain.send_hud"), patch("brain.paste_instantly") as mock_paste:
+    with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
     mock_backend.transcribe.assert_not_called()
@@ -162,9 +162,9 @@ def test_finalize_session_pastes_stitched_text_directly():
     brain.session_store[session_id] = session
 
     with (
-        patch("brain.log.info") as mock_log,
-        patch("brain.send_hud"),
-        patch("brain.paste_instantly") as mock_paste,
+        patch("src.backend.brain.log.info") as mock_log,
+        patch("src.backend.brain.send_hud"),
+        patch("src.backend.brain.paste_instantly") as mock_paste,
     ):
         brain._finalize_recording_if_ready(session_id, 0)
 

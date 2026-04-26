@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
 
 
 def test_recorder_writes_one_session_file_atomically(tmp_path: Path):

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-import brain
+import src.backend.brain as brain
 
 
 class MockConn:
@@ -35,9 +35,9 @@ def test_socket_communication(sample_audio_bytes):
 
     mock_backend.transcribe.return_value = "integrated test result"
 
-    with patch("brain.keyboard", MagicMock()), \
-         patch("brain.paste_instantly") as mock_paste, \
-         patch("brain.send_hud") as mock_hud:
+    with patch("src.backend.brain.keyboard", MagicMock()), \
+         patch("src.backend.brain.paste_instantly") as mock_paste, \
+         patch("src.backend.brain.send_hud") as mock_hud:
         brain.handle_connection(MockConn(chunk))
         mock_backend.transcribe.assert_called_once()
         mock_paste.assert_not_called()

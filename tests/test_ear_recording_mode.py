@@ -25,7 +25,7 @@ class MockPyAudio:
 
 sys.modules['pyaudio'] = MockPyAudio()
 
-import src.ear as ear_module
+import src.audio.ear as ear_module
 
 def test_nemotron_not_in_models_when_no_streaming():
     """
@@ -50,7 +50,7 @@ def test_nemotron_in_models_when_silence_streaming():
         assert len(models) == 5
 
 @patch('sys.stdin.fileno', return_value=0)
-@patch('src.ear.send_switch_command')
+@patch('src.audio.ear.send_switch_command')
 def test_terminal_menu_ignores_nemotron_key_in_no_streaming(mock_send, mock_fileno):
     """
     Verifies that pressing '5' in the terminal menu does absolutely nothing
@@ -75,7 +75,7 @@ def test_terminal_menu_ignores_nemotron_key_in_no_streaming(mock_send, mock_file
             mock_send.assert_not_called()
 
 @patch('sys.stdin.fileno', return_value=0)
-@patch('src.ear.send_switch_command')
+@patch('src.audio.ear.send_switch_command')
 def test_terminal_menu_accepts_nemotron_key_in_streaming(mock_send, mock_fileno):
     """
     Verifies that pressing '5' works when in streaming mode.

@@ -1,4 +1,4 @@
-from streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     apply_last_chunk_overlap,
     analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,

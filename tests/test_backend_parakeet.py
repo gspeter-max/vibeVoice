@@ -1,6 +1,6 @@
 import pytest
 
-import backend_parakeet
+import src.backend.backend_parakeet as backend_parakeet
 
 
 def test_load_model_raises_clear_error_when_sherpa_onnx_is_missing(monkeypatch):
