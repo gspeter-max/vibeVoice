@@ -21,8 +21,8 @@ import termios
 import tty
 import numpy as np
 
-from src.env_utils import get_float_from_environment
-from streaming_shared_logic import (
+from src.utils.env_utils import get_float_from_environment
+from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
     DEFAULT_OVERLAP_SECONDS,
@@ -32,7 +32,7 @@ from streaming_shared_logic import (
     apply_last_chunk_overlap,
     should_split_chunk_after_silence,
 )
-from vad_segmenter import SileroVAD, SileroUtteranceGate
+from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
 from src import log
 try:
     from pynput import keyboard, mouse

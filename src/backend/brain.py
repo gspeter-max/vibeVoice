@@ -16,12 +16,12 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import numpy as np
-from streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     analyze_duplicate_chunk_prefix,
     remove_duplicate_chunk_prefix,
 )
-from streaming_session_telemetry import StreamingSessionTelemetryRecorder
-from src.env_utils import get_float_from_environment
+from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from src.utils.env_utils import get_float_from_environment
 from src import log
 from rich.console import Console
 from rich.table import Table
@@ -254,12 +254,12 @@ def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
     
     # Check if the requested model is a Nemotron model
     if "nemotron" in model_name.lower():
-        from streaming.nemotron import NemotronStreamingEngine
+        from src.streaming.nemotron import NemotronStreamingEngine
         engine = NemotronStreamingEngine()
         # For stateful engines, the engine object also acts as the model state
         return engine, engine
         
-    import backend_parakeet as backend
+    import src.backend.backend_parakeet as backend_parakeet as backend
     return backend, backend.load_model(model_name)
 
 
@@ -465,7 +465,7 @@ def _handle_audio_chunk(
                         rec = session.get_or_create_recording(rec_idx)
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
                         # Deduplicate the new chunk against the last chunk text
-                        from streaming_shared_logic import analyze_duplicate_chunk_prefix
+                        from src.streaming.streaming_shared_logic import analyze_duplicate_chunk_prefix
                         analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
 
                         analysis_cleaned_text = analysis.cleaned_text

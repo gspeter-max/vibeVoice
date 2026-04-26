@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import numpy as np
 from src import log
-from src.env_utils import get_integer_from_environment
+from src.utils.env_utils import get_integer_from_environment
 
 try:
     import sherpa_onnx
