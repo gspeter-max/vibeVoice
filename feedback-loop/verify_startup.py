@@ -53,6 +53,37 @@ def stop_safely_when_user_presses_control_c(signal_number, frame):
     print("\n[Interrupt] Caught interrupt signal, starting cleanup...")
     stop_all_programs_and_exit_script(1)
 
+def print_last_few_lines_of_error_log(file_path: str, lines_to_read: int = 30):
+    """
+    Reads the last few lines of a log file and prints them.
+    This helps the developer see exactly why a component failed without searching manually.
+    
+    Step-by-step logic:
+    1. Check if the log file exists. If not, print a failure message.
+    2. Open the file and read all the lines inside it.
+    3. Take only the last few lines (by default, 30 lines).
+    4. Print these lines clearly with borders so they are easy to read.
+    """
+    if not os.path.exists(file_path):
+        print(f"\n--- LOG DUMP FAILED: {file_path} not found ---")
+        return
+        
+    try:
+        # Open the file in read mode
+        with open(file_path, "r", encoding="utf-8") as file_object:
+            all_lines = file_object.readlines()
+            
+            # Get the last N lines
+            last_lines = all_lines[-lines_to_read:]
+            
+            print(f"\n--- START LOG DUMP: {file_path} ---")
+            for line in last_lines:
+                # Remove extra blank lines at the end of each log line
+                print(line.rstrip())
+            print(f"--- END LOG DUMP: {file_path} ---\n")
+    except Exception as error:
+        print(f"\n--- LOG DUMP FAILED: Could not read {file_path}. Error: {error} ---")
+
 # Tell the system to call our safe stop function when it receives an interrupt or termination signal
 signal.signal(signal.SIGINT, stop_safely_when_user_presses_control_c)
 signal.signal(signal.SIGTERM, stop_safely_when_user_presses_control_c)
