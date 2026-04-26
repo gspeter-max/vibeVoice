@@ -29,7 +29,7 @@ from streaming_shared_logic import (
     DEFAULT_SILENCE_TIMEOUT_SECONDS,
     DEFAULT_VAD_ENERGY_THRESHOLD,
     DEFAULT_VAD_SCORE_THRESHOLD,
-    apply_previous_chunk_overlap,
+    apply_last_chunk_overlap,
     should_split_chunk_after_silence,
 )
 from vad_segmenter import SileroVAD, SileroUtteranceGate
@@ -109,9 +109,6 @@ VAD_THRESHOLD   = get_float_from_environment("VAD_THRESHOLD", DEFAULT_VAD_SCORE_
 VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = get_float_from_environment(
     "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
     DEFAULT_SILENCE_TIMEOUT_SECONDS,
-)
-VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION = get_float_from_environment(
-    "VAD_SENSITIVITY_BOOST_FOR_SPEECH_DETECTION", 1.0
 )
 VAD_ENERGY_THRESHOLD = get_float_from_environment("VAD_ENERGY_THRESHOLD", DEFAULT_VAD_ENERGY_THRESHOLD)
 VAD_ENERGY_RATIO = get_float_from_environment("VAD_ENERGY_RATIO", DEFAULT_ENERGY_RATIO)
@@ -397,7 +394,7 @@ class Ear:
         self._chunk_started_at = 0.0
         self.current_model = "parakeet-tdt-0.6b-v3" # Default model
         self._chunk_overlap_audio_bytes = int(RATE * 2 * OVERLAP_SECONDS)
-        self._pending_chunk_overlap_audio = b""
+        self._last_chunk_tail_bytes = b""
 
         # ★ VAD: buffer full utterances locally before sending to Brain
         try:
@@ -658,15 +655,15 @@ class Ear:
         and accurate flow of text across all chunks in a session.
         """
         silence_audio_byte_count = int(silence_seconds * RATE * 2)
-        overlap_application_result = apply_previous_chunk_overlap(
+        overlap_application_result = apply_last_chunk_overlap(
             current_chunk_audio_bytes=audio_chunk_for_brain,
-            previous_pending_overlap_audio_bytes=self._pending_chunk_overlap_audio,
+            last_chunk_tail_bytes=self._last_chunk_tail_bytes,
             overlap_audio_byte_count=self._chunk_overlap_audio_bytes,
             silence_audio_byte_count=silence_audio_byte_count,
             sample_rate=RATE,
             stop_session=stop_session,
         )
-        self._pending_chunk_overlap_audio = overlap_application_result.next_pending_overlap_audio_bytes
+        self._last_chunk_tail_bytes = overlap_application_result.next_chunk_tail_bytes
         return overlap_application_result.overlapped_audio_bytes
 
     def _flush_current_chunk(self, *, stop_session: bool) -> bool:
@@ -697,7 +694,7 @@ class Ear:
         utterance = self._utterance_gate.flush()
         if not utterance:
             if stop_session:
-                self._pending_chunk_overlap_audio = b""
+                self._last_chunk_tail_bytes = b""
                 log.info("[Ear] 🔇 No speech captured; stopping recording")
                 # Always commit so the Brain closes out this recording slot
                 self._commit_recording_session()
@@ -706,13 +703,13 @@ class Ear:
             return False
 
         utterance_for_brain = self._boost_pcm16_bytes(utterance)
-        previous_pending_overlap_audio = self._pending_chunk_overlap_audio
+        last_chunk_tail_bytes = self._last_chunk_tail_bytes
         utterance_for_brain = self._prepend_pending_chunk_overlap(
             utterance_for_brain,
             stop_session=stop_session,
             silence_seconds=silence_elapsed if not stop_session else 0.0
         )
-        overlap_seconds_added = len(previous_pending_overlap_audio) / 2.0 / RATE
+        overlap_seconds_added = len(last_chunk_tail_bytes) / 2.0 / RATE
         chunk_age_seconds = max(0.0, now - self._chunk_started_at)
 
         duration = (total * CHUNK) / RATE
@@ -1002,7 +999,7 @@ class Ear:
             self._vad_no_speech_warned = False
             self._recording_level_log_time = 0.0
 
-        self._pending_chunk_overlap_audio = b""
+        self._last_chunk_tail_bytes = b""
         if self._is_silence_streaming_mode():
             self._utterance_gate.reset()
             self._begin_recording_session()
