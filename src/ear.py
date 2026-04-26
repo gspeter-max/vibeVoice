@@ -600,31 +600,6 @@ class Ear:
         boosted = (audio * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
         return boosted.tobytes()
 
-    def _prepare_vad_chunk(self, pcm16_bytes: bytes) -> bytes:
-        """
-        Conditions raw audio data specifically for the VAD engine.
-        It applies a separate sensitivity boost to the audio before
-        passing it to the Voice Activity Detector. This allows us to
-        fine-tune how easily the system 'wakes up' to speech without
-        affecting the actual audio quality that is sent to the Brain
-        for transcription, providing a more responsive user experience.
-        """
-        if not pcm16_bytes:
-            return pcm16_bytes
-        if len(pcm16_bytes) % 2:
-            pcm16_bytes = pcm16_bytes[:-1]
-
-        self._last_raw_rms = get_rms(pcm16_bytes)
-        if self.vad_sensitivity_boost == 1.0:
-            self._last_vad_rms = self._last_raw_rms
-            return pcm16_bytes
-
-        audio = np.frombuffer(pcm16_bytes, dtype=np.int16).astype(np.float32)
-        conditioned = (audio * self.vad_sensitivity_boost).clip(-32768, 32767).astype(np.int16)
-        conditioned_bytes = conditioned.tobytes()
-        self._last_vad_rms = get_rms(conditioned_bytes)
-        return conditioned_bytes
-
     def _reset_chunk_tracking(self):
         """
         Resets internal flags and counters for a new audio chunk.
