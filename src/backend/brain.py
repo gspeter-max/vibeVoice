@@ -246,20 +246,16 @@ def _is_no_streaming_mode() -> bool:
 
 def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
     """
-    Loads the requested AI model into memory.
-    Supports standard backends and the new Nemotron stateful engine.
+    Loads the requested AI model into memory wrapped in our clean TranscriptionEngine interface.
     """
     log.info(f"[Brain] Loading engine: {model_name}")
     
-    # Check if the requested model is a Nemotron model
     if "nemotron" in model_name.lower():
-        from src.streaming.nemotron import NemotronStreamingEngine
-        engine = NemotronStreamingEngine()
-        # For stateful engines, the engine object also acts as the model state
-        return engine, engine
+        from src.engines.nemotron import NemotronEngine
+        return NemotronEngine()
         
-    import src.backend.backend_parakeet as backend
-    return backend, backend.load_speech_recognition_model_from_disk(model_name)
+    from src.engines.parakeet import ParakeetEngine
+    return ParakeetEngine(model_name)
 
 
 def send_hud(cmd: str):
@@ -296,8 +292,7 @@ def _get_or_create_session(session_id: str) -> SessionState:
             return session
 
         with backend_lock:
-            backend = backend_info["backend"]
-            model = backend_info["model"]
+            engine = backend_info.get("engine")
 
         telemetry_recorder = None
         if STREAMING_TELEMETRY_ENABLED:
@@ -308,7 +303,7 @@ def _get_or_create_session(session_id: str) -> SessionState:
             )
 
         session = SessionState(
-            backend=backend, model=model, telemetry_recorder=telemetry_recorder
+            engine=engine, telemetry_recorder=telemetry_recorder
         )
         session_store[session_id] = session
         return session
@@ -580,10 +575,10 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
     situations where real-time streaming feedback is not required by the user.
     """
     with backend_lock:
-        backend, model = backend_info["backend"], backend_info["model"]
+        engine = backend_info.get("engine")
 
-    if not backend or not model:
-        log.info("[Brain] ⚠️  No model loaded — skipping")
+    if not engine:
+        log.info("[Brain] ⚠️  No engine loaded — skipping")
         send_hud("hide")
         return
 
@@ -597,7 +592,7 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
 
         log.info(f"[Brain] 🎙️  Final utterance decode")
         send_hud("process")
-        final_text = backend.convert_audio_to_text(model, audio).strip()
+        final_text = engine.transcribe_chunk(audio)
         if not final_text:
             log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
@@ -729,9 +724,9 @@ def _handle_switch_model(blob: bytes):
         with backend_lock:
             import gc
 
-            backend_info["model"] = None
+            backend_info["engine"] = None
             gc.collect()
-            backend_info["backend"], backend_info["model"] = load_transcription_engine(new_model)
+            backend_info["engine"] = load_transcription_engine(new_model)
             
             with session_store_lock:
                 session_store.clear()
@@ -785,12 +780,10 @@ def start_server():
     """
     Initializes the Brain server and begins listening for incoming connections.
     """
-    backend_info["backend"], backend_info["model"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
+    backend_info["engine"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
-        backend_info["backend"].convert_audio_to_text(
-            backend_info["model"], np.zeros(8000, dtype=np.float32)
-        )
+        backend_info["engine"].transcribe_chunk(np.zeros(8000, dtype=np.float32))
     except Exception:
         pass
     log.info("[Brain] Warm-up done ✓")
