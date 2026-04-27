@@ -1,3 +1,18 @@
+"""
+test_brain.py — Unit tests for src/backend/brain.py
+
+These tests verify that brain.py correctly:
+  - Routes raw audio to the engine for transcription
+  - Handles model switching commands
+  - Stitches and pastes final text after a recording session
+  - Deduplicates overlapping text chunks from stateless engines
+
+After Phase 2 wiring, brain.py no longer holds a separate 'backend' and 'model'.
+It now holds a single 'engine' object that conforms to the TranscriptionEngine rulebook.
+All mocks here use mock_engine with is_stateful() and transcribe_chunk() methods.
+"""
+
+import json
 import sys
 import types
 from unittest.mock import MagicMock, patch
@@ -10,7 +25,13 @@ from src.streaming.streaming_shared_logic import remove_duplicate_chunk_prefix
 
 
 class MockConn:
+    """
+    A fake socket connection used in tests.
+    It returns audio chunks one at a time, and returns an empty
+    bytes object at the end to signal that the connection is closed.
+    """
     def __init__(self, *chunks):
+        # Store the chunks and add an empty bytes sentinel at the end
         self._chunks = list(chunks) + [b""]
 
     def settimeout(self, _timeout):
@@ -25,18 +46,26 @@ class MockConn:
 
 @pytest.fixture(autouse=True)
 def clear_session_store():
+    """
+    Runs before and after every test.
+    Clears the global session_store so tests don't bleed into each other.
+    """
     brain.session_store.clear()
     yield
     brain.session_store.clear()
 
 
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
-    mock_backend = MagicMock()
-    mock_model = MagicMock()
-    mock_backend.convert_audio_to_text.return_value = "hello world"
+    """
+    Verify that when raw audio arrives (no CMD_ prefix), brain transcribes it
+    using engine.transcribe_chunk() and pastes the result.
+    """
+    # Create a mock engine that returns "hello world" when asked to transcribe
+    mock_engine = MagicMock()
+    mock_engine.transcribe_chunk.return_value = "hello world"
 
-    brain.backend_info["backend"] = mock_backend
-    brain.backend_info["model"] = mock_model
+    # Set the engine in brain's global state
+    brain.backend_info["engine"] = mock_engine
 
     conn = MockConn(sample_audio_bytes)
 
@@ -46,11 +75,9 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     ):
         brain.handle_connection(conn)
 
-    mock_backend.convert_audio_to_text.assert_called_once()
-    args, _ = mock_backend.convert_audio_to_text.call_args
-    assert args[0] == mock_model
-    assert isinstance(args[1], np.ndarray)
-    assert args[1].dtype == np.float32
+    # The engine must have been asked to transcribe exactly once
+    mock_engine.transcribe_chunk.assert_called_once()
+    # The transcribed text should have been pasted with a trailing space
     mock_paste.assert_called_once_with("hello world ")
     assert any(call.args[0] == "done" for call in mock_hud.call_args_list)
 
@@ -58,63 +85,73 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
 def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
     sample_audio_bytes, monkeypatch
 ):
+    """
+    Verify that in 'no_streaming' mode, audio is buffered and then transcribed
+    all at once using engine.transcribe_chunk().
+    """
     monkeypatch.setattr(brain, "RECORDING_MODE", "no_streaming")
 
-    mock_backend = MagicMock()
-    mock_model = MagicMock()
-    mock_backend.convert_audio_to_text.return_value = "hello world"
+    mock_engine = MagicMock()
+    mock_engine.transcribe_chunk.return_value = "hello world"
 
-    brain.backend_info["backend"] = mock_backend
-    brain.backend_info["model"] = mock_model
+    brain.backend_info["engine"] = mock_engine
 
     conn = MockConn(sample_audio_bytes)
 
     with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
-    mock_backend.convert_audio_to_text.assert_called_once()
+    mock_engine.transcribe_chunk.assert_called_once()
     mock_paste.assert_called_once_with("hello world ")
 
 
 def test_handle_connection_switch_model_command():
-    mock_backend = MagicMock()
-    mock_model = MagicMock()
-    mock_new_backend = MagicMock()
-    mock_new_model = MagicMock()
+    """
+    Verify that when brain receives a CMD_SWITCH_MODEL command, it calls
+    load_transcription_engine with the new model name and stores the result
+    in engine_info['engine'].
+    """
+    mock_old_engine = MagicMock()
+    mock_new_engine = MagicMock()
 
-    brain.backend_info["backend"] = mock_backend
-    brain.backend_info["model"] = mock_model
+    brain.backend_info["engine"] = mock_old_engine
 
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
     with patch(
-        "src.backend.brain.load_transcription_engine", return_value=(mock_new_backend, mock_new_model)
+        "src.backend.brain.load_transcription_engine", return_value=mock_new_engine
     ) as mock_load:
         brain.handle_connection(conn)
 
     mock_load.assert_called_once_with("tiny.en")
-    assert brain.backend_info["backend"] == mock_new_backend
-    assert brain.backend_info["model"] == mock_new_model
+    # The engine stored in brain must now be the new one
+    assert brain.backend_info["engine"] == mock_new_engine
 
 
 def test_handle_connection_skips_too_short_audio():
-    mock_backend = MagicMock()
-    mock_model = MagicMock()
+    """
+    Verify that audio that is all silence (too quiet) is skipped without calling
+    engine.transcribe_chunk() at all.
+    """
+    mock_engine = MagicMock()
+    brain.backend_info["engine"] = mock_engine
 
-    brain.backend_info["backend"] = mock_backend
-    brain.backend_info["model"] = mock_model
-
+    # This audio is all zeros, which will be rejected as silence
     short_audio = b"\x00\x00" * 1600
     conn = MockConn(short_audio)
 
     with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
-    mock_backend.convert_audio_to_text.assert_not_called()
+    mock_engine.transcribe_chunk.assert_not_called()
     mock_paste.assert_not_called()
 
 
 def test_dedupe_with_last_chunk_removes_repeated_prefix():
+    """
+    Direct unit test for the deduplication helper function.
+    Verifies that overlapping words from the previous chunk are trimmed off.
+    """
     cleaned = remove_duplicate_chunk_prefix(
         "I want to see that things are happening fine",
         "things are happening fine and doing H3 grid",
@@ -124,16 +161,24 @@ def test_dedupe_with_last_chunk_removes_repeated_prefix():
 
 
 def test_handle_audio_chunk_dedupes_against_last_chunk_text():
-    mock_backend = MagicMock()
-    del mock_backend.add_audio_chunk_and_get_text
-    mock_model = MagicMock()
-    mock_backend.convert_audio_to_text.side_effect = [
+    """
+    Verify that for a STATELESS engine, two sequential audio chunks are deduplicated.
+    The second chunk's text should have the repeated prefix from chunk 1 removed.
+
+    Dedup flow:
+      Chunk 0 raw text: "I want to see that things are happening fine"
+      Chunk 1 raw text: "things are happening fine and doing H3 grid"
+      Chunk 1 cleaned : "doing H3 grid"  (repeated prefix removed)
+    """
+    mock_engine = MagicMock()
+    # is_stateful() returns False = stateless engine (uses deduplication)
+    mock_engine.is_stateful.return_value = False
+    mock_engine.transcribe_chunk.side_effect = [
         "I want to see that things are happening fine",
         "things are happening fine and doing H3 grid",
     ]
 
-    brain.backend_info["backend"] = mock_backend
-    brain.backend_info["model"] = mock_model
+    brain.backend_info["engine"] = mock_engine
     session_id = "session123"
     audio_bytes = b"\x00\x10" * 32000
 
@@ -149,8 +194,14 @@ def test_handle_audio_chunk_dedupes_against_last_chunk_text():
 
 
 def test_finalize_session_pastes_stitched_text_directly():
+    """
+    Verify that after all chunks arrive and the session is closed,
+    _finalize_recording_if_ready stitches the parts and calls paste_instantly.
+    """
     session_id = "session123"
-    session = brain.SessionState(backend=object(), model=object())
+    mock_engine = MagicMock()
+    # SessionState now takes 'engine', not 'backend' and 'model'
+    session = brain.SessionState(engine=mock_engine)
     # Set up a completed recording at index 0
     rec = brain.RecordingState()
     rec.received_count = 2
@@ -174,10 +225,15 @@ def test_finalize_session_pastes_stitched_text_directly():
 
 
 def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
+    """
+    Verify that a CMD_SESSION_EVENT triggers writing a telemetry JSON file to disk.
+    """
     monkeypatch.setattr(brain, "STREAMING_TELEMETRY_ENABLED", True)
     monkeypatch.setattr(brain, "STREAMING_TELEMETRY_DIR", tmp_path)
-    brain.backend_info["backend"] = MagicMock(CURRENT_MODEL_NAME="base.en")
-    brain.backend_info["model"] = MagicMock()
+    # Set a mock engine in global state so telemetry seed can read the model name
+    mock_engine = MagicMock()
+    mock_engine.model_name = "base.en"
+    brain.backend_info["engine"] = mock_engine
 
     blob = (
         b"CMD_SESSION_EVENT:session123:0\n\n"

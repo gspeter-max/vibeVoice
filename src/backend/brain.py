@@ -165,8 +165,7 @@ def _telemetry_recorder_for_session(
         )
         if session is None:
             session = SessionState(
-                backend=backend_info["backend"],
-                model=backend_info["model"],
+                engine=backend_info.get("engine"),
                 telemetry_recorder=recorder,
             )
             session_store[session_id] = session
