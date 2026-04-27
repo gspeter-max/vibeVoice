@@ -389,11 +389,10 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         )
         send_hud("hide")
 
-    # Clear stateful engines now that we are completely finished processing chunks
+    # Clear memory using our clean interface
     with session.lock:
-        if hasattr(session.backend, "clear_internal_memory"):
-            log.info(f"[Brain] 🔄 Clearing engine memory for session {short_id} (Finalized)")
-            session.backend.clear_internal_memory()
+        log.info(f"[Brain] 🔄 Clearing engine memory for session {short_id} (Finalized)")
+        session.engine.clear_internal_memory()
 
 
 # Keep the old name as an alias so any test code referencing it still works during migration
@@ -431,32 +430,26 @@ def _handle_audio_chunk(
 
     if audio is not None:
         try:
-            backend, model = session.backend, session.model
-            if not backend or not model:
-                log.info("[Brain] ⚠️  No model loaded — skipping chunk")
+            engine = session.engine
+            if not engine:
+                log.info("[Brain] ⚠️  No engine loaded — skipping chunk")
             else:
                 t_start = time.perf_counter()
                 
-                # Check if the engine is stateful (supports add_audio_chunk_and_get_text)
-                if hasattr(backend, "add_audio_chunk_and_get_text"):
-                    # Stateful engines return the full cumulative text result
-                    text = backend.add_audio_chunk_and_get_text(audio).strip()
-                    elapsed = time.perf_counter() - t_start
-                    analysis_cleaned_text = text
+                # 1. Transcribe blindly using the Rulebook
+                text = engine.transcribe_chunk(audio)
+                elapsed = time.perf_counter() - t_start
+                
+                with session.lock:
+                    rec = session.get_or_create_recording(rec_idx)
                     
-                    with session.lock:
-                        rec = session.get_or_create_recording(rec_idx)
+                    # 2. Check Rulebook to see how to handle the output
+                    if engine.is_stateful():
                         # For cumulative engines, we store the full text in part 0
                         rec.transcript_parts = {0: text}
-                        rec.stt_time += elapsed
-                        session.stt_time += elapsed
-                else:
-                    # Stateless backends (like Parakeet-TDT) transcribe chunks independently
-                    text = backend.convert_audio_to_text(model, audio).strip()
-                    elapsed = time.perf_counter() - t_start
-                    
-                    with session.lock:
-                        rec = session.get_or_create_recording(rec_idx)
+                        analysis_cleaned_text = text
+                    else:
+                        # Stateless backends transcribe chunks independently
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
                         # Deduplicate the new chunk against the last chunk text
                         from src.streaming.streaming_shared_logic import analyze_duplicate_chunk_prefix
@@ -471,8 +464,9 @@ def _handle_audio_chunk(
                         skipped_because_result_too_small = analysis.skipped_because_result_too_small
                         
                         rec.transcript_parts[seq] = analysis_cleaned_text
-                        rec.stt_time += elapsed
-                        session.stt_time += elapsed
+                        
+                    rec.stt_time += elapsed
+                    session.stt_time += elapsed
                         
                 log.info(
                     f"[Brain] 🎙️  [{session_id[:8]} rec={rec_idx} chunk={seq}] decode took {elapsed:.2f}s"
