@@ -180,15 +180,18 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
             header_text = header_bytes.decode("utf-8").strip()
             parts = header_text.split(":")
             
-            # Parse the JSON payload back into a dictionary
-            payload_dict = json.loads(payload_bytes.decode("utf-8"))
-            
-            return {
-                "command_type": "session_event",
-                "session_id": parts[1],
-                "recording_index": int(parts[2]),
-                "payload": payload_dict
-            }
+            # Parts should be [CMD, SESSION_ID, RECORDING_INDEX]
+            if len(parts) == 3:
+                # Parse the JSON payload back into a dictionary
+                payload_dict = json.loads(payload_bytes.decode("utf-8"))
+                
+                return {
+                    "command_type": "session_event",
+                    "session_id": parts[1],
+                    "recording_index": int(parts[2]),
+                    "payload": payload_dict
+                }
+            return {"command_type": "error", "reason": "bad_session_event_format"}
         except Exception:
             return {"command_type": "error", "reason": "bad_session_event_format"}
 
