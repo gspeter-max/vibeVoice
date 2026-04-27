@@ -52,7 +52,7 @@ STREAMING_TELEMETRY_DIR = Path(
 )
 
 # Global state
-backend_info = {"backend": None, "model": None}
+backend_info = {"engine": None}
 backend_lock = threading.Lock()
 session_store = {}
 session_store_lock = threading.Lock()
@@ -81,8 +81,7 @@ class SessionState:
     stored in the recordings dict keyed by its recording_index integer.
     """
 
-    backend: object
-    model: object
+    engine: object
     # recordings[0] = first button press, recordings[1] = second, …
     recordings: dict = field(default_factory=dict)
     stt_time: float = 0.0
@@ -104,10 +103,10 @@ def _model_name_for_telemetry() -> str | None:
     that every saved telemetry file can clearly show which AI model was used
     to generate the transcriptions during that specific session.
     """
-    model_name = getattr(backend_info.get("backend"), "CURRENT_MODEL_NAME", None)
-    if model_name:
-        return model_name
-    return getattr(backend_info.get("model"), "model_name", None)
+    engine = backend_info.get("engine")
+    if engine is None:
+        return None
+    return getattr(engine, "model_name", "unknown_model")
 
 
 def _telemetry_seed() -> dict:
