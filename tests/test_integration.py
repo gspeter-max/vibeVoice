@@ -33,13 +33,13 @@ def test_socket_communication(sample_audio_bytes):
     # New 3-part header: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
     commit = b"CMD_SESSION_COMMIT:session123:0"
 
-    mock_backend.transcribe.return_value = "integrated test result"
+    mock_backend.convert_audio_to_text.return_value = "integrated test result"
 
     with patch("src.backend.brain.keyboard", MagicMock()), \
          patch("src.backend.brain.paste_instantly") as mock_paste, \
          patch("src.backend.brain.send_hud") as mock_hud:
         brain.handle_connection(MockConn(chunk))
-        mock_backend.transcribe.assert_called_once()
+        mock_backend.convert_audio_to_text.assert_called_once()
         mock_paste.assert_not_called()
 
         brain.handle_connection(MockConn(commit))

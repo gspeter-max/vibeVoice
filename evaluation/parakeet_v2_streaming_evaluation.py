@@ -37,9 +37,9 @@ DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run
 
 
 def load_evaluation_model():
-    from src.backend.backend_parakeet import load_model
+    from src.backend.backend_parakeet import load_speech_recognition_model_from_disk
 
-    return load_model(PARAKEET_V2_MODEL_NAME)
+    return load_speech_recognition_model_from_disk(PARAKEET_V2_MODEL_NAME)
 
 
 def resolve_dataset_config_name_to_load(
@@ -240,10 +240,10 @@ def transcribe_one_audio_chunk(
     parakeet_v2_model,
     chunk_audio_bytes: bytes,
 ) -> str:
-    from src.backend.backend_parakeet import transcribe
+    from src.backend.backend_parakeet import convert_audio_to_text
 
     chunk_audio_array = np.frombuffer(chunk_audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    return transcribe(parakeet_v2_model, chunk_audio_array).strip()
+    return convert_audio_to_text(parakeet_v2_model, chunk_audio_array).strip()
 
 
 def calculate_word_error_rate_for_final_streaming_text(

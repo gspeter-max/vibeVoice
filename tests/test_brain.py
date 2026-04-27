@@ -33,7 +33,7 @@ def clear_session_store():
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
     mock_backend = MagicMock()
     mock_model = MagicMock()
-    mock_backend.transcribe.return_value = "hello world"
+    mock_backend.convert_audio_to_text.return_value = "hello world"
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
@@ -46,8 +46,8 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     ):
         brain.handle_connection(conn)
 
-    mock_backend.transcribe.assert_called_once()
-    args, _ = mock_backend.transcribe.call_args
+    mock_backend.convert_audio_to_text.assert_called_once()
+    args, _ = mock_backend.convert_audio_to_text.call_args
     assert args[0] == mock_model
     assert isinstance(args[1], np.ndarray)
     assert args[1].dtype == np.float32
@@ -62,7 +62,7 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     mock_backend = MagicMock()
     mock_model = MagicMock()
-    mock_backend.transcribe.return_value = "hello world"
+    mock_backend.convert_audio_to_text.return_value = "hello world"
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
@@ -72,7 +72,7 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
     with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
-    mock_backend.transcribe.assert_called_once()
+    mock_backend.convert_audio_to_text.assert_called_once()
     mock_paste.assert_called_once_with("hello world ")
 
 
@@ -110,7 +110,7 @@ def test_handle_connection_skips_too_short_audio():
     with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
-    mock_backend.transcribe.assert_not_called()
+    mock_backend.convert_audio_to_text.assert_not_called()
     mock_paste.assert_not_called()
 
 
@@ -127,7 +127,7 @@ def test_handle_audio_chunk_dedupes_against_last_chunk_text():
     mock_backend = MagicMock()
     del mock_backend.add_audio_chunk_and_get_text
     mock_model = MagicMock()
-    mock_backend.transcribe.side_effect = [
+    mock_backend.convert_audio_to_text.side_effect = [
         "I want to see that things are happening fine",
         "things are happening fine and doing H3 grid",
     ]

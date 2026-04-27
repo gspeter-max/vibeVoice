@@ -260,7 +260,7 @@ def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
         return engine, engine
         
     import src.backend.backend_parakeet as backend
-    return backend, backend.load_model(model_name)
+    return backend, backend.load_speech_recognition_model_from_disk(model_name)
 
 
 def send_hud(cmd: str):
@@ -458,7 +458,7 @@ def _handle_audio_chunk(
                         session.stt_time += elapsed
                 else:
                     # Stateless backends (like Parakeet-TDT) transcribe chunks independently
-                    text = backend.transcribe(model, audio).strip()
+                    text = backend.convert_audio_to_text(model, audio).strip()
                     elapsed = time.perf_counter() - t_start
                     
                     with session.lock:
@@ -598,7 +598,7 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
 
         log.info(f"[Brain] 🎙️  Final utterance decode")
         send_hud("process")
-        final_text = backend.transcribe(model, audio).strip()
+        final_text = backend.convert_audio_to_text(model, audio).strip()
         if not final_text:
             log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
@@ -789,7 +789,7 @@ def start_server():
     backend_info["backend"], backend_info["model"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
-        backend_info["backend"].transcribe(
+        backend_info["backend"].convert_audio_to_text(
             backend_info["model"], np.zeros(8000, dtype=np.float32)
         )
     except Exception:
