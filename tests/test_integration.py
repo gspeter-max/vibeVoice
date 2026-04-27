@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-import brain
+import src.backend.brain as brain
 
 
 class MockConn:
@@ -22,21 +22,24 @@ def test_socket_communication(sample_audio_bytes):
     Test that a chunk sent by Ear is accumulated by Brain and only pasted on commit.
     """
     mock_backend = MagicMock()
+    del mock_backend.add_audio_chunk_and_get_text
     mock_model = MagicMock()
 
     brain.backend_info["backend"] = mock_backend
     brain.backend_info["model"] = mock_model
 
-    chunk = b"CMD_AUDIO_CHUNK:session123:0\n\n" + sample_audio_bytes
-    commit = b"CMD_SESSION_COMMIT:session123"
+    # New 4-part header: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
+    chunk = b"CMD_AUDIO_CHUNK:session123:0:0\n\n" + sample_audio_bytes
+    # New 3-part header: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
+    commit = b"CMD_SESSION_COMMIT:session123:0"
 
-    mock_backend.transcribe.return_value = "integrated test result"
+    mock_backend.convert_audio_to_text.return_value = "integrated test result"
 
-    with patch("brain.keyboard", MagicMock()), \
-         patch("brain.paste_instantly") as mock_paste, \
-         patch("brain.send_hud") as mock_hud:
+    with patch("src.backend.brain.keyboard", MagicMock()), \
+         patch("src.backend.brain.paste_instantly") as mock_paste, \
+         patch("src.backend.brain.send_hud") as mock_hud:
         brain.handle_connection(MockConn(chunk))
-        mock_backend.transcribe.assert_called_once()
+        mock_backend.convert_audio_to_text.assert_called_once()
         mock_paste.assert_not_called()
 
         brain.handle_connection(MockConn(commit))

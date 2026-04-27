@@ -1,5 +1,5 @@
 import numpy as np
-from src.vad_segmenter import SileroUtteranceGate, SileroVAD
+from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
 
 class FakeVAD:

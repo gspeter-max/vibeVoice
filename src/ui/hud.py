@@ -104,6 +104,13 @@ logger = logging.getLogger()
 
 
 def runtime_signature() -> str:
+    """
+    Generates a unique string describing the current HUD configuration.
+    This includes details such as the color mode, the number of waveform
+    bars, and the visual style of the animation. This signature is used
+    for logging and debugging to ensure that the developer knows exactly
+    which visual settings were active when a particular event occurred.
+    """
     return (
         f"mode={BAR_COLOR_MODE} anchor=menu-bar bars={NUM_BARS} "
         f"bar_w={BAR_W:.1f} gap={BAR_GAP:.1f} item_w={STATUS_ITEM_W} wave={WAVE_STYLE}"
@@ -111,7 +118,13 @@ def runtime_signature() -> str:
 
 
 def bar_color_for_draw(voice_intensity: float, bar_height_factor: float) -> QColor:
-    """Return strict white for waveform bars with alpha-only dynamics."""
+    """
+    Calculates the color and transparency for an individual waveform bar.
+    While the base color is a solid white, the function dynamically adjusts
+     the 'alpha' (transparency) based on the user's voice intensity and
+    the current height of the bar. This creates a subtle glowing effect
+    that makes the HUD feel more 'alive' and responsive to audio input.
+    """
     # Keep bars visibly bright white at all times, with subtle dynamic lift.
     alpha = int(248 + voice_intensity * 5 + bar_height_factor * 3)
     alpha = max(248, min(255, alpha))
@@ -119,7 +132,13 @@ def bar_color_for_draw(voice_intensity: float, bar_height_factor: float) -> QCol
 
 
 def _triangle_wave(x: float) -> float:
-    """Return a sharp triangle wave in range [-1, 1]."""
+    """
+    Generates a mathematical triangle wave pattern for animations.
+    Unlike a smooth sine wave, a triangle wave has sharp peaks and valleys,
+    which we use to create more 'chaotic' or 'jittery' animations for
+    the waveform bars. This adds a unique visual character to the HUD
+    that distinguishes it from standard, overly-smooth audio visualizers.
+    """
     frac = x - math.floor(x)
     return 1.0 - 4.0 * abs(frac - 0.5)
 
@@ -133,7 +152,13 @@ def compute_menu_bar_waveform_layout(
     bar_gap: float,
     bar_height: float,
 ) -> list[dict]:
-    """Return centered bar rectangles for a compact menu-bar waveform."""
+    """
+    Calculates the precise pixel coordinates for each bar in the HUD.
+    It takes the total width of the menu bar item and centers the requested
+    number of bars within that space, accounting for the gaps between them.
+    This ensures that the waveform always looks perfectly aligned and
+    balanced within the macOS menu bar, regardless of the user's screen resolution.
+    """
     total_wave_width = num_bars * bar_width + max(0, num_bars - 1) * bar_gap
     start_x = (status_width - total_wave_width) / 2.0
     start_y = (status_height - bar_height) / 2.0
@@ -173,6 +198,14 @@ class MenuBarWaveformView(NSView if NSView is not None else object):
 
 
 class IPCServer(QThread):
+    """
+    Background thread that manages the TCP control socket for the HUD.
+    It listens for incoming text commands from the Brain (like 'listen' or 'done')
+    and emits a Qt Signal whenever a new command arrives. This architecture
+    allows the HUD to respond instantly to state changes in the AI engine
+    without blocking the main GUI thread, ensuring a smooth and jitter-free
+    visual experience for the user at all times.
+    """
     command = Signal(str)
 
     def run(self):
@@ -225,6 +258,14 @@ class IPCServer(QThread):
 
 
 class VolumeListener(QThread):
+    """
+    Background thread that receives real-time audio telemetry via UDP.
+    It listens for small UDP packets containing the current microphone volume
+    and frequency band data (bass, mid, treble). Because UDP is faster and
+    has lower overhead than TCP, we use it for high-frequency updates, allowing
+    the HUD's waveform bars to dance in perfect sync with the user's voice
+    with virtually zero perceptible lag or delay.
+    """
     volume = Signal(float)
     frequency_bands = Signal(dict)  # New signal for frequency data
 

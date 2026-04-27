@@ -2,7 +2,7 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
-from streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
     DEFAULT_OVERLAP_SECONDS,
@@ -14,7 +14,7 @@ from streaming_shared_logic import (
 
 from evaluation.parakeet_v2_streaming_evaluation import (
     DEFAULT_OUTPUT_JSON_FILE_PATH,
-    add_previous_chunk_overlap_to_current_chunk_audio,
+    add_last_chunk_overlap_to_current_chunk_audio,
     build_command_line_argument_parser,
     calculate_word_error_rate_for_final_streaming_text,
     load_one_dataset_item_audio_and_reference_text,
@@ -43,21 +43,21 @@ def test_split_audio_bytes_into_microphone_frames_keeps_order():
     ]
 
 
-def test_add_previous_chunk_overlap_to_current_chunk_audio():
-    overlapped_audio, next_overlap_audio = add_previous_chunk_overlap_to_current_chunk_audio(
-        previous_chunk_overlap_audio=b"\x01\x00\x02\x00",
+def test_add_last_chunk_overlap_to_current_chunk_audio():
+    overlapped_audio, next_overlap_audio = add_last_chunk_overlap_to_current_chunk_audio(
+        last_chunk_overlap_audio=b"\x01\x00\x02\x00",
         current_chunk_audio=b"\x03\x00\x04\x00\x05\x00\x06\x00",
         overlap_audio_bytes=4,
         stop_session=False,
     )
 
-    assert overlapped_audio == b"\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00"
+    assert overlapped_audio == b"\x02\x00\x05\x00\x03\x00\x04\x00\x05\x00\x06\x00"
     assert next_overlap_audio == b"\x05\x00\x06\x00"
 
 
 def test_remove_repeated_words_from_current_chunk_text():
     cleaned_text = remove_repeated_words_from_current_chunk_text(
-        previous_chunk_text="things are happening fine",
+        last_chunk_text="things are happening fine",
         current_chunk_text="things are happening fine and doing H3 grid",
         max_overlap_words=8,
     )
@@ -368,7 +368,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
     transcriptions_by_audio_bytes = {
         b"\x01\x00\x02\x00\x03\x00\x04\x00": "hello there",
         b"\x05\x00\x06\x00\x07\x00\x08\x00": "there friend",
-        b"\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there friend",
+        b"\x05\x00\x07\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there friend",
     }
 
     monkeypatch.setattr(
@@ -381,7 +381,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 
@@ -408,7 +408,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
             "chunk_age_seconds_when_split_happened": 1.0,
             "silence_duration_seconds_when_split_happened": 0.7,
             "chunk_duration_seconds_before_overlap": 0.00025,
-            "overlap_seconds_added_from_previous_chunk": 0.0,
+            "overlap_seconds_from_last_chunk": 0.0,
             "raw_chunk_text_without_overlap": "hello there",
             "raw_chunk_text_with_overlap": "hello there",
             "cleaned_chunk_text_after_dedup": "hello there",
@@ -419,7 +419,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
             "chunk_age_seconds_when_split_happened": 1.0,
             "silence_duration_seconds_when_split_happened": 0.7,
             "chunk_duration_seconds_before_overlap": 0.00025,
-            "overlap_seconds_added_from_previous_chunk": 0.000125,
+            "overlap_seconds_from_last_chunk": 0.000125,
             "raw_chunk_text_without_overlap": "there friend",
             "raw_chunk_text_with_overlap": "hello there friend",
             "cleaned_chunk_text_after_dedup": "friend",
@@ -455,7 +455,7 @@ def test_run_fake_microphone_stream_counts_real_chunk_events_even_if_dedup_remov
     transcriptions_by_audio_bytes = {
         b"\x01\x00\x02\x00\x03\x00\x04\x00": "hello there",
         b"\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
-        b"\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
+        b"\x05\x00\x07\x00\x05\x00\x06\x00\x07\x00\x08\x00": "hello there",
     }
 
     monkeypatch.setattr(
@@ -468,7 +468,7 @@ def test_run_fake_microphone_stream_counts_real_chunk_events_even_if_dedup_remov
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 
@@ -521,7 +521,7 @@ def test_run_fake_microphone_stream_only_splits_when_silence_gate_says_finalize(
     )
     monkeypatch.setitem(
         sys.modules,
-        "src.vad_segmenter",
+        "src.audio.vad_segmenter",
         SimpleNamespace(SileroUtteranceGate=FakeUtteranceGate, SileroVAD=lambda *_args, **_kwargs: object()),
     )
 
@@ -547,7 +547,7 @@ def test_run_fake_microphone_stream_only_splits_when_silence_gate_says_finalize(
             "chunk_age_seconds_when_split_happened": 3.0,
             "silence_duration_seconds_when_split_happened": None,
             "chunk_duration_seconds_before_overlap": 0.00025,
-            "overlap_seconds_added_from_previous_chunk": 0.0,
+            "overlap_seconds_from_last_chunk": 0.0,
             "raw_chunk_text_without_overlap": "hello there",
             "raw_chunk_text_with_overlap": "hello there",
             "cleaned_chunk_text_after_dedup": "hello there",

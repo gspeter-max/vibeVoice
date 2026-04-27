@@ -9,7 +9,7 @@ import os
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from ear import Ear
+from src.audio.ear import Ear
 
 
 def test_frequency_analysis_returns_valid_bands():
@@ -32,7 +32,7 @@ def test_frequency_analysis_returns_valid_bands():
     mock_ear.RATE = 16000
 
     # Bind the method
-    from ear import Ear
+    from src.audio.ear import Ear
     mock_ear._analyze_frequency_bands = Ear._analyze_frequency_bands.__get__(mock_ear, MockEar)
 
     # Test with mid-frequency audio
@@ -65,7 +65,7 @@ def test_frequency_analysis_low_frequency():
     class MockEar:
         RATE = 16000
 
-    from ear import Ear
+    from src.audio.ear import Ear
     mock_ear = MockEar()
     mock_ear._analyze_frequency_bands = Ear._analyze_frequency_bands.__get__(mock_ear, MockEar)
 
@@ -87,7 +87,7 @@ def test_frequency_analysis_high_frequency():
     class MockEar:
         RATE = 16000
 
-    from ear import Ear
+    from src.audio.ear import Ear
     mock_ear = MockEar()
     mock_ear._analyze_frequency_bands = Ear._analyze_frequency_bands.__get__(mock_ear, MockEar)
 
@@ -107,7 +107,7 @@ def test_frequency_analysis_silence():
     class MockEar:
         RATE = 16000
 
-    from ear import Ear
+    from src.audio.ear import Ear
     mock_ear = MockEar()
     mock_ear._analyze_frequency_bands = Ear._analyze_frequency_bands.__get__(mock_ear, MockEar)
 

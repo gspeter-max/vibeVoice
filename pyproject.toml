@@ -5,12 +5,11 @@ description = "Push-to-talk voice-to-text that auto-types into any app — Wispr
 requires-python = ">=3.11"
 
 dependencies = [
-    # Core STT backend (primary)
-    "faster-whisper>=1.1.0",
-    "onnxruntime==1.21.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-
-    # Parakeet backend (optional, high accuracy)
+    # ASR Engines
     "sherpa-onnx>=1.10.0",
+    "onnxruntime==1.23.2",
+    "scipy>=1.11.0",
+    "huggingface-hub>=0.20.0",
 
     # Audio input
     "pyaudio>=0.2.14",
@@ -18,30 +17,27 @@ dependencies = [
     # Keyboard control (auto-type output)
     "pynput>=1.7.7",
     "structlog",
+    
     # Numerics (used for audio processing)
     "numpy>=1.26.0",
 
     # GUI for HUD
     "PySide6>=6.6.0",
     "pyobjc-framework-Cocoa>=10.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
 # Install with: uv pip install -e ".[dev]"
 dev = [
-    "rich>=13.0.0",   # nicer terminal output during development
     "pytest>=8.0.0",
     "pytest-mock>=3.12.0",
 ]
 
-# Install with: uv pip install -e ".[tts]"
+# TTS specific libraries (if not used by Nemotron)
 tts = [
-    "numpy>=1.26.0",          # Audio processing
-    "scipy>=1.11.0",          # Audio processing
     "psutil>=5.9.0",          # System monitoring
-    "onnxruntime>=1.16.0",    # ONNX runtime for Matcha-TTS
 ]
-
 
 [build-system]
 requires = ["hatchling"]

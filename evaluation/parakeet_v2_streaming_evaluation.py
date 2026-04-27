@@ -6,14 +6,14 @@ from pathlib import Path
 from typing import Any
 from src import log 
 import numpy as np
-from src.streaming_shared_logic import (
+from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
     DEFAULT_OVERLAP_SECONDS,
     DEFAULT_SILENCE_TIMEOUT_SECONDS,
     DEFAULT_VAD_ENERGY_THRESHOLD,
     DEFAULT_VAD_SCORE_THRESHOLD,
-    apply_previous_chunk_overlap,
+    apply_last_chunk_overlap,
     normalize_text_for_word_error_rate,
     remove_duplicate_chunk_prefix,
     should_split_chunk_after_silence,
@@ -37,9 +37,9 @@ DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run
 
 
 def load_evaluation_model():
-    from src.backend_parakeet import load_model
+    from src.backend.backend_parakeet import load_speech_recognition_model_from_disk
 
-    return load_model(PARAKEET_V2_MODEL_NAME)
+    return load_speech_recognition_model_from_disk(PARAKEET_V2_MODEL_NAME)
 
 
 def resolve_dataset_config_name_to_load(
@@ -199,23 +199,23 @@ def split_audio_bytes_into_microphone_frames(
     ]
 
 
-def add_previous_chunk_overlap_to_current_chunk_audio(
-    previous_chunk_overlap_audio: bytes,
+def add_last_chunk_overlap_to_current_chunk_audio(
+    last_chunk_overlap_audio: bytes,
     current_chunk_audio: bytes,
     overlap_audio_bytes: int,
     *,
     stop_session: bool,
 ) -> tuple[bytes, bytes]:
-    overlap_application_result = apply_previous_chunk_overlap(
+    overlap_application_result = apply_last_chunk_overlap(
         current_chunk_audio_bytes=current_chunk_audio,
-        previous_pending_overlap_audio_bytes=previous_chunk_overlap_audio,
+        last_chunk_tail_bytes=last_chunk_overlap_audio,
         overlap_audio_byte_count=overlap_audio_bytes,
         sample_rate=DEFAULT_SAMPLE_RATE,
         stop_session=stop_session,
     )
     return (
         overlap_application_result.overlapped_audio_bytes,
-        overlap_application_result.next_pending_overlap_audio_bytes,
+        overlap_application_result.next_chunk_tail_bytes,
     )
 
 
@@ -224,13 +224,13 @@ def split_text_into_comparable_words(text: str) -> list[str]:
 
 
 def remove_repeated_words_from_current_chunk_text(
-    previous_chunk_text: str,
+    last_chunk_text: str,
     current_chunk_text: str,
     *,
     max_overlap_words: int = 8,
 ) -> str:
     return remove_duplicate_chunk_prefix(
-        previous_chunk_text,
+        last_chunk_text,
         current_chunk_text,
         max_overlap_words=max_overlap_words,
     )
@@ -240,10 +240,10 @@ def transcribe_one_audio_chunk(
     parakeet_v2_model,
     chunk_audio_bytes: bytes,
 ) -> str:
-    from src.backend_parakeet import transcribe
+    from src.backend.backend_parakeet import convert_audio_to_text
 
     chunk_audio_array = np.frombuffer(chunk_audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    return transcribe(parakeet_v2_model, chunk_audio_array).strip()
+    return convert_audio_to_text(parakeet_v2_model, chunk_audio_array).strip()
 
 
 def calculate_word_error_rate_for_final_streaming_text(
@@ -289,7 +289,7 @@ def build_chunk_event(
     chunk_age_seconds_when_split_happened: float,
     silence_duration_seconds_when_split_happened: float | None,
     chunk_duration_seconds_before_overlap: float,
-    overlap_seconds_added_from_previous_chunk: float,
+    overlap_seconds_from_last_chunk: float,
     raw_chunk_text_without_overlap: str,
     raw_chunk_text_with_overlap: str,
     cleaned_chunk_text_after_dedup: str,
@@ -300,7 +300,7 @@ def build_chunk_event(
         "chunk_age_seconds_when_split_happened": chunk_age_seconds_when_split_happened,
         "silence_duration_seconds_when_split_happened": silence_duration_seconds_when_split_happened,
         "chunk_duration_seconds_before_overlap": chunk_duration_seconds_before_overlap,
-        "overlap_seconds_added_from_previous_chunk": overlap_seconds_added_from_previous_chunk,
+        "overlap_seconds_from_last_chunk": overlap_seconds_from_last_chunk,
         "raw_chunk_text_without_overlap": raw_chunk_text_without_overlap,
         "raw_chunk_text_with_overlap": raw_chunk_text_with_overlap,
         "cleaned_chunk_text_after_dedup": cleaned_chunk_text_after_dedup,
@@ -384,7 +384,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
     frame_samples: int = DEFAULT_FRAME_SAMPLES,
     minimum_chunk_age_before_silence_split_seconds: float = DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
 ) -> dict[str, Any]:
-    from src.vad_segmenter import SileroUtteranceGate, SileroVAD
+    from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
     log.info(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...")
     parakeet_v2_model = load_evaluation_model()
@@ -400,8 +400,8 @@ def run_fake_microphone_stream_for_one_dataset_item(
     )
 
     overlap_audio_bytes = int(DEFAULT_SAMPLE_RATE * 2 * overlap_seconds)
-    previous_chunk_overlap_audio = b""
-    previous_chunk_text = ""
+    last_chunk_overlap_audio = b""
+    last_chunk_text = ""
     current_time_seconds = 0.0
     frame_duration_seconds = frame_samples / DEFAULT_SAMPLE_RATE
 
@@ -437,20 +437,20 @@ def run_fake_microphone_stream_for_one_dataset_item(
                 parakeet_v2_model,
                 raw_chunk_audio,
             )
-            overlap_application_result = apply_previous_chunk_overlap(
+            overlap_application_result = apply_last_chunk_overlap(
                 current_chunk_audio_bytes=raw_chunk_audio,
-                previous_pending_overlap_audio_bytes=previous_chunk_overlap_audio,
+                last_chunk_tail_bytes=last_chunk_overlap_audio,
                 overlap_audio_byte_count=overlap_audio_bytes,
                 sample_rate=DEFAULT_SAMPLE_RATE,
                 stop_session=False,
             )
-            previous_chunk_overlap_audio = overlap_application_result.next_pending_overlap_audio_bytes
+            last_chunk_overlap_audio = overlap_application_result.next_chunk_tail_bytes
             raw_chunk_text_with_overlap = transcribe_one_audio_chunk(
                 parakeet_v2_model,
                 overlap_application_result.overlapped_audio_bytes,
             )
             cleaned_chunk_text_after_dedup = remove_duplicate_chunk_prefix(
-                previous_chunk_text,
+                last_chunk_text,
                 raw_chunk_text_with_overlap,
                 max_overlap_words=max_overlap_words,
             )
@@ -462,8 +462,8 @@ def run_fake_microphone_stream_for_one_dataset_item(
                     chunk_age_seconds_when_split_happened=split_decision.chunk_age_seconds,
                     silence_duration_seconds_when_split_happened=split_decision.silence_duration_seconds,
                     chunk_duration_seconds_before_overlap=chunk_duration_seconds_before_overlap,
-                    overlap_seconds_added_from_previous_chunk=(
-                        overlap_application_result.overlap_seconds_added_from_previous_chunk
+                    overlap_seconds_from_last_chunk=(
+                        overlap_application_result.overlap_seconds_from_last_chunk
                     ),
                     raw_chunk_text_without_overlap=raw_chunk_text_without_overlap,
                     raw_chunk_text_with_overlap=raw_chunk_text_with_overlap,
@@ -473,7 +473,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
 
             if cleaned_chunk_text_after_dedup:
                 chunk_texts.append(cleaned_chunk_text_after_dedup)
-                previous_chunk_text = cleaned_chunk_text_after_dedup
+                last_chunk_text = cleaned_chunk_text_after_dedup
 
             chunk_durations_seconds.append(chunk_duration_seconds_before_overlap)
             chunk_started_at_seconds = current_time_seconds
@@ -487,9 +487,9 @@ def run_fake_microphone_stream_for_one_dataset_item(
             parakeet_v2_model,
             final_chunk_audio,
         )
-        final_overlap_application_result = apply_previous_chunk_overlap(
+        final_overlap_application_result = apply_last_chunk_overlap(
             current_chunk_audio_bytes=final_chunk_audio,
-            previous_pending_overlap_audio_bytes=previous_chunk_overlap_audio,
+            last_chunk_tail_bytes=last_chunk_overlap_audio,
             overlap_audio_byte_count=overlap_audio_bytes,
             sample_rate=DEFAULT_SAMPLE_RATE,
             stop_session=True,
@@ -499,7 +499,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
             final_overlap_application_result.overlapped_audio_bytes,
         )
         cleaned_final_chunk_text_after_dedup = remove_duplicate_chunk_prefix(
-            previous_chunk_text,
+            last_chunk_text,
             raw_final_chunk_text_with_overlap,
             max_overlap_words=max_overlap_words,
         )
@@ -514,8 +514,8 @@ def run_fake_microphone_stream_for_one_dataset_item(
                 chunk_age_seconds_when_split_happened=final_chunk_age_seconds,
                 silence_duration_seconds_when_split_happened=None,
                 chunk_duration_seconds_before_overlap=chunk_duration_seconds_before_overlap,
-                overlap_seconds_added_from_previous_chunk=(
-                    final_overlap_application_result.overlap_seconds_added_from_previous_chunk
+                overlap_seconds_from_last_chunk=(
+                    final_overlap_application_result.overlap_seconds_from_last_chunk
                 ),
                 raw_chunk_text_without_overlap=raw_final_chunk_text_without_overlap,
                 raw_chunk_text_with_overlap=raw_final_chunk_text_with_overlap,
