@@ -1,6 +1,5 @@
 # tests/test_streaming_session.py
 import pytest
-import time
 from src.streaming.session import StreamingSession
 
 def test_session_tracks_tail_bytes_for_audio_overlap():

@@ -113,5 +113,15 @@ class StreamingSession:
         # Set the saved audio bytes to empty
         self._last_chunk_tail_bytes = b""
         
+        # Reset the start time to right now (for future telemetry)
+        self._chunk_started_at = time.time()
+    
+    def reset_audio_state(self):
+        """
+        Clears the saved audio bytes and resets the timer for a new recording.
+        """
+        # Set the saved audio bytes to empty
+        self._last_chunk_tail_bytes = b""
+        
         # Reset the start time to right now
         self._chunk_started_at = time.time()
