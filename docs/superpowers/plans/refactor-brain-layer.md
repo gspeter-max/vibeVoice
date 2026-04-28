@@ -17,7 +17,7 @@
 - `src/engines/nemotron.py`: A `NemotronEngine` class that implements the interface. It is stateful.
 
 **Important Rule to follow :**
-- **CRITICAL: ** add detailed docs in functions and explain the code and logic in comments.  
+- **CRITICAL:** add detailed docs in functions and explain the code and logic in comments.  
 - **CRITICAL:** make the code function name and variable name clear and easily to understand instead of short and confusing names.
   - so a 5 year old child easily understands.
   - do not put any imagination and analogy to understand for 5 year old child.

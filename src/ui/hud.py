@@ -88,19 +88,7 @@ THINKING   = "thinking"
 PROCESSING = "processing"
 DONE       = "done"
 
-from ..quantization import (
-    QuantizedResult,
-    BaseQuantizer,
-    SplitResidualVectorQuantizer,
-    ResidualVectorQuantizer,
-)
-from ..modules.conv import pad_for_conv1d
-from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingModule, State, StateT
-from ..utils.compile import CUDAGraphed
 
-
-logger = logging.getLogger()
 
 
 def runtime_signature() -> str:
@@ -487,7 +475,7 @@ class MenuBarWaveformController(QObject):
 
     # ── Public state transitions ───────────────────────────────────────────
     def show_listening(self):
-        log.info("[HUD] 🎙️ Setting state to LISTENING")
+        log.info("[HUD]   → Listening")
         _play_sound(self._snd_listen)
         self._enter(LISTENING)
 
@@ -498,6 +486,7 @@ class MenuBarWaveformController(QObject):
         self._enter(PROCESSING)
 
     def show_done(self):
+        log.info("[HUD]   → Done")
         _play_sound(self._snd_done)
         self._enter(DONE)
         QTimer.singleShot(900, self._return_to_idle)
@@ -518,7 +507,6 @@ class MenuBarWaveformController(QObject):
     # ── IPC dispatcher ────────────────────────────────────────────────────
     def _on_command(self, cmd):
         c = cmd.strip()
-        log.info(f"[HUD] ← {c}")
         lowered = c.lower()
         if lowered.startswith("draft:") or lowered.startswith("final:"):
             return
@@ -538,13 +526,10 @@ class MenuBarWaveformController(QObject):
     def _on_volume(self, val):
         self._voice_raw  = min(1.0, val * 6.0)
         self._last_vol_t = time.time()
-        # DEBUG: Log every volume packet for diagnosis
-        log.info(f"[HUD] 🎤 Received volume: {val:.4f} -> voice_raw={self._voice_raw:.4f}")
 
     def _on_frequency_bands(self, freq_bands: dict):
         """Update frequency bands for color mapping."""
         self._frequency_bands = freq_bands
-        log.info(f"[HUD] 🎵 Frequency bands updated: {freq_bands}")
 
     def _enter(self, state):
         self._state    = state
@@ -557,9 +542,6 @@ class MenuBarWaveformController(QObject):
     def _tick(self):
         self._t = time.time() - self._t0
 
-        # Update hue offset for animated themes (no longer needed, kept for compatibility)
-        pass
-
         # Voice decay
         if time.time() - self._last_vol_t > 0.15:
             self._voice_raw *= 0.80
@@ -571,10 +553,6 @@ class MenuBarWaveformController(QObject):
         v   = self._voice_smooth
         t   = self._t
         mid = (NUM_BARS - 1) / 2.0
-
-        # DEBUG: Log voice data every 60 ticks (~1 second)
-        if int(self._t * 60) % 60 == 0 and self._state == LISTENING:
-            log.info(f"[HUD DEBUG] voice_raw={self._voice_raw:.3f} voice_smooth={v:.3f} state={self._state}")
 
         for i in range(NUM_BARS):
             ph = self._bar_phase[i]

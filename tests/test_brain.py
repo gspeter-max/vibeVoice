@@ -221,7 +221,7 @@ def test_finalize_session_pastes_stitched_text_directly():
 
     mock_paste.assert_called_once_with("hello world ")
     logged_messages = [call.args[0] for call in mock_log.call_args_list]
-    assert any("Finalizing recording" in message for message in logged_messages)
+    assert any("[Brain] 🏁" in message for message in logged_messages)
 
 
 def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
@@ -246,3 +246,38 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
     assert len(json_files) == 1
     payload = json_files[0].read_text(encoding="utf-8")
     assert '"vad_no_speech_warning_seen": true' in payload
+
+
+def test_brain_logs_match_pulse_format(capsys):
+    """
+    Verify that Brain logs follow the 'The Pulse' design.
+    - Start: '[Brain] 🎙️  Recording started...'
+    - End: '[Brain] 🏁 "text" (Xs)'
+    """
+    from unittest.mock import MagicMock
+    import src.backend.brain as brain
+    import numpy as np
+
+    mock_engine = MagicMock()
+    mock_engine.is_stateful.return_value = False
+    mock_engine.transcribe_chunk.return_value = "Hello"
+
+    # Setup session
+    session_id = "pulse_test_session"
+    brain.backend_info["engine"] = mock_engine
+    
+    # 1. Send first chunk (non-silent)
+    brain._handle_audio_chunk(session_id, 0, 0, b"\x01\x10" * 1600)
+    # 2. Commit session (needed for finalization)
+    session = brain._get_or_create_session(session_id)
+    rec = session.get_or_create_recording(0)
+    rec.closed = True
+    # 3. Finalize
+    brain._finalize_recording_if_ready(session_id, 0)
+
+    captured = capsys.readouterr()
+    stdout = captured.out
+
+    assert "[Brain] 🎙️  Recording started..." in stdout
+    assert '[Brain] 🏁 "Hello" (' in stdout
+    assert "s)" in stdout

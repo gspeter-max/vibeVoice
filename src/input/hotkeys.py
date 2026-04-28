@@ -45,7 +45,8 @@ def _is_right_cmd(key) -> bool:
         True if it's our target key, False otherwise.
     """
     # 1. Standard check
-    if key == getattr(keyboard.Key, 'cmd_r', None):
+    _key_class = getattr(keyboard, 'Key', None)
+    if _key_class and key == getattr(_key_class, 'cmd_r', None):
         return True
     
     # 2. Name-based check (for some OS versions)

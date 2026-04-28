@@ -543,7 +543,6 @@ class Ear:
                 client.connect(SOCKET_PATH)
                 client.sendall(header + utterance_bytes)
                 client.shutdown(socket.SHUT_WR)
-            log.info("📤 Audio chunk sent", seq=seq, size=len(utterance_bytes), session=session_id[:8])
             self._send_session_event_to_brain(
                 "chunk_sent_to_brain",
                 {

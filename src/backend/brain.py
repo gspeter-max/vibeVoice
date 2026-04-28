@@ -355,15 +355,7 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
     short_id = session_id[:8]
     if text:
         stt_time = rec.stt_time
-        log.info(
-            "🏁 Finalizing recording",
-            session=short_id,
-            recording=rec_idx,
-            chunks=rec.received_count,
-            size=len(text),
-            stt_time=f"{stt_time:.2f}s",
-            text=text,
-        )
+        log.info(f"[Brain] 🏁 \"{text}\" ({stt_time:.2f}s)")
         _update_session_telemetry_summary(
             session_id,
             {
@@ -378,7 +370,7 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         _update_session_telemetry_summary(session_id, {"final_paste_success": True})
         send_hud("done")
     else:
-        log.info("🔇 Nothing detected", session=short_id, recording=rec_idx)
+        log.info("[Brain] 🔇 Nothing detected")
         _update_session_telemetry_summary(
             session_id,
             {
@@ -412,6 +404,9 @@ def _handle_audio_chunk(
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.received_count += 1
+        
+        if seq == 0 and rec.received_count == 1:
+            log.info("[Brain] 🎙️  Recording started...")
 
     elapsed = 0.0
     audio_int16 = np.frombuffer(
@@ -420,11 +415,7 @@ def _handle_audio_chunk(
     audio = _normalize_audio(audio_int16)
 
     text = ""
-    analysis_cleaned_text = ""
-    overlap_word_count = 0
-    trim_applied = False
-    combined_score = char_score = token_score = 0.0
-    skipped_because_result_too_small = False
+    dedup_analysis = None
     prev_text = ""
 
     if audio is not None:
@@ -452,24 +443,13 @@ def _handle_audio_chunk(
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
                         # Deduplicate the new chunk against the last chunk text
                         from src.streaming.streaming_shared_logic import analyze_duplicate_chunk_prefix
-                        analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
+                        dedup_analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
 
-                        analysis_cleaned_text = analysis.cleaned_text
-                        overlap_word_count = analysis.overlap_word_count
-                        trim_applied = analysis.trim_applied
-                        combined_score = analysis.combined_score
-                        char_score = analysis.char_score
-                        token_score = analysis.token_score
-                        skipped_because_result_too_small = analysis.skipped_because_result_too_small
-                        
-                        rec.transcript_parts[seq] = analysis_cleaned_text
+                        rec.transcript_parts[seq] = dedup_analysis.cleaned_text
                         
                     rec.stt_time += elapsed
                     session.stt_time += elapsed
                         
-                log.info(
-                    f"[Brain] 🎙️  [{session_id[:8]} rec={rec_idx} chunk={seq}] decode took {elapsed:.2f}s"
-                )
         except Exception as e:
             log.info(f"[Brain] ❌ Chunk decode error: {e}")
             import traceback
@@ -493,14 +473,14 @@ def _handle_audio_chunk(
             "decode_seconds": round(elapsed, 2),
             "last_chunk_text": prev_text,
             "raw_text": text,
-            "cleaned_text_after_dedup": analysis_cleaned_text,
+            "cleaned_text_after_dedup": dedup_analysis.cleaned_text if dedup_analysis else text,
             "dedup_stats": {
-                "overlap_word_count": overlap_word_count,
-                "trim_applied": trim_applied,
-                "combined_score": round(combined_score, 4),
-                "char_score": round(char_score, 4),
-                "token_score": round(token_score, 4),
-                "skipped_too_small": skipped_because_result_too_small,
+                "overlap_word_count": dedup_analysis.overlap_word_count if dedup_analysis else 0,
+                "trim_applied": dedup_analysis.trim_applied if dedup_analysis else False,
+                "combined_score": round(dedup_analysis.combined_score, 4) if dedup_analysis else 0.0,
+                "char_score": round(dedup_analysis.char_score, 4) if dedup_analysis else 0.0,
+                "token_score": round(dedup_analysis.token_score, 4) if dedup_analysis else 0.0,
+                "skipped_too_small": dedup_analysis.skipped_because_result_too_small if dedup_analysis else False,
             },
         },
     )
@@ -511,7 +491,7 @@ def _handle_audio_chunk(
                 r.received_count for r in session.recordings.values()
             ),
             "total_decode_seconds": round(session.stt_time, 2),
-            "flags": {"dedup_trim_applied": trim_applied},
+            "flags": {"dedup_trim_applied": dedup_analysis.trim_applied if dedup_analysis else False},
         },
     )
 
