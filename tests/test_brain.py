@@ -229,8 +229,9 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
     """
     Verify that a CMD_SESSION_EVENT triggers writing a telemetry JSON file to disk.
     """
-    monkeypatch.setattr(brain, "STREAMING_TELEMETRY_ENABLED", True)
-    monkeypatch.setattr(brain, "STREAMING_TELEMETRY_DIR", tmp_path)
+    import src.backend.data_record.telemetry as telemetry
+    monkeypatch.setattr(telemetry, "STREAMING_TELEMETRY_ENABLED", True)
+    monkeypatch.setattr(telemetry, "STREAMING_TELEMETRY_DIR", tmp_path)
     # Set a mock engine in global state so telemetry seed can read the model name
     mock_engine = MagicMock()
     mock_engine.model_name = "base.en"

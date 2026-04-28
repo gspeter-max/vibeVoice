@@ -34,6 +34,19 @@ from src.backend.state import (
     RecordingState, SessionState
 )
 
+from src.backend.data_record.telemetry import (
+    _telemetry_seed,
+    _telemetry_recorder_for_session,
+    _update_chunk_telemetry_summary,
+    _update_session_telemetry_summary,
+    _handle_session_telemetry_event,
+    STREAMING_TELEMETRY_ENABLED,
+    STREAMING_TELEMETRY_DIR,
+    RECORDING_MODE
+)
+
+NO_STREAMING_MODE = "no_streaming"
+
 try:
     from pynput.keyboard import Controller
 except ImportError:  # pragma: no cover
