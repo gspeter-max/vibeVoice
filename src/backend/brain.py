@@ -22,6 +22,7 @@ from src.streaming.streaming_shared_logic import (
 )
 from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
 from src.utils.env_utils import get_float_from_environment
+from src.utils.bootstrap import fix_macos_library_paths
 from src import log
 from rich.console import Console
 from rich.table import Table
@@ -50,49 +51,6 @@ STREAMING_TELEMETRY_ENABLED = (
 STREAMING_TELEMETRY_DIR = Path(
     os.environ.get("STREAMING_TELEMETRY_DIR", "logs/streaming_sessions")
 )
-
-# Global state
-backend_info = {"engine": None}
-backend_lock = threading.Lock()
-session_store = {}
-session_store_lock = threading.Lock()
-
-
-@dataclass
-class RecordingState:
-    """
-    Holds the transcription state for a single button press.
-    One SessionState contains many RecordingState objects — one per button press.
-    """
-
-    received_count: int = 0
-    done_count: int = 0
-    closed: bool = False
-    finalized: bool = False
-    transcript_parts: dict = field(default_factory=dict)
-    stt_time: float = 0.0
-
-
-@dataclass
-class SessionState:
-    """
-    State object for an entire application run (one Brain process lifetime).
-    A session survives multiple button presses; each press is one RecordingState
-    stored in the recordings dict keyed by its recording_index integer.
-    """
-
-    engine: object
-    # recordings[0] = first button press, recordings[1] = second, …
-    recordings: dict = field(default_factory=dict)
-    stt_time: float = 0.0
-    telemetry_recorder: StreamingSessionTelemetryRecorder | None = None
-    lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def get_or_create_recording(self, rec_idx: int) -> "RecordingState":
-        """Returns the RecordingState for rec_idx, creating it if needed."""
-        if rec_idx not in self.recordings:
-            self.recordings[rec_idx] = RecordingState()
-        return self.recordings[rec_idx]
 
 
 def _model_name_for_telemetry() -> str | None:
@@ -753,6 +711,9 @@ def start_server():
     """
     Initializes the Brain server and begins listening for incoming connections.
     """
+    # Auto-fix environment issues (e.g., macOS library paths)
+    fix_macos_library_paths()
+
     backend_info["engine"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
