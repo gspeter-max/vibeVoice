@@ -91,13 +91,6 @@ echo "
 # Cleanup stale processes
 log_info "Cleaning up old processes..."
 
-# macOS Library Path Fix: Ensure the AI program can find its library files.
-# This solves the "@rpath/libonnxruntime" error for every new user automatically.
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    log_info "Verifying macOS library paths..."
-    "$VENV_PYTHON" scripts/fix_macos_deps.py
-fi
-
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes

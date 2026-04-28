@@ -54,9 +54,9 @@ def test_socket_communication(sample_audio_bytes):
     # New 3-part header: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
     commit = b"CMD_SESSION_COMMIT:session123:0"
 
-    with patch("src.backend.brain.keyboard", MagicMock()), \
-         patch("src.backend.brain.paste_instantly") as mock_paste, \
-         patch("src.backend.brain.send_hud") as mock_hud:
+    with patch.object(brain, "keyboard", MagicMock()), \
+         patch.object(brain, "paste_instantly") as mock_paste, \
+         patch.object(brain, "send_hud") as mock_hud:
 
         # Step 1: Send the audio chunk — should transcribe but NOT paste yet
         brain.handle_connection(MockConn(chunk))

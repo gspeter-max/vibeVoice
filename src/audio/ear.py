@@ -581,7 +581,7 @@ class Ear:
             log.error("❌ Failed to commit session", error=str(e))
             return False
 
-    def _boost_pcm16_bytes(self, pcm16_bytes: bytes) -> bytes:
+    def _boost_audio_chunk(self, audio_chunk: bytes) -> bytes:
         """
         Applies a digital gain multiplier to raw 16-bit PCM audio data.
         This is used to artificially increase the volume of the microphone
@@ -589,11 +589,11 @@ class Ear:
         the signal, we can improve the accuracy of the transcription for
         users with quiet microphones while ensuring the audio doesn't clip.
         """
-        if not pcm16_bytes:
-            return pcm16_bytes
-        if len(pcm16_bytes) % 2:
-            pcm16_bytes = pcm16_bytes[:-1]
-        audio = np.frombuffer(pcm16_bytes, dtype=np.int16).astype(np.float32)
+        if not audio_chunk:
+            return audio_chunk
+        if len(audio_chunk) % 2:
+            audio_chunk = audio_chunk[:-1]
+        audio = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
         boosted = (audio * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
         return boosted.tobytes()
 
@@ -673,7 +673,7 @@ class Ear:
                 self._chunk_seq = 0
             return False
 
-        utterance_for_brain = self._boost_pcm16_bytes(utterance)
+        utterance_for_brain = self._boost_audio_chunk(utterance)
         last_chunk_tail_bytes = self._last_chunk_tail_bytes
         utterance_for_brain = self._prepend_pending_chunk_overlap(
             utterance_for_brain,
@@ -822,9 +822,9 @@ class Ear:
                 now = time.time()
 
                 speech_now = self._utterance_gate.push(
-                    pcm16_bytes=in_data,
+                    audio_chunk=in_data,
                     now=now,
-                    analysis_pcm16_bytes=chunk_bytes
+                    analysis_chunk=chunk_bytes
                 )
 
                 if speech_now and not self._chunk_speech_logged:

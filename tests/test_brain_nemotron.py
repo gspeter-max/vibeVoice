@@ -26,8 +26,8 @@ def test_brain_routes_to_nemotron():
     assert engine.is_stateful() is True
 
 
-@patch("src.backend.brain._get_or_create_session")
-@patch("src.backend.brain._normalize_audio")
+@patch.object(brain, "_get_or_create_session")
+@patch.object(brain, "_normalize_audio")
 def test_handle_audio_chunk_uses_transcribe_chunk_for_stateful_engine(mock_norm, mock_get_session):
     """
     Verify that _handle_audio_chunk calls engine.transcribe_chunk() for a stateful engine,
@@ -57,8 +57,8 @@ def test_handle_audio_chunk_uses_transcribe_chunk_for_stateful_engine(mock_norm,
     assert mock_rec.transcript_parts[0] == "cumulative text"
 
 
-@patch("src.backend.brain.send_hud")
-@patch("src.backend.brain.paste_instantly")
+@patch.object(brain, "send_hud")
+@patch.object(brain, "paste_instantly")
 def test_finalize_recording_if_ready_always_clears_engine_memory(mock_paste, mock_hud):
     """
     Verify that _finalize_recording_if_ready always calls engine.clear_internal_memory()

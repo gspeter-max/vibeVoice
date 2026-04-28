@@ -6,17 +6,17 @@ class FakeVAD:
     def __init__(self, scores):
         self._scores = iter(scores)
 
-    def is_speech(self, _audio_chunk, sample_rate=16000):
+    def is_speech(self, _audio_samples, sample_rate=16000):
         return next(self._scores)
 
 
 class RecordingVAD:
     def __init__(self, score):
         self.score = score
-        self.seen_audio_chunks = []
+        self.seen_audio_samples = []
 
-    def is_speech(self, audio_chunk, sample_rate=16000):
-        self.seen_audio_chunks.append(audio_chunk.copy())
+    def is_speech(self, audio_samples, sample_rate=16000):
+        self.seen_audio_samples.append(audio_samples.copy())
         return self.score
 
 
@@ -81,16 +81,16 @@ def test_gate_keeps_raw_audio_but_uses_analysis_audio_for_detection():
         frame_samples=4,
     )
 
-    raw_pcm16_bytes = b"\x01\x00" * 4
-    analysis_pcm16_bytes = b"\x02\x00" * 4
+    raw_audio_chunk = b"\x01\x00" * 4
+    analysis_audio_chunk = b"\x02\x00" * 4
 
     assert gate.push(
-        raw_pcm16_bytes,
+        raw_audio_chunk,
         now=0.0,
-        analysis_pcm16_bytes=analysis_pcm16_bytes,
+        analysis_chunk=analysis_audio_chunk,
     ) is True
-    assert gate.flush() == raw_pcm16_bytes
-    assert vad_engine.seen_audio_chunks[0].tolist() == [2 / 32768.0] * 4
+    assert gate.flush() == raw_audio_chunk
+    assert vad_engine.seen_audio_samples[0].tolist() == [2 / 32768.0] * 4
 
 
 def test_gate_uses_current_raw_frame_for_energy_fallback_not_first_frame_forever():
@@ -102,15 +102,15 @@ def test_gate_uses_current_raw_frame_for_energy_fallback_not_first_frame_forever
         frame_samples=4,
     )
 
-    loud_raw_pcm16_bytes = b"\x00\x10" * 4
-    quiet_raw_pcm16_bytes = b"\x00\x01" * 4
-    boosted_quiet_analysis_pcm16_bytes = b"\x00\x06" * 4
+    loud_raw_audio_chunk = b"\x00\x10" * 4
+    quiet_raw_audio_chunk = b"\x00\x01" * 4
+    boosted_quiet_analysis_audio_chunk = b"\x00\x06" * 4
 
-    assert gate.push(loud_raw_pcm16_bytes, now=0.0) is True
+    assert gate.push(loud_raw_audio_chunk, now=0.0) is True
     assert gate.push(
-        quiet_raw_pcm16_bytes,
+        quiet_raw_audio_chunk,
         now=0.1,
-        analysis_pcm16_bytes=boosted_quiet_analysis_pcm16_bytes,
+        analysis_chunk=boosted_quiet_analysis_audio_chunk,
     ) is False
 
 

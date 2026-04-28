@@ -277,7 +277,7 @@ def test_flush_current_chunk_prepends_last_chunk_overlap_for_nonfinal_chunk():
 
     with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
          patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00\x05\x00\x06\x00"), \
-         patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
+         patch.object(ear, "_boost_audio_chunk", side_effect=lambda b: b), \
          patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send:
         ear._flush_current_chunk(stop_session=False)
 
@@ -295,7 +295,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
 
     with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
          patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00"), \
-         patch.object(ear, "_boost_pcm16_bytes", side_effect=lambda b: b), \
+         patch.object(ear, "_boost_audio_chunk", side_effect=lambda b: b), \
          patch.object(ear, "_send_audio_chunk_to_brain", return_value=True) as mock_send, \
          patch.object(ear, "_commit_recording_session", return_value=True):
         ear._flush_current_chunk(stop_session=True)
@@ -330,9 +330,9 @@ def test_audio_callback_uses_boosted_audio_for_vad():
 
     gate.push.assert_called_once()
     assert gate.push.call_args.args == ()
-    assert gate.push.call_args.kwargs["pcm16_bytes"] == raw
-    # analysis_pcm16_bytes should be the boosted version (1 * 4 = 4)
-    assert gate.push.call_args.kwargs["analysis_pcm16_bytes"] == (b"\x04\x00" * 4)
+    assert gate.push.call_args.kwargs["audio_chunk"] == raw
+    # analysis_chunk should be the boosted version (1 * 4 = 4)
+    assert gate.push.call_args.kwargs["analysis_chunk"] == (b"\x04\x00" * 4)
 
 
 def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):

@@ -71,8 +71,8 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     conn = MockConn(sample_audio_bytes)
 
     with (
-        patch("src.backend.brain.send_hud") as mock_hud,
-        patch("src.backend.brain.paste_instantly") as mock_paste,
+        patch.object(brain, "send_hud") as mock_hud,
+        patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain.handle_connection(conn)
 
@@ -99,7 +99,7 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     conn = MockConn(sample_audio_bytes)
 
-    with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
+    with patch.object(brain, "send_hud"), patch.object(brain, "paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
     mock_engine.transcribe_chunk.assert_called_once()
@@ -119,8 +119,8 @@ def test_handle_connection_switch_model_command():
 
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
-    with patch(
-        "src.backend.brain.load_transcription_engine", return_value=mock_new_engine
+    with patch.object(
+        brain, "load_transcription_engine", return_value=mock_new_engine
     ) as mock_load:
         brain.handle_connection(conn)
 
@@ -141,7 +141,7 @@ def test_handle_connection_skips_too_short_audio():
     short_audio = b"\x00\x00" * 1600
     conn = MockConn(short_audio)
 
-    with patch("src.backend.brain.send_hud"), patch("src.backend.brain.paste_instantly") as mock_paste:
+    with patch.object(brain, "send_hud"), patch.object(brain, "paste_instantly") as mock_paste:
         brain.handle_connection(conn)
 
     mock_engine.transcribe_chunk.assert_not_called()
@@ -215,8 +215,8 @@ def test_finalize_session_pastes_stitched_text_directly():
 
     with (
         patch("src.backend.brain.log.info") as mock_log,
-        patch("src.backend.brain.send_hud"),
-        patch("src.backend.brain.paste_instantly") as mock_paste,
+        patch.object(brain, "send_hud"),
+        patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain._finalize_recording_if_ready(session_id, 0)
 

@@ -75,7 +75,7 @@ class SileroVAD:
             self._h = np.zeros_like(self._h)
             self._c = np.zeros_like(self._c)
 
-    def is_speech(self, audio_chunk: np.ndarray, sample_rate: int = 16000) -> float:
+    def is_speech(self, audio_samples: np.ndarray, sample_rate: int = 16000) -> float:
         """
         Analyzes a single frame of audio and returns a speech probability score.
         It first normalizes the input frame to exactly 512 samples, padding or
@@ -84,21 +84,21 @@ class SileroVAD:
         returning a score between 0.0 and 1.0. A higher score indicates a
         stronger confidence that the audio frame contains spoken human voice.
         """
-        if len(audio_chunk) == 0:
+        if len(audio_samples) == 0:
             return 0.0
 
         # The model expects a fixed-size frame, so we normalize the length here.
-        if len(audio_chunk) < 512:
-            audio_chunk = np.pad(audio_chunk, (0, 512 - len(audio_chunk)))
-        elif len(audio_chunk) > 512:
-            audio_chunk = audio_chunk[:512]
+        if len(audio_samples) < 512:
+            audio_samples = np.pad(audio_samples, (0, 512 - len(audio_samples)))
+        elif len(audio_samples) > 512:
+            audio_samples = audio_samples[:512]
 
         if self._version == 5:
             # Silero V5 ONNX streaming expects the current 512 samples preceded
             # by 64 samples of context from the previous frame. We maintain that
             # rolling window in self._context and prepend it here.
-            audio_chunk_2d = audio_chunk.reshape(1, -1)
-            input_with_context = np.concatenate([self._context, audio_chunk_2d], axis=1)
+            audio_samples_2d = audio_samples.reshape(1, -1)
+            input_with_context = np.concatenate([self._context, audio_samples_2d], axis=1)
             ort_inputs = {
                 "input": input_with_context,
                 "sr": np.array([sample_rate], dtype=np.int64),
@@ -110,7 +110,7 @@ class SileroVAD:
             self._context = input_with_context[:, -64:].copy()
         else:
             ort_inputs = {
-                "input": audio_chunk.reshape(1, -1),
+                "input": audio_samples.reshape(1, -1),
                 "sr": np.array([sample_rate], dtype=np.int64),
                 "h": self._h,
                 "c": self._c,
@@ -221,9 +221,9 @@ class SileroUtteranceGate:
 
     def push(
             self, 
-            pcm16_bytes: bytes, 
+            audio_chunk: bytes, 
             now: float, 
-            analysis_pcm16_bytes : bytes | None = None
+            analysis_chunk : bytes | None = None
         ) -> bool:
         """
         Feeds new microphone data into the gate for real-time analysis.
@@ -233,12 +233,12 @@ class SileroUtteranceGate:
         allowing the speech detection to automatically adapt to changing
         room environments like air conditioners or distant background chatter.
         """
-        if not pcm16_bytes:
+        if not audio_chunk:
             return False
-        self._raw_analysis_buffer.extend(pcm16_bytes)
-        self._analysis_buffer.extend(analysis_pcm16_bytes if analysis_pcm16_bytes is not None else pcm16_bytes)
+        self._raw_analysis_buffer.extend(audio_chunk)
+        self._analysis_buffer.extend(analysis_chunk if analysis_chunk is not None else audio_chunk)
         # Keep the full utterance audio so it can be flushed later.
-        self._buffer.extend(pcm16_bytes)
+        self._buffer.extend(audio_chunk)
 
         frame_bytes = self.frame_samples * 2
         speech_detected = False
