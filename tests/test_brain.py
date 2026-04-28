@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 
 import src.backend.brain as brain
+import src.backend.state as state
 from src.streaming.streaming_shared_logic import remove_duplicate_chunk_prefix
 
 
@@ -50,9 +51,9 @@ def clear_session_store():
     Runs before and after every test.
     Clears the global session_store so tests don't bleed into each other.
     """
-    brain.session_store.clear()
+    state.session_store.clear()
     yield
-    brain.session_store.clear()
+    state.session_store.clear()
 
 
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
@@ -65,7 +66,7 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
     mock_engine.transcribe_chunk.return_value = "hello world"
 
     # Set the engine in brain's global state
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
 
     conn = MockConn(sample_audio_bytes)
 
@@ -94,7 +95,7 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
     mock_engine = MagicMock()
     mock_engine.transcribe_chunk.return_value = "hello world"
 
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
 
     conn = MockConn(sample_audio_bytes)
 
@@ -114,7 +115,7 @@ def test_handle_connection_switch_model_command():
     mock_old_engine = MagicMock()
     mock_new_engine = MagicMock()
 
-    brain.backend_info["engine"] = mock_old_engine
+    state.backend_info["engine"] = mock_old_engine
 
     conn = MockConn(b"CMD_SWITCH_MODEL:tiny.en")
 
@@ -125,7 +126,7 @@ def test_handle_connection_switch_model_command():
 
     mock_load.assert_called_once_with("tiny.en")
     # The engine stored in brain must now be the new one
-    assert brain.backend_info["engine"] == mock_new_engine
+    assert state.backend_info["engine"] == mock_new_engine
 
 
 def test_handle_connection_skips_too_short_audio():
@@ -134,7 +135,7 @@ def test_handle_connection_skips_too_short_audio():
     engine.transcribe_chunk() at all.
     """
     mock_engine = MagicMock()
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
 
     # This audio is all zeros, which will be rejected as silence
     short_audio = b"\x00\x00" * 1600
@@ -178,14 +179,14 @@ def test_handle_audio_chunk_dedupes_against_last_chunk_text():
         "things are happening fine and doing H3 grid",
     ]
 
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
     session_id = "session123"
     audio_bytes = b"\x00\x10" * 32000
 
     brain._handle_audio_chunk(session_id, 0, 0, audio_bytes)
     brain._handle_audio_chunk(session_id, 0, 1, audio_bytes)
 
-    session = brain.session_store[session_id]
+    session = state.session_store[session_id]
     assert (
         session.recordings[0].transcript_parts[0]
         == "I want to see that things are happening fine"
@@ -201,16 +202,16 @@ def test_finalize_session_pastes_stitched_text_directly():
     session_id = "session123"
     mock_engine = MagicMock()
     # SessionState now takes 'engine', not 'backend' and 'model'
-    session = brain.SessionState(engine=mock_engine)
+    session = state.SessionState(engine=mock_engine)
     # Set up a completed recording at index 0
-    rec = brain.RecordingState()
+    rec = state.RecordingState()
     rec.received_count = 2
     rec.done_count = 2
     rec.closed = True
     rec.transcript_parts[0] = "hello"
     rec.transcript_parts[1] = "world"
     session.recordings[0] = rec
-    brain.session_store[session_id] = session
+    state.session_store[session_id] = session
 
     with (
         patch("src.backend.brain.log.info") as mock_log,
@@ -233,7 +234,7 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
     # Set a mock engine in global state so telemetry seed can read the model name
     mock_engine = MagicMock()
     mock_engine.model_name = "base.en"
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
 
     blob = (
         b"CMD_SESSION_EVENT:session123:0\n\n"
@@ -256,6 +257,7 @@ def test_brain_logs_match_pulse_format(capsys):
     """
     from unittest.mock import MagicMock
     import src.backend.brain as brain
+    import src.backend.state as state
     import numpy as np
 
     mock_engine = MagicMock()
@@ -264,7 +266,7 @@ def test_brain_logs_match_pulse_format(capsys):
 
     # Setup session
     session_id = "pulse_test_session"
-    brain.backend_info["engine"] = mock_engine
+    state.backend_info["engine"] = mock_engine
     
     # 1. Send first chunk (non-silent)
     brain._handle_audio_chunk(session_id, 0, 0, b"\x01\x10" * 1600)

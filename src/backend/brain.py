@@ -28,6 +28,12 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
+from src.backend.state import (
+    backend_info, backend_lock,
+    session_store, session_store_lock,
+    RecordingState, SessionState
+)
+
 try:
     from pynput.keyboard import Controller
 except ImportError:  # pragma: no cover
