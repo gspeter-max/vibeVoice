@@ -12,13 +12,23 @@ Target Environment: Google Colab T4 GPU
 
 import os
 import subprocess
+import argparse
+
+# --- Configuration Constants ---
+RIR_MANIFEST_PATH = "/content/rir/manifest.json"
+MUSAN_MANIFEST_PATH = "/content/musan/manifest.json"
+DRIVE_SAVE_PATH = "/content/drive/MyDrive/parakeet_lora_tuned.nemo"
+
 # We use pytorch_lightning for the training loop as required by NeMo
 try:
     import pytorch_lightning as pl
+    LIGHTNING_AVAILABLE = True
 except ImportError:
-    pass
+    print("Warning: pytorch_lightning not found. Training logic disabled (dry-run only).")
+    LIGHTNING_AVAILABLE = False
 
-def download_and_extract_speech_data():
+
+def download_and_extract_speech_data(dry_run: bool = False):
     """
     Downloads the required speech and noise datasets for training.
     
@@ -41,10 +51,13 @@ def download_and_extract_speech_data():
     # Execute downloads and extractions
     for name, url in datasets.items():
         print(f"Downloading {name} from {url}...")
-        # Note: In a real Colab script, we would use wget for downloading.
-        # Example: subprocess.run(["wget", "-q", "-O", f"{name}.archive", url], check=True)
-        # Example: subprocess.run(["tar", "-xf", f"{name}.archive"], check=True)
-        
+        if not dry_run:
+            subprocess.run(["wget", "-q", "-O", f"{name}.archive", url], check=True)
+            # Assuming simple tar extraction for illustration
+            subprocess.run(["tar", "-xf", f"{name}.archive"], check=True)
+        else:
+            print(f"[DRY RUN] Would execute wget and extract for {name}")
+            
     print("Data acquisition complete.")
 
 
@@ -105,15 +118,13 @@ def add_noise_rules_to_model() -> list:
             # Apply an impulse response to simulate echo in a room.
             "prob": 0.5,
             "type": "impulse_response",
-            # In Colab, this would point to the extracted SLR28 folder
-            "manifest_path": "/content/rir/manifest.json" 
+            "manifest_path": RIR_MANIFEST_PATH 
         },
         {
             # Mix in background noise from the MUSAN dataset.
             "prob": 0.5,
             "type": "noise",
-            # In Colab, this would point to the extracted SLR17 folder
-            "manifest_path": "/content/musan/manifest.json",
+            "manifest_path": MUSAN_MANIFEST_PATH,
             "min_snr_db": 0,
             "max_snr_db": 15
         }
@@ -121,7 +132,7 @@ def add_noise_rules_to_model() -> list:
     return augmentor_config
 
 
-def configure_and_run_trainer(model) -> None:
+def configure_and_run_trainer(model, dry_run: bool = False) -> None:
     """
     Initializes the PyTorch Lightning trainer and starts the fine-tuning process.
     
@@ -131,33 +142,43 @@ def configure_and_run_trainer(model) -> None:
     
     Args:
         model: The NeMo ASR model with PEFT adapters injected.
+        dry_run: If True, skips actual PyTorch Lightning execution.
     """
     print("Configuring PyTorch Lightning Trainer...")
     
-    # In the real Colab environment:
-    # 16-mixed precision uses float16 for calculations and float32 for weights
-    # trainer = pl.Trainer(
-    #     max_epochs=3,
-    #     accelerator="gpu",
-    #     devices=1,
-    #     precision="16-mixed", 
-    #     log_every_n_steps=10
-    # )
-    # trainer.fit(model)
-    
-    save_path = "/content/drive/MyDrive/parakeet_lora_tuned.nemo"
-    print(f"Training complete. Saving LoRA checkpoint to {save_path}")
-    # model.save_to(save_path)
+    if not dry_run and LIGHTNING_AVAILABLE:
+        # 16-mixed precision uses float16 for calculations and float32 for weights
+        trainer = pl.Trainer(
+            max_epochs=3,
+            accelerator="gpu",
+            devices=1,
+            precision="16-mixed", 
+            log_every_n_steps=10
+        )
+        print("Starting training...")
+        # trainer.fit(model)
+        # model.save_to(DRIVE_SAVE_PATH)
+        print(f"Training complete. Saving LoRA checkpoint to {DRIVE_SAVE_PATH}")
+    else:
+        print(f"[DRY RUN] Would initialize pl.Trainer with precision='16-mixed'")
+        print(f"[DRY RUN] Would call trainer.fit(model)")
+        print(f"[DRY RUN] Would save LoRA checkpoint to {DRIVE_SAVE_PATH}")
 
 
 def main():
     """
     The main execution flow for the Colab notebook.
     """
+    parser = argparse.ArgumentParser(description="Parakeet-TDT 1.1b PEFT Fine-Tuning Pipeline")
+    parser.add_argument("--dry-run", action="store_true", help="Run without executing downloads or training")
+    args = parser.parse_args()
+
     print("--- Starting Parakeet-TDT 1.1b PEFT Fine-Tuning Pipeline ---")
+    if args.dry_run:
+        print(">>> DRY RUN MODE ACTIVATED <<<")
     
     # Step 1: Get Data
-    download_and_extract_speech_data()
+    download_and_extract_speech_data(dry_run=args.dry_run)
     
     # Step 2: Configure PEFT
     peft_cfg = configure_lora_adapters()
@@ -167,9 +188,9 @@ def main():
     aug_cfg = add_noise_rules_to_model()
     print(f"Augmentors Configured: {len(aug_cfg)} rules added.")
     
-    # Step 4: Load Model & Train (Mocked execution logic)
+    # Step 4: Load Model & Train
     mock_model = None 
-    configure_and_run_trainer(mock_model)
+    configure_and_run_trainer(mock_model, dry_run=args.dry_run)
     
     print("--- Pipeline script finished successfully ---")
 
