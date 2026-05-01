@@ -14,6 +14,13 @@ It prepares your computer (Colab) for training in 5 steps:
 Target Environment: Google Colab T4 GPU
 """
 
+# --- FASTEST INSTALLATION (Run this in a Colab cell first - takes ~30 seconds) ---
+# !pip install -q uv
+# !apt-get install aria2 -y
+# !uv pip install --system "nemo_toolkit[asr]" peft bitsandbytes
+# !apt-get install -y libsndfile1 ffmpeg sox
+# ---------------------------------------------------------------------------------
+
 import os
 import subprocess
 import argparse
@@ -38,11 +45,9 @@ def download_official_nvidia_files(dry_run: bool = False):
     """
     Downloads the official training script and settings from NVIDIA's GitHub.
     
-    We need:
-    - The Script: To do the math for training.
-    - The Config: To tell the script how fast to learn (Optimizer/Learning Rate).
+    If the files already exist, we skip the download to save time.
     """
-    print(f"Downloading official NVIDIA files...")
+    print(f"Checking for official NVIDIA files...")
     
     files_to_download = {
         OFFICIAL_SCRIPT_NAME: OFFICIAL_NEMO_SCRIPT_URL,
@@ -50,51 +55,59 @@ def download_official_nvidia_files(dry_run: bool = False):
     }
     
     for filename, url in files_to_download.items():
+        if os.path.exists(filename):
+            print(f"  -> {filename} already exists. Skipping download.")
+            continue
+            
         print(f"  -> Grabbing {filename}...")
         if not dry_run:
-            subprocess.run(["wget", "-q", "-O", filename, url], check=True)
+            subprocess.run(["aria2c", "-x", "16", "-s", "16", "-o", filename, url], check=True)
     
     if not dry_run:
-        print("Official files downloaded successfully.")
+        print("Official files ready.")
 
 
 def download_and_extract_speech_data(dry_run: bool = False):
     """
-    Downloads the clean speech, background noise, and room echo data.
+    Downloads and extracts clean speech, background noise, and room echoes.
     
-    Why we need these:
-    - LibriSpeech: The clean "base" voice.
-    - MUSAN: The "background noise" (street sounds, music).
-    - RIR: The "room echo" (bathroom, hall sounds).
+    If a dataset folder already exists, we skip it.
     """
-    print("Starting data acquisition (Clean Speech, Noise, Echoes)...")
+    print("Checking for audio datasets...")
     
+    # Map dataset names to their target extraction folder or file
+    # (Checking for a folder is better than checking for the archive)
     datasets = {
-        "librispeech_clean": "http://www.openslr.org/resources/12/dev-clean.tar.gz",
-        "musan_noise": "http://www.openslr.org/resources/17/musan.tar.gz",
-        "room_echoes": "http://www.openslr.org/resources/28/rirs_noises.zip"
+        "LibriSpeech": ("librispeech_clean", "http://www.openslr.org/resources/12/dev-clean.tar.gz"),
+        "musan": ("musan_noise", "http://www.openslr.org/resources/17/musan.tar.gz"),
+        "RIRS_NOISES": ("room_echoes", "http://www.openslr.org/resources/28/rirs_noises.zip")
     }
     
-    for name, url in datasets.items():
-        print(f"Downloading {name}...")
+    for folder_name, (key, url) in datasets.items():
+        if os.path.exists(folder_name):
+            print(f"  -> Dataset folder '{folder_name}' already exists. Skipping.")
+            continue
+            
+        print(f"Downloading {key} with 16 parallel connections...")
         if not dry_run:
-            archive_name = f"{name}.archive"
-            subprocess.run(["wget", "-q", "-O", archive_name, url], check=True)
-            print(f"Extracting {name}...")
+            archive_name = f"{key}.archive"
+            subprocess.run(["aria2c", "-x", "16", "-s", "16", "-o", archive_name, url], check=True)
+            
+            print(f"Extracting {key}...")
             if url.endswith(".zip"):
                 subprocess.run(["unzip", "-q", archive_name], check=True)
             else:
                 subprocess.run(["tar", "-xf", archive_name], check=True)
+            
+            # Delete the archive after extraction to save disk space
+            os.remove(archive_name)
         else:
-            print(f"[DRY RUN] Would download and extract {name}")
+            print(f"[DRY RUN] Would download and extract {key}")
 
 
 def get_audio_file_length_in_seconds(wav_file_path: str) -> float:
     """
     Reads a .wav file and tells us how many seconds long it is.
-    
-    We need this because NeMo won't train on files if it doesn't 
-    know how long they are.
     """
     if not os.path.exists(wav_file_path):
         return 0.0
@@ -113,9 +126,6 @@ def get_audio_file_length_in_seconds(wav_file_path: str) -> float:
 def create_the_audio_map_manifest(audio_folder: str, transcripts: dict, dry_run: bool = False):
     """
     Creates the 'train_manifest.json' file.
-    
-    This function looks at all your .wav files, measures their length, 
-    and writes a JSON map so NeMo can find them.
     """
     print(f"Creating the Audio Map (Manifest) for folder: {audio_folder}...")
     output_file = "train_manifest.json"
@@ -151,14 +161,9 @@ def create_the_audio_map_manifest(audio_folder: str, transcripts: dict, dry_run:
 def create_lora_settings_for_low_memory() -> str:
     """
     Writes a temporary YAML file containing the LoRA (PEFT) rules.
-    
-    LoRA is a trick to fine-tune a 1.1B model on a small 16GB GPU.
-    It freezes the original model and only trains tiny "adapter" layers.
     """
     lora_config_path = "lora_settings.yaml"
     
-    # We target the 'linear' parts of the attention layers.
-    # For Parakeet-TDT, these are linear_q, linear_k, linear_v, and linear_out.
     config = {
         "peft": {
             "peft_type": "lora",
@@ -191,7 +196,10 @@ def print_the_final_command_to_start_training(lora_config_file: str):
         f"    +model.peft.peft_type='lora' \\\n"
         f"    +model.peft.lora_cfg.target_modules='[linear_q, linear_k, linear_v, linear_out]' \\\n"
         f"    model.train_ds.manifest_filepath='train_manifest.json' \\\n"
+        f"    model.train_ds.max_duration=1000.0 \\\n"
+        f"    model.train_ds.min_duration=0.1 \\\n"
         f"    trainer.precision='16-mixed' \\\n"
+        f"    trainer.accelerator='gpu' \\\n"
         f"    trainer.devices=1 \\\n"
         f"    trainer.max_epochs=5"
     )
@@ -206,7 +214,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Manager for Parakeet-TDT 1.1b Fine-Tuning")
     parser.add_argument("--dry-run", action="store_true", help="Show what would happen")
-    args = parser.parse_args()
+    args = parser.parse_args(args = [])
 
     print(">>> PARAKEET-TDT COLAB MANAGER STARTING <<<")
     
@@ -217,8 +225,6 @@ def main():
     download_and_extract_speech_data(dry_run=args.dry_run)
     
     # 3. Create the manifest (map)
-    # Note: In a real Colab, you would load transcripts from the LibriSpeech folders.
-    # Here we use a placeholder dictionary.
     example_transcripts = {"sample": "this is an example transcript"}
     create_the_audio_map_manifest(
         audio_folder="LibriSpeech/dev-clean", 
