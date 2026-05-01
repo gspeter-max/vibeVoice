@@ -1,6 +1,9 @@
 import threading
 from dataclasses import dataclass, field
-from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
 
 # Global state
 backend_info = {"engine": None}
@@ -36,7 +39,7 @@ class SessionState:
     # recordings[0] = first button press, recordings[1] = second, …
     recordings: dict = field(default_factory=dict)
     stt_time: float = 0.0
-    telemetry_recorder: StreamingSessionTelemetryRecorder | None = None
+    telemetry_recorder: "StreamingSessionTelemetryRecorder | None" = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def get_or_create_recording(self, rec_idx: int) -> "RecordingState":

@@ -20,7 +20,7 @@ from src.streaming.streaming_shared_logic import (
     analyze_duplicate_chunk_prefix,
     remove_duplicate_chunk_prefix,
 )
-from src.streaming.streaming_session_telemetry import StreamingSessionTelemetryRecorder
+from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
 from src.utils.env_utils import get_float_from_environment
 from src.utils.bootstrap import fix_macos_library_paths
 from src import log
