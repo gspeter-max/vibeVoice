@@ -36,6 +36,35 @@ trap cleanup EXIT INT TERM
 # Configuration
 VENV_PYTHON="./.venv/bin/python"
 
+# 0. Ensure .venv exists (Auto-setup for new clones)
+if [ ! -f "$VENV_PYTHON" ]; then
+    log_info "No virtual environment found. Starting auto-setup..."
+    
+    # Linux-specific check for PortAudio (pyaudio dependency)
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if ! ldconfig -p | grep -q libportaudio >/dev/null 2>&1; then
+            log_error "Missing system audio headers (PortAudio)."
+            log_info "Please run: sudo apt-get update && sudo apt-get install -y portaudio19-dev python3-dev gcc"
+            exit 1
+        fi
+    fi
+
+    if command -v uv >/dev/null 2>&1; then
+        log_info "Detected 'uv'. Running 'uv sync'..."
+        uv sync
+    else
+        log_warn "'uv' not found. Falling back to standard venv/pip (this might be slower)..."
+        python3 -m venv .venv
+        ./.venv/bin/pip install -e .
+    fi
+    
+    if [ ! -f "$VENV_PYTHON" ]; then
+        log_error "Auto-setup failed. Please install dependencies manually."
+        exit 1
+    fi
+    log_info "✅ Environment setup complete."
+fi
+
 # 1. Run the Setup Wizard (Foreground)
 # This handles Provider selection, API keys, Mode, and Telemetry using Rich.
 "$VENV_PYTHON" src/utils/wizard.py
