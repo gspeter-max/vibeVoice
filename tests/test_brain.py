@@ -72,7 +72,7 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
 
     with (
         patch.object(brain, "send_hud") as mock_hud,
-        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain.handle_connection(conn)
@@ -103,11 +103,10 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     with (
         patch.object(brain, "send_hud"),
-        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain.handle_connection(conn)
-
     mock_engine.transcribe_chunk.assert_called_once()
     mock_groq.assert_called_once_with("hello world")
     mock_paste.assert_called_once_with("hello world cleaned ")
@@ -223,11 +222,10 @@ def test_finalize_session_pastes_stitched_text_directly():
     with (
         patch("src.backend.brain.log.info") as mock_log,
         patch.object(brain, "send_hud"),
-        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain._finalize_recording_if_ready(session_id, 0)
-
     mock_groq.assert_called_once_with("hello world")
     mock_paste.assert_called_once_with("hello world cleaned ")
     logged_messages = [call.args[0] for call in mock_log.call_args_list]

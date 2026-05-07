@@ -30,19 +30,6 @@ _RIGHT_COMMAND_VIRTUAL_KEY = 54
 def _is_right_cmd(key) -> bool:
     """
     Checks if a keyboard event is actually the 'Right Command' key.
-    
-    Why this exists: 
-    Different computers (Mac, Windows, Linux) and different versions of Python 
-    report the 'Right Command' key in different ways. This function acts as 
-    a "universal translator" to make sure we always catch it.
-
-    Step-by-step logic:
-    1. Check if the key object is the standard 'cmd_r' object from pynput.
-    2. If not, check if the key has a text name equal to 'cmd_r'.
-    3. If still not found, check if it matches the macOS 'Virtual Key' code (54).
-    
-    Returns:
-        True if it's our target key, False otherwise.
     """
     # 1. Standard check
     _key_class = getattr(keyboard, 'Key', None)
@@ -63,14 +50,11 @@ class InputTrigger:
     """
     The 'Brain' for handling keyboard and mouse shortcuts.
     
-    It watches the Right Command key and Right Mouse button and tells 
-    the application when to start or stop recording based on how long 
-    the user holds them.
-    
     Features:
     - Smart filtering: Ignores noisy "auto-repeat" signals from the OS.
     - Thread Safety: Uses a Lock to prevent crashes when multi-tasking.
-    - Simple API: Just provide 3 functions (callbacks) and it does the rest.
+    - Delayed Start: Waits 0.3s before triggering Push-to-Talk to prevent accidental flashes.
+    - Double Tap Toggle: Tapping twice quickly locks the recording on.
     """
     def __init__(
         self, 
@@ -79,30 +63,23 @@ class InputTrigger:
         on_toggle_recording: Callable[[], None],
         hold_threshold_seconds: float = 0.4
     ):
-        """
-        Initializes the trigger with custom behavior.
-        
-        Step-by-step setup:
-        1. Store the functions (callbacks) that we will call when things happen.
-        2. Set the 'hold threshold' (0.4s) which separates a 'tap' from a 'hold'.
-        3. Create a 'Safety Lock' (threading.Lock) to keep our data safe.
-        4. Prepare empty variables to track key/mouse state.
-        """
         # Functions to call
         self._on_start_recording = on_start_recording
         self._on_stop_recording = on_stop_recording
         self._on_toggle_recording = on_toggle_recording
         
-        # Timing settings
-        self._hold_threshold = hold_threshold_seconds
-        
         # Security & State
         self._state_lock = threading.Lock()
         
         # Keyboard tracking
-        self._cmd_press_start_time = 0.0
         self._is_cmd_key_currently_held = False # Guards against OS auto-repeat noise
         self._is_toggle_mode_active = False
+        
+        # Double-tap and delayed hold tracking
+        self._last_cmd_release_time = 0.0
+        self._double_tap_threshold = 0.3
+        self._delayed_start_timer: threading.Timer | None = None
+        self._is_recording_due_to_hold = False
         
         # Mouse tracking
         self._mouse_press_start_time = 0.0
@@ -114,15 +91,7 @@ class InputTrigger:
         self._mouse_listener_thread = None
 
     def start_listening(self):
-        """
-        Spins up the background threads to start watching for inputs.
-        
-        Step-by-step logic:
-        1. Grab the Safety Lock.
-        2. Create a Keyboard Listener if it doesn't exist.
-        3. Create a Mouse Listener if it doesn't exist.
-        4. Start both threads so they run in the background.
-        """
+        """Spins up the background threads to start watching for inputs."""
         with self._state_lock:
             if self._keyboard_listener_thread is None:
                 self._keyboard_listener_thread = keyboard.Listener(
@@ -138,14 +107,7 @@ class InputTrigger:
                 self._mouse_listener_thread.start()
 
     def stop_listening(self):
-        """
-        Shuts down the background listeners.
-        
-        Step-by-step logic:
-        1. Grab the Safety Lock.
-        2. Stop and clear the keyboard listener.
-        3. Stop and clear the mouse listener.
-        """
+        """Shuts down the background listeners and timers."""
         with self._state_lock:
             if self._keyboard_listener_thread:
                 self._keyboard_listener_thread.stop()
@@ -153,87 +115,83 @@ class InputTrigger:
             if self._mouse_listener_thread:
                 self._mouse_listener_thread.stop()
                 self._mouse_listener_thread = None
+            if self._delayed_start_timer:
+                self._delayed_start_timer.cancel()
+                self._delayed_start_timer = None
+
+    def _trigger_hold_recording(self):
+        """Called by the background timer 0.3s after the user presses the key."""
+        with self._state_lock:
+            # If the user is STILL physically holding the key, and we aren't in toggle mode...
+            if self._is_cmd_key_currently_held and not self._is_toggle_mode_active:
+                self._is_recording_due_to_hold = True
+                self._on_start_recording(from_hold=True)
 
     def _handle_key_press(self, key, current_time: float):
-        """
-        Processes a 'Key Down' event from the OS.
-        
-        Step-by-step logic:
-        1. Ignore if the key is not the Right Command.
-        2. Grab the Safety Lock.
-        3. Check 'Auto-repeat': If the key is already held, STOP (OS is being noisy).
-        4. Mark the key as 'Physically Held'.
-        5. Check 'Toggle Mode': If we are already recording, STOP the session and exit.
-        6. Start Recording: Save the start time and tell the app to begin.
-        """
+        """Processes a 'Key Down' event from the OS."""
         if not _is_right_cmd(key):
             return
 
         with self._state_lock:
-            # Step 3: Guard against the "Holding down" repeat signals
+            # Guard against the "Holding down" repeat signals from the OS
             if self._is_cmd_key_currently_held:
                 return
             
-            # Step 4: Update physical state
             self._is_cmd_key_currently_held = True
 
-            # Step 5: Handle "Toggle Off" (User tapped it again while recording)
+            # If we are already recording in Toggle Mode, a single tap turns it off.
             if self._is_toggle_mode_active:
                 self._is_toggle_mode_active = False
                 self._on_stop_recording(stop_session=True)
                 return
 
-            # Step 6: Begin a new session
-            self._cmd_press_start_time = current_time
-            self._on_start_recording(from_hold=False)
+            # Check how long it has been since we last let go of the key
+            time_since_last_release = current_time - self._last_cmd_release_time
+            
+            if time_since_last_release <= self._double_tap_threshold:
+                # It's a double tap!
+                if self._delayed_start_timer:
+                    self._delayed_start_timer.cancel()
+                    self._delayed_start_timer = None
+                
+                self._is_toggle_mode_active = True
+                self._on_toggle_recording()
+            else:
+                # It's the first press. Do NOT start recording yet. 
+                # Start a 0.3s timer. If they hold it that long, it's a push-to-talk.
+                if self._delayed_start_timer:
+                    self._delayed_start_timer.cancel()
+
+                # threading.Timer =  if  self._double_tap_threshold hit  then call self._trigger_hold_recording() 
+                self._delayed_start_timer = threading.Timer(self._double_tap_threshold, self._trigger_hold_recording)
+                self._delayed_start_timer.start()
 
     def _handle_key_release(self, key, current_time: float):
-        """
-        Processes a 'Key Up' event from the OS.
-        
-        Step-by-step logic:
-        1. Ignore if the key is not the Right Command.
-        2. Grab the Safety Lock.
-        3. Mark the key as 'Physically Released'.
-        4. Ignore if we just entered 'Toggle Mode' (logic handled in press).
-        5. Calculate duration: (Current Time - Original Press Time).
-        6. Decide:
-           - If held >= 0.4s: Long Hold. Tell the app to STOP immediately.
-           - If held < 0.4s: Short Tap. Enter 'Toggle Mode' (stay recording).
-        """
+        """Processes a 'Key Up' event from the OS."""
         if not _is_right_cmd(key):
             return
             
         with self._state_lock:
-            # Step 3: Update physical state
             self._is_cmd_key_currently_held = False
+            self._last_cmd_release_time = current_time
             
-            # Step 4: Guard check
+            # They let go! Cancel the delayed timer so it doesn't fire.
+            # If it was just a quick tap (like CMD+C), nothing will have recorded.
+            if self._delayed_start_timer:
+                self._delayed_start_timer.cancel()
+                self._delayed_start_timer = None
+                
+            # If we are in toggle mode, releasing the key means nothing. Just keep recording.
             if self._is_toggle_mode_active: 
                 return
 
-            # Step 5 & 6: Timing calculation
-            duration_held = current_time - self._cmd_press_start_time
-            
-            if duration_held >= self._hold_threshold:
-                # User held it down: Stop now that they let go.
+            # If the delayed timer fired and we WERE recording from a hold, stop it now.
+            if self._is_recording_due_to_hold:
+                self._is_recording_due_to_hold = False
                 self._on_stop_recording(stop_session=True)
-            else:
-                # User just tapped it: Switch to 'Stay On' (Toggle) mode.
-                self._is_toggle_mode_active = True
-                self._on_toggle_recording()
 
     def _handle_mouse_click(self, x, y, button, pressed):
-        """
-        Processes mouse clicks (Down or Up).
-        
-        Step-by-step logic:
-        1. Ignore if it's not the Right Mouse Button.
-        2. Grab the Safety Lock.
-        3. If Pressed: Record the start time and set 'Mouse Down' flag.
-        4. If Released: Set 'Mouse Up' flag. If we were recording because 
-           of this hold, stop it immediately.
-        """
+        """Processes mouse clicks (Down or Up)."""
         if button != getattr(mouse.Button, 'right', None):
             return
             
@@ -250,21 +208,10 @@ class InputTrigger:
                     self._is_recording_due_to_mouse_hold = False
                 
     def check_mouse_hold_threshold(self) -> bool:
-        """
-        A 'Polling' function to check if the mouse has been held long enough.
-        
-        Step-by-step logic:
-        1. Grab the Safety Lock.
-        2. Check: Is the mouse button currently down AND are we NOT yet recording?
-        3. Check Time: Has it been >= 1.0 second since the press started?
-        4. Action: Start recording and return True. Otherwise return False.
-        """
+        """A 'Polling' function to check if the mouse has been held long enough."""
         with self._state_lock:
-            # Step 2: Basic conditions
             if self.is_mouse_button_held_down and not self._is_recording_due_to_mouse_hold:
-                # Step 3: Timing check
                 if time.time() - self._mouse_press_start_time >= 1.0:
-                    # Step 4: Fire the start command
                     self._is_recording_due_to_mouse_hold = True
                     self._on_start_recording(from_hold=True)
                     return True

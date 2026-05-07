@@ -250,19 +250,22 @@ class RoundedRectangularIndicatorWidget(QWidget):
         painter.setPen(Qt.NoPen)
 
         for i in range(num_bars):
-            # Coherent Traveling Wave — a smooth sine wave that travels across the bars,
-            # creating a beautiful liquid "flow" effect instead of chaotic random spikes.
-            # Speed = elapsed * 8.0. Wavelength = i * 0.8.
-            # Using (sin + 1)/2 makes the bottoms of the wave perfectly rounded and smooth,
-            # completely eliminating the sharp "bouncing ball" bottoms of an abs(sin) wave.
-            wave_val = (math.sin(elapsed * 8.0 - i * 0.8) + 1.0) / 2.0
+            offset = self._bar_phase_offsets[i]
+
+            # Multi-frequency layered oscillation — three sin waves at different
+            # speeds create complex, natural movement (not robotic single-sin)
+            wave = (
+                0.50 * math.sin(elapsed * 3.0 + offset) +
+                0.30 * math.sin(elapsed * 5.7 + offset * 1.3) +
+                0.20 * math.sin(elapsed * 1.3 + offset * 0.7)
+            )
 
             # Center-weighted bell curve — center bars reach full height,
             # edge bars are ~45% shorter (mimics real audio spectrum shape)
             center_weight = 1.0 - abs(i - mid_index) / mid_index * 0.45
 
             # Final bar height
-            bar_h = 1.5 + (amp * wave_val * center_weight)
+            bar_h = 1.5 + (amp * abs(wave) * center_weight)
             bar_h = min(bar_h, pill_rect.height() - 6)  # Stay within pill bounds
 
             # Fade out opacity when amp approaches 0 so dots completely disappear

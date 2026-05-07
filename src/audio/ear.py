@@ -344,7 +344,7 @@ class Ear:
     audio data and with the HUD to provide visual feedback to the user.
     """
     def __init__(self, input_device_index=None):
-        self.pyaudio_libaray_for_capturing_audio = pyaudio.PyAudio()
+        self.pyaudio_library_for_capturing_audio = pyaudio.PyAudio()
         self.stream = None
         self.is_recording = False
         self._lock = threading.Lock()
@@ -360,11 +360,19 @@ class Ear:
             log.info("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)")
 
         if input_device_index is None:
-            self.input_device_index = self.pyaudio_libaray_for_capturing_audio.get_default_input_device_info().get("index")
+            # Check environment variable first (saved by wizard_tui.py)
+            env_mic_index = os.environ.get("VIBEVOICE_MIC_INDEX")
+            if env_mic_index is not None:
+                try:
+                    self.input_device_index = int(env_mic_index)
+                except ValueError:
+                    self.input_device_index = self.pyaudio_library_for_capturing_audio.get_default_input_device_info().get("index")
+            else:
+                self.input_device_index = self.pyaudio_library_for_capturing_audio.get_default_input_device_info().get("index")
         else:
             self.input_device_index = input_device_index
 
-        self.active_mic_name = self.pyaudio_libaray_for_capturing_audio.get_device_info_by_index(self.input_device_index).get("name")
+        self.active_mic_name = self.pyaudio_library_for_capturing_audio.get_device_info_by_index(self.input_device_index).get("name")
 
         self.hud_proc = None
         self._cmd_press_time = 0.0
@@ -923,7 +931,7 @@ class Ear:
             except Exception:
                 pass
 
-        self.stream = self.pyaudio_libaray_for_capturing_audio.open(
+        self.stream = self.pyaudio_library_for_capturing_audio.open(
             format=FORMAT,
             channels=CHANNELS,
             rate=RATE,
@@ -1142,59 +1150,29 @@ class Ear:
         if recording:
             now = time.time()
             if now - self._recording_level_log_time >= RECORDING_LEVEL_LOG_INTERVAL:
-                meter = "█" * min(int(rms * 500), 50)
-                log.info(f"\r  Level: [{meter:<50}]")
+                meter_width = 30
+                level = min(int(rms * 300), meter_width)
+                meter = "█" * level + "░" * (meter_width - level)
+                # Use \r to keep the meter on a single line
+                sys.stdout.write(f"\r  Voice Level: [{meter}] ")
+                sys.stdout.flush()
                 self._recording_level_log_time = now
 
             if self._is_silence_streaming_mode():
                 # --- Nemotron Fixed Time Gap Logic ---
-                # Nemotron works best when we send sound every 1.12 seconds.
-                # If we are using Nemotron, we ignore silence and just use this time gap.
                 if "nemotron" in self.current_model.lower():
                     time_since_last_chunk = now - self._chunk_started_at
                     if time_since_last_chunk >= 1.12:
-                        log.info(f"\r[Ear] 💓 Nemotron time gap reached (1.12s); sending sound")
+                        # Log removed for Zen mode
                         self._stop_and_send(stop_session=False)
                     return
-                # --- End Nemotron Logic ---
 
-                # Silence mode watches for speech ending so it can send a chunk.
+                # Silence mode watches for speech ending
                 if self._utterance_gate.has_speech_started() and not self._silence_pending_logged:
                     silence_elapsed = self._utterance_gate.silence_elapsed(now)
                     if silence_elapsed > 0.0:
                         self._silence_pending_logged = True
-                        log.info(
-                            f"[Ear] 🤫 Silence pending ({silence_elapsed:.2f}s / {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s)",
-                        )
 
-                if (
-                    not self._utterance_gate.has_speech_started()
-                    and not self._vad_no_speech_warned
-                    and self._chunk_started_at > 0.0
-                    and (now - self._chunk_started_at) >= 1.0
-                ):
-                    try:
-                        max_score = self._utterance_gate.max_score()
-                    except Exception:
-                        max_score = 0.0
-                    log.info(
-                        f"[Ear] ⚠️  VAD has not entered speech state yet "
-                        f"(max_score={max_score:.3f}, threshold={VAD_THRESHOLD:.2f}, "
-                        f"last_energy={self._utterance_gate.last_energy():.4f}, "
-                        f"energy_threshold={self._utterance_gate.last_dynamic_threshold():.4f})",
-                    )
-                    self._send_session_event_to_brain(
-                        "vad_no_speech_warning",
-                        {
-                            "chunk_index": self._chunk_seq,
-                            "max_score": round(max_score, 3),
-                            "threshold": round(VAD_THRESHOLD, 2),
-                            "last_energy": round(self._utterance_gate.last_energy(), 4),
-                            "energy_threshold": round(self._utterance_gate.last_dynamic_threshold(), 4),
-                        },
-                    )
-                    self._vad_no_speech_warned = True
-                
                 silence_elapsed = (
                     self._utterance_gate.silence_elapsed(now)
                     if self._utterance_gate.has_speech_started()
@@ -1208,9 +1186,7 @@ class Ear:
                     silence_duration_seconds=silence_elapsed,
                 )
                 if split_decision.should_split_now:
-                    log.info(
-                        f"\r[Ear] ✂️  Silence threshold hit ({silence_elapsed:.2f}s >= {VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT:.2f}s); sending chunk",
-                    )
+                    # Log removed for Zen mode
                     self._stop_and_send(stop_session=False)
 
     def cleanup(self):
@@ -1224,34 +1200,64 @@ class Ear:
         """
         self._close_brain_stream()
         self._close_mic_stream()
-        self.pyaudio_libaray_for_capturing_audio.terminate()
+        self.pyaudio_library_for_capturing_audio.terminate()
 
+
+from src.input.hotkeys import InputTrigger
 
 def start_ear():
     """
     The main entry point for the Ear process.
-    It handles initial microphone selection, starts the background
-    terminal menu, and initializes the Ear engine. It also sets up
-    keyboard and mouse listeners to capture user input and enters
-    the main recording loop. This function coordinates all the
-    moving parts required to turn your voice into digital text.
     """
-    p_temp = pyaudio.PyAudio()
-    selected_mic_index = select_mic(p_temp)
-    p_temp.terminate()
+    # 1. Detect Microphone
+    env_mic_index = os.environ.get("VIBEVOICE_MIC_INDEX")
+    if env_mic_index is not None:
+        try:
+            selected_mic_index = int(env_mic_index)
+            log.info(f"[Ear] Using microphone index {selected_mic_index} from .env")
+        except ValueError:
+            p_temp = pyaudio.PyAudio()
+            selected_mic_index = select_mic(p_temp)
+            p_temp.terminate()
+    else:
+        p_temp = pyaudio.PyAudio()
+        selected_mic_index = select_mic(p_temp)
+        p_temp.terminate()
 
     ear = Ear(input_device_index=selected_mic_index)
 
     menu = TerminalMenu(ear_instance=ear)
     menu.start()
 
-    # Keyboard listener for Right CMD shortcut
-    listener = keyboard.Listener(on_press=ear.on_press, on_release=ear.on_release)
-    listener.start()
+    def _start_recording_wrapper(from_hold: bool):
+        if ear._is_no_streaming_mode():
+            if not ear._open_brain_stream():
+                return
 
-    # Mouse listener for hold-to-record
-    mouse_listener = mouse.Listener(on_click=ear.on_mouse_click)
-    mouse_listener.start()
+        ear._start_recording_state(from_hold=from_hold)
+        ear._cmd_press_time = time.time()
+        # Clean Zen UI: No more "RECORDING" banners, the meter handles it.
+
+        threading.Thread(target=ear._send_hud, args=("listen",), daemon=True).start()
+        ear._start_volume_sender()
+
+    def _stop_recording_wrapper(stop_session: bool):
+        # Clean Zen UI: No more "Stopping" logs.
+        ear._stop_and_send(stop_session=stop_session)
+        ear._toggle_active = False
+
+    def _toggle_recording_wrapper():
+        ear._toggle_active = True
+        log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
+        _start_recording_wrapper(from_hold=False)
+
+    input_trigger = InputTrigger(
+        on_start_recording=_start_recording_wrapper,
+        on_stop_recording=_stop_recording_wrapper,
+        on_toggle_recording=_toggle_recording_wrapper
+    )
+    input_trigger.start_listening()
+
     log.info("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record")
 
     backend_label = {
@@ -1261,23 +1267,16 @@ def start_ear():
     mic_mode = "Voice Isolation (macOS)" if os.environ.get("VOICE_ISOLATION", "0") == "1" else "Standard (Raw Audio)"
 
     
-    log.info("╔══════════════════════════════════════════════════╗")
-    log.info("║      🎙️  PARAKEET FLOW v2 — STREAMING MODE       ║")
-    log.info(f"║  Backend : {backend_label:<38}║")
-    log.info(f"║  Mic Mode: {mic_mode:<38}║")
-    log.info(f"║  Hotkey  : RIGHT CMD (hold to record)            ║")
-    log.info("╚══════════════════════════════════════════════════╝")
-    log.info(" Press [1] Conformer    [2] Moonshine")
-    log.info(" Press [3] Parakeet v2  [4] Parakeet v3")
-    
-    active_models = get_active_models()
-    if "nemotron-streaming-0.6b" in active_models:
-        log.info(" Press [5] Nemotron     [t] Self-test")
-    else:
-        log.info(" Press [t] Self-test")
-    log.info("─" * 52)
-    log.info(" Brain output prints directly in this terminal.")
-    log.info("─" * 52)
+    # --- Zen UI: Minimal Startup Status ---
+    backend_label = {
+        "parakeet": "Parakeet TDT v3",
+    }.get(BACKEND, BACKEND)
+
+    log.info("─" * 60)
+    log.info(f"🎙️  VIBEVOICE PRO | {backend_label} | {ear.active_mic_name}")
+    log.info(f"Hotkey: RIGHT CMD (hold) | Mouse: RIGHT BUTTON (hold)")
+    log.info("─" * 60)
+    log.info("Ready. Press hotkey to record.")
 
     try:
         ear.record_loop()

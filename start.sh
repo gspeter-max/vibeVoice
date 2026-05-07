@@ -33,41 +33,25 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Load environment
+# Configuration
+VENV_PYTHON="./.venv/bin/python"
+
+# 1. Run the Setup Wizard (Foreground)
+# This handles Provider selection, API keys, Mode, and Telemetry using Rich.
+"$VENV_PYTHON" src/utils/wizard.py
+
+# 2. Load the UPDATED environment
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
-# Configuration
 export BACKEND="${BACKEND:-parakeet}"
 export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
 export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
-export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-}"
+export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-0}"
+export RECORDING_MODE="${RECORDING_MODE:-silence_streaming}"
 export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
 
-# Recording Mode Selection
-export RECORDING_MODE="${RECORDING_MODE:-}"
-if [ -z "$RECORDING_MODE" ]; then
-    echo "Select recording mode:"
-    echo "  [1] no_streaming"
-    echo "  [2] silence_streaming (default)"
-    read -r -p "Enter choice [1/2]: " mode_choice
-    [[ "$mode_choice" == "1" ]] && RECORDING_MODE="no_streaming" || RECORDING_MODE="silence_streaming"
-fi
-
-if [ -z "$STREAMING_TELEMETRY_ENABLED" ]; then
-    if [[ "${START_SH_DRY_RUN:-0}" == "1" ]]; then
-        STREAMING_TELEMETRY_ENABLED="0"
-    else
-        echo "Enable streaming telemetry JSON capture?"
-        echo "  [1] no (default)"
-        echo "  [2] yes"
-        read -r -p "Enter choice [1/2]: " telemetry_choice
-        [[ "$telemetry_choice" == "2" ]] && STREAMING_TELEMETRY_ENABLED="1" || STREAMING_TELEMETRY_ENABLED="0"
-    fi
-fi
-
-VENV_PYTHON="./.venv/bin/python"
 
 # Startup Banner
 echo "
@@ -130,5 +114,4 @@ sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
 "$VENV_PYTHON" src/audio/ear.py
-y
-y
+

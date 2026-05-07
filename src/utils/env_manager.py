@@ -5,53 +5,84 @@ It can check if a key exists, ask the user for a new one,
 and save it to the .env file automatically.
 """
 import os
+import sys
 from rich.console import Console
 from rich.prompt import Prompt
 
 # Initialize the Rich console for beautiful terminal output
 console = Console()
 
+def is_interactive() -> bool:
+    """
+    Checks if the current process is running in an interactive terminal.
+    Verifies both stdout (output) and stdin (input) are connected to a TTY.
+    """
+    return console.is_terminal and sys.stdin.isatty()
+
+def save_to_env(key: str, value: str) -> None:
+    """
+    Saves a key-value pair to the .env file idempotently.
+    If the key exists, it updates it. If not, it appends it.
+    """
+    env_path = ".env"
+    lines = []
+    
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+    # Normalize value and build the line
+    new_line = f"{key}={value.strip()}\n"
+    found = False
+    updated_lines = []
+
+    for line in lines:
+        if line.startswith(f"{key}="):
+            updated_lines.append(new_line)
+            found = True
+        else:
+            updated_lines.append(line)
+
+    if not found:
+        # Ensure file ends with newline before appending
+        if updated_lines and not updated_lines[-1].endswith("\n"):
+            updated_lines.append("\n")
+        updated_lines.append(new_line)
+
+    with open(env_path, "w") as f:
+        f.writelines(updated_lines)
+    
+    # Update current process environment
+    os.environ[key] = value.strip()
+
 def check_and_ask_for_api_key(provider_name: str, env_var_name: str) -> None:
     """
-    Checks if an API key exists in the environment or .env file.
-    If it is missing, it asks the user to paste it and saves it.
-    
-    Args:
-        provider_name: The name of the AI company (e.g., "Groq").
-        env_var_name: The name of the secret variable (e.g., "GROQ_API_KEY").
+    Checks if an API key exists. If missing and interactive, prompts user.
     """
-    # 1. First, check if the key is already loaded in the environment
+    # 1. Check environment/env file logic
     if os.environ.get(env_var_name):
         return
 
-    # 2. If not in environment, try to see if it's in the .env file but not loaded
     if os.path.exists(".env"):
         with open(".env", "r") as env_file:
             for line in env_file:
-                # Look for lines like "KEY=VALUE"
                 if line.startswith(f"{env_var_name}="):
-                    # Found it! Extract the value and save it to the environment
                     value = line.strip().split("=", 1)[1]
                     os.environ[env_var_name] = value
                     return
 
-    # 3. If we are here, the key is really missing.
-    # We warn the user using beautiful colors.
+    # 2. Key is missing. Check if we can actually ask the user.
+    if not is_interactive():
+        console.print(f"[bold red]❌ API key missing for {provider_name} and no terminal detected to ask.[/bold red]")
+        return
+
     console.print(f"\n[bold yellow]⚠️  API key missing for {provider_name}.[/bold yellow]")
     console.print(f"You can get your key from the {provider_name} dashboard.\n")
 
-    # 4. Ask the user to paste their key
-    # Prompt.ask will wait for the user to type and press Enter
-    user_key = Prompt.ask(f"Please paste your [bold cyan]{provider_name} API Key[/bold cyan]")
-
-    if user_key:
-        # 5. Save the key to the .env file so we don't ask again next time
-        # We use "a" to append to the end of the file
-        with open(".env", "a") as env_file:
-            # Add a newline first to be safe
-            env_file.write(f"\n{env_var_name}={user_key.strip()}\n")
-        
-        # 6. Also put it in the current session memory (environment)
-        os.environ[env_var_name] = user_key.strip()
-        
-        console.print(f"[bold green]✅ Successfully saved {provider_name} API key to .env![/bold green]\n")
+    try:
+        user_key = Prompt.ask(f"Please paste your [bold cyan]{provider_name} API Key[/bold cyan]")
+        if user_key:
+            save_to_env(env_var_name, user_key)
+            console.print(f"[bold green]✅ Successfully saved {provider_name} API key![/bold green]\n")
+    except EOFError:
+        return

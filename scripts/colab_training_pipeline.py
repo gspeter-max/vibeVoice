@@ -196,6 +196,8 @@ def print_the_final_command_to_start_training(lora_config_file: str):
         f"    +model.peft.peft_type='lora' \\\n"
         f"    +model.peft.lora_cfg.target_modules='[linear_q, linear_k, linear_v, linear_out]' \\\n"
         f"    model.train_ds.manifest_filepath='train_manifest.json' \\\n"
+        f"    model.train_ds.is_tarred=false \\\n"
+        f"    model.train_ds.use_lhotse=false \\\n"
         f"    model.train_ds.max_duration=1000.0 \\\n"
         f"    model.train_ds.min_duration=0.1 \\\n"
         f"    trainer.precision='16-mixed' \\\n"

@@ -16,9 +16,27 @@ from src.utils.env_manager import check_and_ask_for_api_key
 # 1. Configuration for our Providers
 # We list them in order: Groq, Cerebras, Together AI.
 PROVIDERS = [
-    {"name": "Groq", "call": call_groq, "env_var": "GROQ_API_KEY"},
-    {"name": "Cerebras", "call": call_cerebras, "env_var": "CEREBRAS_API_KEY"},
-    {"name": "Together AI", "call": call_together, "env_var": "TOGETHER_API_KEY"}
+    {
+        "name": "Groq", 
+        "call": call_groq, 
+        "env_var": "GROQ_API_KEY",
+        "description": "Fastest Performance",
+        "feature": "Ultra-low latency"
+    },
+    {
+        "name": "Cerebras", 
+        "call": call_cerebras, 
+        "env_var": "CEREBRAS_API_KEY",
+        "description": "High-quality Alternative",
+        "feature": "Llama-3.1 70B support"
+    },
+    {
+        "name": "Together AI", 
+        "call": call_together, 
+        "env_var": "TOGETHER_API_KEY",
+        "description": "Versatile Models",
+        "feature": "Large context window"
+    }
 ]
 
 # 2. State to remember who is the current leader.

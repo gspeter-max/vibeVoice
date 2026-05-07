@@ -55,6 +55,7 @@ def test_socket_communication(sample_audio_bytes):
     commit = b"CMD_SESSION_COMMIT:session123:0"
 
     with patch.object(brain, "keyboard", MagicMock()), \
+         patch.object(brain, "refine_text_with_fallbacks", return_value="integrated test result cleaned") as mock_groq, \
          patch.object(brain, "paste_instantly") as mock_paste, \
          patch.object(brain, "send_hud") as mock_hud:
 
@@ -66,5 +67,5 @@ def test_socket_communication(sample_audio_bytes):
         # Step 2: Send the commit signal — should stitch and paste now
         brain.handle_connection(MockConn(commit))
 
-    mock_paste.assert_called_once_with("integrated test result ")
+    mock_paste.assert_called_once_with("integrated test result cleaned ")
     assert any(call.args[0] == "done" for call in mock_hud.call_args_list)
