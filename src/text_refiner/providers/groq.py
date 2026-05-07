@@ -41,7 +41,7 @@ def call_groq(client: httpx.Client, raw_text: str) -> str:
             {"role": "user", "content": raw_text}
         ],
         "temperature": 0.0,
-        "max_tokens": 1024,
+        "max_tokens": 512,
     }
     
     # 4. Send the package and wait for the reply
