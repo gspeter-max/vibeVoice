@@ -53,10 +53,16 @@ We achieved a **12x speed improvement** over standard Whisper by implementing th
 
 ### 1. Prerequisites
 - Python 3.11+
-- macOS (CoreAudio supported)
-- PortAudio (Install via Homebrew: `brew install portaudio`)
+- **macOS**: PortAudio (Install via Homebrew: `brew install portaudio`)
+- **Linux (Ubuntu/Debian)**: System audio headers (see below)
 
-**Note on Models:** This project exclusively uses `sherpa-onnx` for high-performance inference. It is installed automatically with the project dependencies.
+#### 🐧 Linux System Requirements
+If you are on Linux, you must install the following system packages before running the installation:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y portaudio19-dev python3-dev gcc libasound2-dev
+```
 
 ### 2. Installation
 ```bash
