@@ -34,6 +34,16 @@ from src.streaming.streaming_shared_logic import (
 )
 from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
 from src import log
+
+# PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
+try:
+    from AppKit import NSSound
+    from pathlib import Path
+    _start_sound = NSSound.alloc().initWithContentsOfFile_byReference_(
+        str(Path(__file__).parent.parent.parent / "sound_effect" / "start.mp3"), True
+    )
+except Exception:
+    _start_sound = None
 try:
     from pynput import keyboard, mouse
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -967,6 +977,14 @@ class Ear:
         or a single keypress. In streaming mode, it also resets the VAD
         engine and starts a fresh telemetry session to track the new recording.
         """
+        try:
+            if _start_sound:
+                if _start_sound.isPlaying():
+                    _start_sound.stop()
+                _start_sound.play()
+        except Exception:
+            pass
+
         with self._lock:
             self.is_recording = True
             self.last_rms = 0.0

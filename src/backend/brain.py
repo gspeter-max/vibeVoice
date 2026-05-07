@@ -31,6 +31,16 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
+# PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
+try:
+    from AppKit import NSSound
+    from pathlib import Path
+    _finish_sound = NSSound.alloc().initWithContentsOfFile_byReference_(
+        str(Path(__file__).parent.parent.parent / "sound_effect" / "finished.mp3"), True
+    )
+except Exception:
+    _finish_sound = None
+
 from src.backend.state import (
     backend_info, backend_lock,
     session_store, session_store_lock,
@@ -494,6 +504,15 @@ def paste_instantly(text: str):
     except Exception as e:
         log.info(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
         keyboard.type(text)
+
+    # PLAY FINISHED SOUND EFFECT INSTANTLY
+    try:
+        if _finish_sound:
+            if _finish_sound.isPlaying():
+                _finish_sound.stop()
+            _finish_sound.play()
+    except Exception as e:
+        log.warning(f"[Brain] ⚠️  Failed to play finished sound: {e}")
 
 
 def _normalize_audio(int16_audio: np.ndarray) -> np.ndarray | None:
