@@ -31,15 +31,53 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
+import platform
+
 # PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
-try:
-    from AppKit import NSSound
-    from pathlib import Path
-    _finish_sound = NSSound.alloc().initWithContentsOfFile_byReference_(
-        str(Path(__file__).parent.parent.parent / "sound_effect" / "finished.mp3"), True
-    )
-except Exception:
-    _finish_sound = None
+_finish_sound = None
+
+def _load_finish_sound():
+    global _finish_sound
+    try:
+        from pathlib import Path
+        sound_path = str(Path(__file__).parent.parent.parent / "sound_effect" / "finished.mp3")
+        
+        if platform.system() == "Darwin":
+            try:
+                from AppKit import NSSound
+                _finish_sound = NSSound.alloc().initWithContentsOfFile_byReference_(sound_path, True)
+            except ImportError:
+                pass
+        
+        # Cross-platform fallback using PySide6 if AppKit fails or on Linux/Windows
+        if _finish_sound is None:
+            try:
+                from PySide6.QtMultimedia import QSoundEffect
+                from PySide6.QtCore import QUrl
+                _finish_sound = QSoundEffect()
+                _finish_sound.setSource(QUrl.fromLocalFile(sound_path))
+                _finish_sound.setVolume(1.0)
+            except ImportError:
+                log.info("[Brain] PySide6.QtMultimedia not available for sound effects")
+    except Exception as e:
+        log.info(f"[Brain] Failed to load finish sound: {e}")
+
+_load_finish_sound()
+
+def _play_finish_sound():
+    if not _finish_sound:
+        return
+        
+    try:
+        if platform.system() == "Darwin" and hasattr(_finish_sound, "isPlaying"):
+            if _finish_sound.isPlaying():
+                _finish_sound.stop()
+            _finish_sound.play()
+        else:
+            # PySide6 QSoundEffect path
+            _finish_sound.play()
+    except Exception as e:
+        log.warning(f"[Brain] ⚠️  Failed to play finished sound: {e}")
 
 from src.backend.state import (
     backend_info, backend_lock,
@@ -469,50 +507,50 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
 
 def paste_instantly(text: str):
     """
-    Simulates a 'Cmd+V' paste operation to insert text into the active app.
-    It first saves the current clipboard content, copies the new transcribed
-    text to the clipboard, triggers the system's paste command via AppleScript,
-    and then restores the original clipboard. If this fast method fails, it
-    falls back to simulating individual keystrokes, which is slower but more reliable.
+    Simulates a 'Cmd+V' (macOS) or 'Ctrl+V' (Linux/Win) paste operation to insert text.
+    On macOS, it uses pbcopy/pbpaste/osascript for high-speed pasting.
+    On other platforms or if fast-paste fails, it falls back to simulating keystrokes.
     """
-    try:
-        # Save old clipboard
-        old = subprocess.check_output(["pbpaste"], stderr=subprocess.DEVNULL).decode(
-            "utf-8", errors="ignore"
-        )
+    pasted_successfully = False
+    
+    if platform.system() == "Darwin":
+        try:
+            # Save old clipboard
+            old = subprocess.check_output(["pbpaste"], stderr=subprocess.DEVNULL).decode(
+                "utf-8", errors="ignore"
+            )
 
-        # Copy new text
-        proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-        proc.communicate(input=text.encode("utf-8"))
-
-        # Paste via AppleScript
-        subprocess.run(
-            [
-                "osascript",
-                "-e",
-                'tell application "System Events" to keystroke "v" using command down',
-            ],
-            check=True,
-        )
-
-        # Restore clipboard
-        time.sleep(0.05)
-        if old:
+            # Copy new text
             proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-            proc.communicate(input=old.encode("utf-8"))
+            proc.communicate(input=text.encode("utf-8"))
 
-    except Exception as e:
-        log.info(f"[Brain] ⚠️  Paste failed: {e}. Falling back to slow typing.")
+            # Paste via AppleScript
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    'tell application "System Events" to keystroke "v" using command down',
+                ],
+                check=True,
+            )
+
+            # Restore clipboard
+            time.sleep(0.05)
+            if old:
+                proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+                proc.communicate(input=old.encode("utf-8"))
+            
+            pasted_successfully = True
+
+        except Exception as e:
+            log.info(f"[Brain] ⚠️  macOS Fast-paste failed: {e}")
+
+    if not pasted_successfully:
+        log.info("[Brain] ⌨️  Pasting via simulated typing...")
         keyboard.type(text)
 
     # PLAY FINISHED SOUND EFFECT INSTANTLY
-    try:
-        if _finish_sound:
-            if _finish_sound.isPlaying():
-                _finish_sound.stop()
-            _finish_sound.play()
-    except Exception as e:
-        log.warning(f"[Brain] ⚠️  Failed to play finished sound: {e}")
+    _play_finish_sound()
 
 
 def _normalize_audio(int16_audio: np.ndarray) -> np.ndarray | None:

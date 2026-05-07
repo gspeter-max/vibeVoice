@@ -35,15 +35,53 @@ from src.streaming.streaming_shared_logic import (
 from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
 from src import log
 
+import platform
+
 # PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
-try:
-    from AppKit import NSSound
-    from pathlib import Path
-    _start_sound = NSSound.alloc().initWithContentsOfFile_byReference_(
-        str(Path(__file__).parent.parent.parent / "sound_effect" / "start.mp3"), True
-    )
-except Exception:
-    _start_sound = None
+_start_sound = None
+
+def _load_start_sound():
+    global _start_sound
+    try:
+        from pathlib import Path
+        sound_path = str(Path(__file__).parent.parent.parent / "sound_effect" / "start.mp3")
+        
+        if platform.system() == "Darwin":
+            try:
+                from AppKit import NSSound
+                _start_sound = NSSound.alloc().initWithContentsOfFile_byReference_(sound_path, True)
+            except ImportError:
+                pass
+        
+        # Cross-platform fallback using PySide6 if AppKit fails or on Linux/Windows
+        if _start_sound is None:
+            try:
+                from PySide6.QtMultimedia import QSoundEffect
+                from PySide6.QtCore import QUrl
+                _start_sound = QSoundEffect()
+                _start_sound.setSource(QUrl.fromLocalFile(sound_path))
+                _start_sound.setVolume(1.0)
+            except ImportError:
+                log.info("[Ear] PySide6.QtMultimedia not available for sound effects")
+    except Exception as e:
+        log.info(f"[Ear] Failed to load start sound: {e}")
+
+_load_start_sound()
+
+def _play_start_sound():
+    if not _start_sound:
+        return
+        
+    try:
+        if platform.system() == "Darwin" and hasattr(_start_sound, "isPlaying"):
+            if _start_sound.isPlaying():
+                _start_sound.stop()
+            _start_sound.play()
+        else:
+            # PySide6 QSoundEffect path
+            _start_sound.play()
+    except Exception as e:
+        log.info(f"[Ear] Failed to play start sound: {e}")
 try:
     from pynput import keyboard, mouse
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -977,13 +1015,7 @@ class Ear:
         or a single keypress. In streaming mode, it also resets the VAD
         engine and starts a fresh telemetry session to track the new recording.
         """
-        try:
-            if _start_sound:
-                if _start_sound.isPlaying():
-                    _start_sound.stop()
-                _start_sound.play()
-        except Exception:
-            pass
+        _play_start_sound()
 
         with self._lock:
             self.is_recording = True

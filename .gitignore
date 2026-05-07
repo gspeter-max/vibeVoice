@@ -25,7 +25,6 @@ evaluation/__pycache__
 # Audio files (Test data)
 *.wav
 *.aiff
-*.mp3
 *.flac
 *.m4a
 *.ogg
