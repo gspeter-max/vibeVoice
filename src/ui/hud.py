@@ -1,628 +1,394 @@
-"""
-hud.py — macOS menu bar waveform HUD
-====================================
-Compact native status item with premium white waveform bars.
-
-States:
-  - hidden     : small idle pill outline (always on-screen)
-  - listening  : pill EXPANDS, bars animate with real mic volume
-  - thinking   : bars soften into a restrained white shimmer
-  - processing : bars do a slow white sweep/pulse
-  - done       : brief flash then back to idle outline
-
-IPC:
-  TCP 57234 → "listen" | "thinking" | "process" | "done" | "hide"
-  UDP 57235 → "vol:0.XXX"
-
-Test:  python hud.py --demo
-"""
-
 import sys
-import os
 import math
 import time
-import socket
-import subprocess
 import random
-from src import log
-os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
+import platform
+import logging
+import socket
+import threading
+from typing import Optional
+from ctypes import c_void_p
 
-import objc
-from PySide6.QtCore import QObject, QTimer, QThread, Signal, Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QWidget, QApplication
+from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QScreen
 
-try:
-    from AppKit import (
-        NSApp,
-        NSColor,
-        NSBezierPath,
-        NSMakeRect,
-        NSView,
-        NSStatusBar,
-    )
-except Exception:  # pragma: no cover - menu bar rendering is macOS-only
-    NSApp = None
-    NSColor = None
-    NSBezierPath = None
-    NSMakeRect = None
-    NSView = None
-    NSStatusBar = None
-
-# ── Menu bar dimensions ───────────────────────────────────────────────────────
-STATUS_ITEM_W = 64
-STATUS_ITEM_H = 22
-STATUS_ITEM_VERTICAL_SHIFT = 0.0
-
-# ── Bar config ────────────────────────────────────────────────────────────────
-NUM_BARS  = 9
-BAR_W     = 2.0
-BAR_GAP   = 2.5
-BAR_MAX_H = 15.0
-BAR_MIN_H = 5.0
-BAR_R     = 0.9     # rounded tip
-BAR_COLOR_MODE = "monochrome"
-WAVE_STYLE = "chaotic-zigzag"
-LISTEN_NOISE_DRIFT_LERP = 0.32
-LISTEN_NOISE_DRIFT_WEIGHT = 0.34
-LISTEN_NOISE_SPARK_WEIGHT = 0.18
-LISTEN_ZIGZAG_WEIGHT = 0.34
-LISTEN_KICK_PROB = 0.16
-LISTEN_KICK_DAMP = 0.66
-LISTEN_KICK_MAG = 0.42
-LISTEN_SMOOTH_BASE_SPEED_A = 3.9
-LISTEN_SMOOTH_BASE_SPEED_B = 8.4
-LISTEN_ZIGZAG_SPEED_PRIMARY = 3.0
-LISTEN_ZIGZAG_SPEED_ALT = 4.4
-THINKING_SPEED_A = 2.6
-THINKING_SPEED_B = 4.6
-PROCESSING_SWEEP_SPEED = 1.45
-PROCESSING_BREATH_SPEED = 0.95
-
-IPC_PORT = 57234
-VOL_PORT = 57235
-
-HIDDEN     = "hidden"
-LISTENING  = "listening"
-THINKING   = "thinking"
-PROCESSING = "processing"
-DONE       = "done"
-
-
-
-
-def runtime_signature() -> str:
-    """
-    Generates a unique string describing the current HUD configuration.
-    This includes details such as the color mode, the number of waveform
-    bars, and the visual style of the animation. This signature is used
-    for logging and debugging to ensure that the developer knows exactly
-    which visual settings were active when a particular event occurred.
-    """
-    return (
-        f"mode={BAR_COLOR_MODE} anchor=menu-bar bars={NUM_BARS} "
-        f"bar_w={BAR_W:.1f} gap={BAR_GAP:.1f} item_w={STATUS_ITEM_W} wave={WAVE_STYLE}"
-    )
-
-
-def bar_color_for_draw(voice_intensity: float, bar_height_factor: float) -> QColor:
-    """
-    Calculates the color and transparency for an individual waveform bar.
-    While the base color is a solid white, the function dynamically adjusts
-     the 'alpha' (transparency) based on the user's voice intensity and
-    the current height of the bar. This creates a subtle glowing effect
-    that makes the HUD feel more 'alive' and responsive to audio input.
-    """
-    # Keep bars visibly bright white at all times, with subtle dynamic lift.
-    alpha = int(248 + voice_intensity * 5 + bar_height_factor * 3)
-    alpha = max(248, min(255, alpha))
-    return QColor(255, 255, 255, alpha)
-
-
-def _triangle_wave(x: float) -> float:
-    """
-    Generates a mathematical triangle wave pattern for animations.
-    Unlike a smooth sine wave, a triangle wave has sharp peaks and valleys,
-    which we use to create more 'chaotic' or 'jittery' animations for
-    the waveform bars. This adds a unique visual character to the HUD
-    that distinguishes it from standard, overly-smooth audio visualizers.
-    """
-    frac = x - math.floor(x)
-    return 1.0 - 4.0 * abs(frac - 0.5)
-
-
-def compute_menu_bar_waveform_layout(
-    *,
-    status_width: float,
-    status_height: float,
-    num_bars: int,
-    bar_width: float,
-    bar_gap: float,
-    bar_height: float,
-) -> list[dict]:
-    """
-    Calculates the precise pixel coordinates for each bar in the HUD.
-    It takes the total width of the menu bar item and centers the requested
-    number of bars within that space, accounting for the gaps between them.
-    This ensures that the waveform always looks perfectly aligned and
-    balanced within the macOS menu bar, regardless of the user's screen resolution.
-    """
-    total_wave_width = num_bars * bar_width + max(0, num_bars - 1) * bar_gap
-    start_x = (status_width - total_wave_width) / 2.0
-    start_y = (status_height - bar_height) / 2.0
-
-    layout = []
-    for idx in range(num_bars):
-        x = start_x + idx * (bar_width + bar_gap)
-        layout.append(
-            {
-                "x": x,
-                "y": start_y,
-                "width": bar_width,
-                "height": bar_height,
-            }
-        )
-    return layout
-
-
-class MenuBarWaveformView(NSView if NSView is not None else object):
-    def initWithFrame_(self, frame):
-        self = objc.super(MenuBarWaveformView, self).initWithFrame_(frame)
-        if self is None:
-            return None
-        self._hud = None
-        return self
-
-    def setHud_(self, hud):
-        self._hud = hud
-
-    def isFlipped(self):
-        return True
-
-    def drawRect_(self, _dirtyRect):
-        if self._hud is None:
-            return
-        self._hud._draw_menu_bar_waveform(self.bounds())
-
-
-class IPCServer(QThread):
-    """
-    Background thread that manages the TCP control socket for the HUD.
-    It listens for incoming text commands from the Brain (like 'listen' or 'done')
-    and emits a Qt Signal whenever a new command arrives. This architecture
-    allows the HUD to respond instantly to state changes in the AI engine
-    without blocking the main GUI thread, ensuring a smooth and jitter-free
-    visual experience for the user at all times.
-    """
-    command = Signal(str)
-
-    def run(self):
-        log.info(f"[HUD] 🚀 IPCServer thread starting...")
-        srv = None
-        try:
-            log.info(f"[HUD] 🔧 Creating TCP socket...")
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-            log.info(f"[HUD] 🔧 Binding to 127.0.0.1:{IPC_PORT}...")
-            srv.bind(("127.0.0.1", IPC_PORT))
-
-            log.info(f"[HUD] 🔧 Setting listen queue...")
-            srv.listen(5)
-
-            log.info(f"[HUD] 🔧 Setting socket timeout...")
-            srv.settimeout(1.0)
-
-            log.info(f"[HUD] 🌐 TCP server listening on :{IPC_PORT}")
-
-            while not self.isInterruptionRequested():
-                try:
-                    conn, addr = srv.accept()
-                    log.info(f"[HUD] 🔌 Connection accepted from {addr}")
-                    data = conn.recv(256).decode().strip()
-                    log.info(f"[HUD] 📨 Received data: '{data}'")
-                    conn.close()
-                    if data:
-                        log.info(f"[HUD] 📢 Emitting command signal: '{data}'")
-                        self.command.emit(data)
-                    else:
-                        log.info(f"[HUD] ⚠️ Empty data received")
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    log.info(f"[HUD] ❌ Error in receive loop: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-        except Exception as e:
-            log.info(f"[HUD] ❌ TCP server FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            if srv:
-                log.info(f"[HUD] 🔧 Closing TCP socket...")
-                srv.close()
-            log.info(f"[HUD] 🛑 IPCServer thread terminated")
-
-
-class VolumeListener(QThread):
-    """
-    Background thread that receives real-time audio telemetry via UDP.
-    It listens for small UDP packets containing the current microphone volume
-    and frequency band data (bass, mid, treble). Because UDP is faster and
-    has lower overhead than TCP, we use it for high-frequency updates, allowing
-    the HUD's waveform bars to dance in perfect sync with the user's voice
-    with virtually zero perceptible lag or delay.
-    """
-    volume = Signal(float)
-    frequency_bands = Signal(dict)  # New signal for frequency data
-
-    def run(self):
-        log.info(f"[HUD] 🚀 VolumeListener thread starting...")
-        sock = None
-        try:
-            log.info(f"[HUD] 🔧 Creating UDP socket...")
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-            log.info(f"[HUD] 🔧 Binding to 127.0.0.1:{VOL_PORT}...")
-            sock.bind(("127.0.0.1", VOL_PORT))
-
-            log.info(f"[HUD] 🔧 Setting socket timeout...")
-            sock.settimeout(0.1)
-
-            log.info(f"[HUD] 🌐 UDP server listening on :{VOL_PORT}")
-
-            while not self.isInterruptionRequested():
-                try:
-                    data, addr = sock.recvfrom(128)
-                    txt = data.decode().strip()
-                    log.info(f"[HUD] 📨 Received UDP from {addr}: '{txt}'")
-                    if txt.startswith("vol:"):
-                        # Parse new format: "vol:RMS,bass:BASS,mid:MID,treble:TREBLE"
-                        try:
-                            parts = txt.split(',')
-                            vol_val = float(parts[0][4:])  # Extract "vol:X.XXX"
-
-                            # Parse frequency bands
-                            freq_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
-                            for part in parts[1:]:
-                                if ':' in part:
-                                    key, val = part.split(':', 1)
-                                    if key in freq_bands:
-                                        freq_bands[key] = float(val)
-
-                            log.info(f"[HUD] 🎤 Emitting volume signal: {vol_val:.4f}, freq: {freq_bands}")
-                            self.volume.emit(vol_val)
-                            self.frequency_bands.emit(freq_bands)
-                        except (ValueError, IndexError) as e:
-                            log.info(f"[HUD] ⚠️ Failed to parse volume data: {e}")
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    log.info(f"[HUD] ❌ Error in UDP receive loop: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-        except Exception as e:
-            log.info(f"[HUD] ❌ UDP server FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            if sock:
-                log.info(f"[HUD] 🔧 Closing UDP socket...")
-                sock.close()
-            log.info(f"[HUD] 🛑 VolumeListener thread terminated")
-
-
-# ── Sound effects (using provided external files) ─────────────────────────────
-def _init_sounds():
-    # Use repo root as base for assets/
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    listen_path = os.path.join(base_dir, "assets", "ui-alert-synth-beep-epic-stock-media-1-00-00.mp3")
-    done_path   = os.path.join(base_dir, "assets", "mixkit-tile-game-reveal-960.wav")
-    return listen_path, done_path
-
-
-def _play_sound(path):
-    """Play a sound file without blocking, without stealing focus."""
-    if not os.path.exists(path):
-        return
+# Global activation policy setup for macOS
+if platform.system() == "Darwin":
     try:
-        subprocess.Popen(
-            ["afplay", path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        ns_app = NSApplication.sharedApplication()
+        ns_app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    except ImportError:
         pass
 
+# Constants for the indicator dimensions (Native Menu Bar size)
+INDICATOR_WIDTH = 68
+INDICATOR_HEIGHT = 26
 
-# ── Main menu bar controller ────────────────────────────────────────────────
-class MenuBarWaveformController(QObject):
+HUD_HOST, HUD_PORT = "127.0.0.1", 57234
 
+# State definitions
+STATE_HIDDEN = "HIDDEN"
+STATE_LISTENING = "LISTENING"
+STATE_THINKING = "THINKING"
+STATE_PROCESSING = "PROCESS"
+STATE_DONE = "DONE"
+
+
+class HudCommandBridge(QObject):
+    """
+    Thread-safe bridge between the TCP server thread and the Qt main thread.
+
+    Qt's Signal/Slot system automatically detects when a signal is emitted
+    from a different thread than the receiver lives in. When that happens,
+    Qt uses QueuedConnection internally — the call is posted to the
+    receiver's event loop and executed safely on the main thread.
+
+    Without this bridge, calling QTimer.singleShot from a daemon thread
+    creates a timer in that thread (which has no Qt event loop), so the
+    callback never fires and HUD state never changes.
+    """
+    command_received = Signal(str)
+
+
+class RoundedRectangularIndicatorWidget(QWidget):
+    """
+    A persistent, non-intrusive floating indicator that renders vertical bar waveforms.
+    It is designed to stay on top of all windows (including the Dock) without accepting input focus.
+    """
     def __init__(self):
         super().__init__()
-        self._status_item = None
-        self._status_view = None
-
-        self._state        = HIDDEN
-        self._t0           = time.time()
-        self._t            = 0.0
-        self._fade         = 1.0
-        self._fade_dir     = 0
-        self._voice_raw    = 0.0
-        self._voice_smooth = 0.0
-        self._last_vol_t   = 0.0
-
-        # Frequency bands for color mapping
-        self._frequency_bands = {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
-        log.info(f"[HUD] Theme mode: {runtime_signature()}")
-        preview = bar_color_for_draw(voice_intensity=1.0, bar_height_factor=1.0)
-        log.info(f"[HUD] Theme preview RGB=({preview.red()},{preview.green()},{preview.blue()}) alpha={preview.alpha()}")
-
-        # Per-bar state
-        self._bar_h     = [BAR_MIN_H] * NUM_BARS
-        self._bar_phase = [i * 0.28 for i in range(NUM_BARS)]
-        self._bar_noise = [0.0] * NUM_BARS
-        self._bar_kick  = [0.0] * NUM_BARS
-
-        self._snd_listen, self._snd_done = _init_sounds()
-
-        # 60 fps animation timer (only runs when animating)
-        self._timer = QTimer(self)
-        self._timer.setInterval(16)
-        self._timer.timeout.connect(self._tick)
-
-        # IPC threads
-        log.info(f"[HUD] 🔧 Creating IPCServer thread...")
-        self._ipc = IPCServer(self)
-        log.info(f"[HUD] 🔧 Connecting IPC command signal...")
-        self._ipc.command.connect(self._on_command)
-        log.info(f"[HUD] 🔧 Starting IPCServer thread...")
-        self._ipc.start()
-
-        log.info(f"[HUD] 🔧 Creating VolumeListener thread...")
-        self._vol = VolumeListener(self)
-        log.info(f"[HUD] 🔧 Connecting volume signal...")
-        self._vol.volume.connect(self._on_volume)
-        log.info(f"[HUD] 🔧 Connecting frequency bands signal...")
-        self._vol.frequency_bands.connect(self._on_frequency_bands)
-        log.info(f"[HUD] 🔧 Starting VolumeListener thread...")
-        self._vol.start()
-
-        # Keepalive timer
-        self._keepalive = QTimer(self)
-        self._keepalive.setInterval(3000)
-        self._keepalive.timeout.connect(self._ensure_visible)
-        self._keepalive.start()
-
-        self._ensure_menu_bar_item()
-        self._request_menu_bar_view_redraw()
-
-        log.info("[HUD] Menu bar HUD ready ✓")
-
-    def _ensure_visible(self):
-        """Re-assert the menu-bar item exists and remains visible."""
-        self._ensure_menu_bar_item()
-        self._request_menu_bar_view_redraw()
-
-    def _ensure_menu_bar_item(self):
-        if self._status_item is not None:
-            return
-        if NSStatusBar is None:
-            raise RuntimeError("macOS status bar APIs are unavailable")
-        self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
-            STATUS_ITEM_W
+        
+        # 1. Fundamental Window Flags
+        self.setWindowFlags(
+            Qt.WindowStaysOnTopHint |       # Always above other windows
+            Qt.FramelessWindowHint |        # No title bar or borders
+            Qt.Tool |                       # Floating tool level (macOS/Linux)
+            Qt.WindowDoesNotAcceptFocus |   # Keyboard ignores this window
+            Qt.WindowTransparentForInput    # Mouse clicks go through to windows behind
         )
-        if self._status_view is None and NSView is not None:
-            self._status_view = MenuBarWaveformView.alloc().initWithFrame_(
-                NSMakeRect(0, 0, STATUS_ITEM_W, STATUS_ITEM_H)
-            )
-            self._status_view.setHud_(self)
-        if self._status_view is not None:
-            self._status_item.setView_(self._status_view)
-            self._status_view.setFrame_(NSMakeRect(0, 0, STATUS_ITEM_W, STATUS_ITEM_H))
+        
+        # 2. Attributes for persistence and non-activation
+        self.setAttribute(Qt.WA_TranslucentBackground)  # Transparent corners
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # Don't steal focus on show
+        
+        if platform.system() == "Darwin":
+            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow) # Stay visible when app is background
+            
+        self.setFixedSize(INDICATOR_WIDTH, INDICATOR_HEIGHT)
+        
+        # Platform Specific Hardening
+        self._apply_platform_specific_hardening()
+        
+        # Internal rendering state
+        self._interface_state = STATE_HIDDEN
+        self._base_amplitude = 1.0
 
-    def _status_bar_alpha(self) -> float:
-        if self._state == LISTENING:
-            return min(1.0, 0.88 + self._voice_smooth * 0.12)
-        if self._state == THINKING:
-            return 0.96
-        if self._state == PROCESSING:
-            return 0.98
-        if self._state == DONE:
-            return 1.0
-        return 0.74
+        # Smooth transition: rendered amplitude and pill size lerp toward target each frame
+        # to avoid jarring instant state changes (inspired by Wispr Flow)
+        self._smooth_amplitude = 0.0
+        self._smooth_width = 44.0   # Idle width
+        self._smooth_height = 20.0  # Idle height
+        self._last_frame_time = time.time()
 
-    def _request_menu_bar_view_redraw(self):
-        if self._status_view is not None:
-            self._status_view.setNeedsDisplay_(True)
+        # Per-bar random phase offsets create organic, non-synchronized motion.
+        # Each bar oscillates at slightly different timing, like real audio.
+        self._bar_phase_offsets = [random.uniform(0, math.pi * 2) for _ in range(10)]
 
-    def _draw_menu_bar_waveform(self, bounds):
-        if NSColor is None or NSBezierPath is None or NSMakeRect is None:
+        # Time-based animation start (frame-rate independent)
+        self._animation_start_time = time.time()
+
+        # Colors (Solid Black with White Outline)
+        self._border_color = QColor(255, 255, 255, 100)
+        self._background_color = QColor(0, 0, 0, 255)
+
+    def _apply_platform_specific_hardening(self):
+        """Applies OS-level settings to ensure the indicator is non-intrusive and always on top."""
+        sys_name = platform.system()
+        
+        if sys_name == "Darwin":
+            # macOS: Ensure the window follows the user into full-screen 'Spaces'
+            # AND elevate the window level to stay above the Dock.
+            try:
+                import objc
+                from AppKit import NSWindowCollectionBehaviorCanJoinAllSpaces, NSStatusWindowLevel
+                
+                # Get the underlying NSWindow for the widget
+                ptr = self.winId()
+                # Use pyobjc to set the collection behavior and level
+                # winId() on macOS provides the NSView pointer. We need the NSWindow.
+                ns_view = objc.objc_object(c_void_p=ptr)
+                ns_window = ns_view.window()
+                
+                if ns_window:
+                    # Behavior: Join all spaces (full screen support)
+                    ns_window.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces)
+                    
+                    # Level: Elevate to Status Level (above Dock)
+                    ns_window.setLevel_(NSStatusWindowLevel)
+                else:
+                    logging.debug("macOS hardening failed: Could not retrieve NSWindow from NSView.")
+                
+            except Exception as e:
+                logging.debug(f"macOS hardening failed: {e}")
+                
+        elif sys_name == "Windows":
+            # Windows: Set WS_EX_NOACTIVATE to prevent focus theft on click
+            try:
+                import ctypes
+                
+                GWL_EXSTYLE = -20
+                WS_EX_NOACTIVATE = 0x08000000
+                
+                hwnd = self.winId()
+                get_window_long = ctypes.windll.user32.GetWindowLongW
+                set_window_long = ctypes.windll.user32.SetWindowLongW
+                
+                current_style = get_window_long(hwnd, GWL_EXSTYLE)
+                set_window_long(hwnd, GWL_EXSTYLE, current_style | WS_EX_NOACTIVATE)
+            except Exception as e:
+                logging.debug(f"Windows hardening failed: {e}")
+
+    def update_interface_state(self, state: str, amplitude: float = 1.0):
+        """Updates the internal state and amplitude for the drawing logic."""
+        self._interface_state = state
+        self._base_amplitude = amplitude
+        self.update()
+
+    def paintEvent(self, event):
+        """Renders the rounded rectangular background, outline, and vertical bars."""
+        current_time = time.time()
+        elapsed = current_time - self._animation_start_time
+        dt = max(0.001, current_time - self._last_frame_time)
+        self._last_frame_time = current_time
+
+        # Target pill dimensions based on state
+        if self._interface_state == STATE_HIDDEN:
+            target_w = 44.0
+            target_h = 8.0  # <--- CHANGE THIS: Height when NOT recording (idle)
+        else:
+            target_w = 68.0
+            target_h = 26.0  # <--- CHANGE THIS: Height when RECORDING (active)
+
+        # Smooth size lerp
+        smooth_speed_size = 12.0 if target_w > self._smooth_width else 6.0
+        lerp_factor_size = 1.0 - math.exp(-dt * smooth_speed_size)
+        self._smooth_width += (target_w - self._smooth_width) * lerp_factor_size
+        self._smooth_height += (target_h - self._smooth_height) * lerp_factor_size
+
+        # Center the drawn pill inside the fixed 68x26 widget window
+        from PySide6.QtCore import QRectF
+        pill_x = (self.width() - self._smooth_width) / 2.0
+        pill_y = (self.height() - self._smooth_height) / 2.0
+        pill_rect = QRectF(pill_x, pill_y, self._smooth_width, self._smooth_height)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 1. Draw the Pill Background (Solid Black)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self._background_color))
+        radius = self._smooth_height / 2.0
+        painter.drawRoundedRect(pill_rect, radius, radius)
+        
+        # 2. Draw the "Slightly White" Outline
+        outline_pen = QPen(self._border_color, 1)
+        painter.setPen(outline_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(pill_rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        
+        # 3. Draw the Vertical Bars
+        self._draw_vertical_bars(painter, elapsed, dt, pill_rect)
+        
+    def _draw_vertical_bars(self, painter: QPainter, elapsed: float, dt: float, pill_rect):
+        """
+        Draws vertical bars with organic, Wispr Flow-inspired animation.
+
+        Premium techniques used:
+        1. Time-based animation (frame-rate independent)
+        2. Smooth amplitude lerping between states (no jarring snaps)
+        3. Multi-frequency layered sin waves per bar (organic motion)
+        4. Center-weighted bell curve (center bars taller than edges)
+        5. Per-bar opacity modulation (subtle breathing effect)
+        """
+        mid_y = pill_rect.center().y()
+
+        # Bar layout — 6 centered bars, 2px wide with 2px gap
+        # Thin bars with full pill-shaped rounding (radius = width/2) look like
+        # smooth capsules, matching the Wispr Flow visual reference
+        num_bars = 10
+        bar_spacing = 4    # 2px bar + 2px gap
+        bar_width = 2
+        bar_rounding = bar_width / 2.0  # Full pill shape — perfectly round tips
+        total_width = (num_bars - 1) * bar_spacing + bar_width
+        start_x = pill_rect.center().x() - (total_width / 2.0)
+
+        # Target amplitude based on current HUD state
+        if self._interface_state == STATE_HIDDEN:
+            target_amp = 0.0    # 0 = bars fade out and disappear completely
+        elif self._interface_state == STATE_LISTENING:
+            target_amp = 14.0 * self._base_amplitude   # Taller, prominent waves
+        elif self._interface_state == STATE_THINKING:
+            # Gentle breathing oscillation while AI processes
+            target_amp = 3.5 * (math.sin(elapsed * 1.5) * 0.3 + 1.0)
+        elif self._interface_state == STATE_PROCESSING:
+            target_amp = 5.0
+        else:  # DONE
+            target_amp = 2.0
+
+        # Smooth amplitude lerp using exponential decay (frame-rate independent).
+        # Rise = fast (user starts speaking, instant feedback needed).
+        # Fall = slow (gentle fade-out feels premium, not jarring).
+        smooth_speed = 8.0 if target_amp > self._smooth_amplitude else 3.0
+        lerp_factor = 1.0 - math.exp(-dt * smooth_speed)
+        self._smooth_amplitude += (target_amp - self._smooth_amplitude) * lerp_factor
+
+        amp = self._smooth_amplitude
+        mid_index = (num_bars - 1) / 2.0
+
+        painter.setPen(Qt.NoPen)
+
+        for i in range(num_bars):
+            # Coherent Traveling Wave — a smooth sine wave that travels across the bars,
+            # creating a beautiful liquid "flow" effect instead of chaotic random spikes.
+            # Speed = elapsed * 8.0. Wavelength = i * 0.8.
+            # Using (sin + 1)/2 makes the bottoms of the wave perfectly rounded and smooth,
+            # completely eliminating the sharp "bouncing ball" bottoms of an abs(sin) wave.
+            wave_val = (math.sin(elapsed * 8.0 - i * 0.8) + 1.0) / 2.0
+
+            # Center-weighted bell curve — center bars reach full height,
+            # edge bars are ~45% shorter (mimics real audio spectrum shape)
+            center_weight = 1.0 - abs(i - mid_index) / mid_index * 0.45
+
+            # Final bar height
+            bar_h = 1.5 + (amp * wave_val * center_weight)
+            bar_h = min(bar_h, pill_rect.height() - 6)  # Stay within pill bounds
+
+            # Fade out opacity when amp approaches 0 so dots completely disappear
+            opacity_multiplier = min(1.0, amp * 2.0)
+            if opacity_multiplier <= 0.01:
+                continue
+
+            # Per-bar opacity modulation — bars pulse between 180-255 alpha.
+            # Creates a subtle "breathing" effect that makes the UI feel alive.
+            base_alpha = 180 + 75 * abs(math.sin(elapsed * 2.0 + i * 0.5))
+            alpha = int(base_alpha * opacity_multiplier)
+
+            painter.setBrush(QBrush(QColor(255, 255, 255, alpha)))
+
+            x = start_x + i * bar_spacing
+            y = mid_y - (bar_h / 2)
+
+            # drawRoundedRect with radius = bar_width/2 creates capsule/pill shape
+            painter.drawRoundedRect(x, y, bar_width, bar_h, bar_rounding, bar_rounding)
+
+class OscillatingInterfaceController:
+    """
+    Manages the lifecycle, positioning, and state transitions of the indicator widget.
+    Handles adaptive frame rate — 60 FPS when active, 10 FPS when idle to save CPU.
+    """
+    def __init__(self):
+        self.widget = RoundedRectangularIndicatorWidget()
+
+        # Animation timer — starts at low FPS (idle), ramps up when active
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.widget.update)
+        self.timer.start(100)  # 10 FPS when idle — saves CPU
+
+        # Positioning
+        self._position_at_bottom_center()
+        self.widget.show()
+
+    def _position_at_bottom_center(self):
+        """Positions the widget at the horizontal center, absolute bottom of the screen."""
+        screen = QApplication.primaryScreen()
+        if not screen:
             return
 
-        width = float(bounds.size.width)
-        height = float(bounds.size.height)
-        NSColor.clearColor().set()
-        NSBezierPath.bezierPathWithRect_(NSMakeRect(0, 0, width, height)).fill()
+        geo = screen.geometry()
+        x = geo.x() + (geo.width() - INDICATOR_WIDTH) // 2
+        y = geo.y() + geo.height() - INDICATOR_HEIGHT
 
-        layout = compute_menu_bar_waveform_layout(
-            status_width=width,
-            status_height=height,
-            num_bars=NUM_BARS,
-            bar_width=BAR_W,
-            bar_gap=BAR_GAP,
-            bar_height=BAR_MAX_H,
-        )
-        alpha = self._status_bar_alpha()
-        for idx, rect in enumerate(layout):
-            bh = max(BAR_MIN_H, self._bar_h[idx])
-            scale = 0.62 + (bh - BAR_MIN_H) / max(1.0, BAR_MAX_H - BAR_MIN_H) * 0.38
-            current_h = max(BAR_MIN_H, min(BAR_MAX_H, bh))
-            y = (height - current_h) / 2.0 + STATUS_ITEM_VERTICAL_SHIFT
-            x = rect["x"]
-            w = rect["width"]
+        self.widget.move(x, y)
 
-            NSColor.colorWithCalibratedWhite_alpha_(1.0, alpha * scale).set()
-            path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-                NSMakeRect(x, y, w, current_h),
-                BAR_R,
-                BAR_R,
-            )
-            path.fill()
+    def _set_animation_speed(self, interval_ms: int):
+        """
+        Adjusts the repaint timer interval for adaptive frame rate.
+        Active states get 60 FPS (16ms) for smooth animation.
+        Idle state gets 10 FPS (100ms) to save CPU.
+        """
+        if self.timer.interval() != interval_ms:
+            self.timer.setInterval(interval_ms)
 
-    # ── Public state transitions ───────────────────────────────────────────
-    def show_listening(self):
-        log.info("[HUD]   → Listening")
-        _play_sound(self._snd_listen)
-        self._enter(LISTENING)
-
-    def show_thinking(self):
-        self._enter(THINKING)
-
-    def show_processing(self):
-        self._enter(PROCESSING)
-
-    def show_done(self):
-        log.info("[HUD]   → Done")
-        _play_sound(self._snd_done)
-        self._enter(DONE)
-        QTimer.singleShot(900, self._return_to_idle)
-
-    def hide_hud(self):
-        self._return_to_idle()
+    @Slot(str, float)
+    def on_interface_command(self, command: str, amplitude: float = 1.0):
+        """Handles incoming commands to change the indicator's behavior."""
+        cmd = command.lower()
+        if cmd == "listen":
+            self.widget.update_interface_state(STATE_LISTENING, amplitude)
+            self._set_animation_speed(16)  # 60 FPS for smooth waveform
+        elif cmd in ["think", "process"]:
+            self.widget.update_interface_state(STATE_THINKING if cmd == "think" else STATE_PROCESSING)
+            self._set_animation_speed(16)  # 60 FPS for smooth waveform
+        elif cmd == "done":
+            self.widget.update_interface_state(STATE_DONE)
+            self._set_animation_speed(16)  # Keep smooth during fade-out
+            QTimer.singleShot(1500, self._return_to_idle)
+        elif cmd == "hide":
+            self._return_to_idle()
 
     def _return_to_idle(self):
-        self._state    = HIDDEN
-        self._fade_dir = 0
-        self._bar_h    = [BAR_MIN_H] * NUM_BARS
-        self._bar_noise = [0.0] * NUM_BARS
-        self._bar_kick = [0.0] * NUM_BARS
-        if not self._timer.isActive():
-            self._timer.start()
-        self._request_menu_bar_view_redraw()
+        """Resets the indicator to the subtle idle state."""
+        self.widget.update_interface_state(STATE_HIDDEN)
+        # Delay the FPS drop so the smooth fade-out animation completes at 60 FPS
+        QTimer.singleShot(600, lambda: self._set_animation_speed(100))
 
-    # ── IPC dispatcher ────────────────────────────────────────────────────
-    def _on_command(self, cmd):
-        c = cmd.strip()
-        lowered = c.lower()
-        if lowered.startswith("draft:") or lowered.startswith("final:"):
-            return
-        if lowered == "listen":
-            self.show_listening()
-        elif lowered == "thinking":
-            self.show_thinking()
-        elif lowered == "process":
-            self.show_processing()
-        elif lowered == "done":
-            self.show_done()
-        elif lowered == "hide":
-            self.hide_hud()
-        else:
-            log.info(f"[HUD] Unknown command: {c}")
+class HudServer(threading.Thread):
+    """
+    TCP server that listens for state commands from Ear and Brain.
 
-    def _on_volume(self, val):
-        self._voice_raw  = min(1.0, val * 6.0)
-        self._last_vol_t = time.time()
+    Runs in a daemon thread. When a command arrives (e.g. "listen", "process"),
+    it emits a Qt Signal through the HudCommandBridge. Qt automatically
+    queues the signal and delivers it on the main thread where the
+    controller can safely update the widget.
+    """
+    def __init__(self, controller):
+        super().__init__(daemon=True)
+        self.controller = controller
 
-    def _on_frequency_bands(self, freq_bands: dict):
-        """Update frequency bands for color mapping."""
-        self._frequency_bands = freq_bands
+        # Bridge lives in the main thread (created here in __init__ which
+        # runs on the main thread). Signal emission from the daemon thread
+        # is thread-safe — Qt detects cross-thread and uses QueuedConnection.
+        self.command_bridge = HudCommandBridge()
+        self.command_bridge.command_received.connect(controller.on_interface_command)
 
-    def _enter(self, state):
-        self._state    = state
-        self._t0       = time.time()
-        self._t        = 0.0
-        self._fade_dir = 0
-        if not self._timer.isActive():
-            self._timer.start()
+    def run(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((HUD_HOST, HUD_PORT))
+            except Exception as e:
+                print(f"HUD Server bind error: {e}")
+                return
+            s.listen()
+            while True:
+                conn, addr = s.accept()
+                with conn:
+                    data = conn.recv(1024)
+                    if not data:
+                        continue
+                    command = data.decode().strip()
+                    # Emit signal — Qt queues it to the main thread automatically
+                    self.command_bridge.command_received.emit(command)
 
-    def _tick(self):
-        self._t = time.time() - self._t0
-
-        # Voice decay
-        if time.time() - self._last_vol_t > 0.15:
-            self._voice_raw *= 0.80
-
-        target = self._voice_raw if self._state == LISTENING else 0.0
-        spd    = 0.38 if target > self._voice_smooth else 0.08
-        self._voice_smooth += (target - self._voice_smooth) * spd
-
-        v   = self._voice_smooth
-        t   = self._t
-        mid = (NUM_BARS - 1) / 2.0
-
-        for i in range(NUM_BARS):
-            ph = self._bar_phase[i]
-            centre_w = 1.0 - abs(i - mid) / mid * 0.18
-
-            if self._state == LISTENING:
-                # Chaotic zigzag drift: fast-rising random motion with sharp edges.
-                noise_target = random.uniform(-1.0, 1.0)
-                self._bar_noise[i] += (noise_target - self._bar_noise[i]) * LISTEN_NOISE_DRIFT_LERP
-                noise_drift = self._bar_noise[i] * LISTEN_NOISE_DRIFT_WEIGHT
-
-                # Stronger spark for non-smooth, jagged motion.
-                noise_spark = random.uniform(-1.0, 1.0) * LISTEN_NOISE_SPARK_WEIGHT
-
-                # Stochastic kick occasionally flips direction sharply.
-                if random.random() < (LISTEN_KICK_PROB * (0.45 + 0.55 * min(1.0, v))):
-                    self._bar_kick[i] = random.uniform(-LISTEN_KICK_MAG, LISTEN_KICK_MAG)
-                self._bar_kick[i] *= LISTEN_KICK_DAMP
-                kick = self._bar_kick[i]
-
-                smooth_base = (
-                    0.34 * math.sin(t * LISTEN_SMOOTH_BASE_SPEED_A + ph * 0.90) +
-                    0.16 * math.sin(t * LISTEN_SMOOTH_BASE_SPEED_B + ph * 1.20)
-                )
-                zig_primary = _triangle_wave(t * LISTEN_ZIGZAG_SPEED_PRIMARY + i * 0.11 + ph * 0.30) * LISTEN_ZIGZAG_WEIGHT
-                zig_alt = (-1.0 if i % 2 else 1.0) * _triangle_wave(t * LISTEN_ZIGZAG_SPEED_ALT + ph * 0.21) * 0.18
-                raw_wave = smooth_base + zig_primary + zig_alt + noise_drift + noise_spark + kick
-                wave = max(0.0, min(1.0, (raw_wave + 1.0) / 2.0))
-                idle  = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * 0.16
-                activity = min(1.0, 0.44 + v * 1.55)
-                tgt   = idle + (BAR_MAX_H * wave * centre_w - idle) * activity
-
-            elif self._state == THINKING:
-                wave = (
-                    0.72 * math.sin(t * THINKING_SPEED_A + i * 0.22) +
-                    0.28 * math.sin(t * THINKING_SPEED_B + i * 0.12)
-                )
-                wave = (wave + 1.0) / 2.0
-                tgt = BAR_MIN_H + (BAR_MAX_H * 0.36) * wave
-
-            elif self._state == PROCESSING:
-                sweep = (math.sin(t * PROCESSING_SWEEP_SPEED) + 1.0) / 2.0 * (NUM_BARS - 1)
-                dist  = abs(i - sweep)
-                glow  = math.exp(-dist * dist * 0.22)
-                breath = 0.14 + 0.04 * math.sin(t * PROCESSING_BREATH_SPEED + i * 0.16)
-                tgt = BAR_MIN_H + (BAR_MAX_H * 0.55) * max(glow, breath)
-
-            elif self._state == DONE:
-                prog = min(1.0, self._t * 5.0)
-                tgt  = BAR_MAX_H * (1.0 - prog) + BAR_MIN_H * prog
-
-            else:
-                tgt = BAR_MIN_H
-
-            cur = self._bar_h[i]
-            self._bar_h[i] += (tgt - cur) * (0.42 if tgt > cur else 0.10)
-
-        self._request_menu_bar_view_redraw()
-
-        if self._state == HIDDEN:
-            self._timer.stop()
+def initialize_hud() -> OscillatingInterfaceController:
+    """Helper to instantiate the controller."""
+    return OscillatingInterfaceController()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    try:
-        from AppKit import NSApp, NSApplicationActivationPolicyAccessory
-        NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-    except Exception:
-        pass
-
-    hud = MenuBarWaveformController()
+    controller = initialize_hud()
+    server = HudServer(controller)
+    server.start()
     sys.exit(app.exec())

@@ -71,6 +71,18 @@ def _is_no_streaming_mode() -> bool:
     return RECORDING_MODE == NO_STREAMING_MODE
 
 
+def _is_online(timeout=0.5) -> bool:
+    """
+    Checks for internet connectivity by attempting a quick connection to a reliable DNS server.
+    Used to prevent the app from hanging on LLM requests when the user is offline.
+    """
+    try:
+        socket.create_connection(("1.1.1.1", 53), timeout=timeout)
+        return True
+    except OSError:
+        return False
+
+
 def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
     """
     Loads the requested AI model into memory wrapped in our clean TranscriptionEngine interface.
@@ -139,9 +151,11 @@ def _get_or_create_session(session_id: str) -> SessionState:
 def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_timing: float, refiner_timing: float):
     """
     Displays a formatted summary of the completed session in the terminal.
-    Using the 'rich' library, this function prints a colorful table showing
-    the raw text, the refined text, and the timing breakdown.
     """
+    # Clear the previous meter line from Ear
+    sys.stdout.write(f"\r\033[K")
+    sys.stdout.flush()
+
     table = Table(title=f"📋 Session: {session_id[:8]}", box=box.ROUNDED, expand=True)
     table.add_column("Field", style="cyan")
     table.add_column("Value")
@@ -149,7 +163,8 @@ def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_t
     table.add_row("Status", "[bold green]DONE[/bold green]")
     table.add_row("Raw Text", f"[dim white]{raw_text}[/dim white]")
     table.add_row("Refined", f"[bold white]{cleaned_text}[/bold white]")
-    table.add_row("Timing", f"STT: {stt_timing:.2f}s | Groq: {refiner_timing:.2f}s | Total: {(stt_timing + refiner_timing):.2f}s")
+    llm_timing_str = f"{refiner_timing:.2f}s" if refiner_timing > 0 else "bypassed"
+    table.add_row("Timing", f"STT: {stt_timing:.2f}s | LLM: {llm_timing_str} | Total: {(stt_timing + refiner_timing):.2f}s")
     table.add_row("Stats", f"Before: {len(raw_text)} chars | After: {len(cleaned_text)} chars")
 
     Console().print("\n", table, "\n")
@@ -182,14 +197,19 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
     short_id = session_id[:8]
     if text:
         stt_time = rec.stt_time
-        log.info(f"[Brain] 🏁 \"{text}\" ({stt_time:.2f}s)")
+        # log.info replaced by _show_summary_table for Zen mode
         
         send_hud("process")
         
-        # Send the raw text to Groq to fix grammar and remove stutters before pasting
+        # Smart online/offline detection: skip LLM if no internet to ensure instant pasting
         t_refine_start = time.perf_counter()
-        cleaned_text = refine_text_with_fallbacks(text)
-        refine_time = time.perf_counter() - t_refine_start
+        if _is_online():
+            cleaned_text = refine_text_with_fallbacks(text)
+            refine_time = time.perf_counter() - t_refine_start
+        else:
+            log.info("[Brain] 🔌 Offline mode detected — bypassing LLM refiner for instant paste")
+            cleaned_text = text
+            refine_time = 0.0
         
         _update_session_telemetry_summary(
             session_id,
@@ -207,7 +227,7 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         _update_session_telemetry_summary(session_id, {"final_paste_success": True})
         send_hud("done")
     else:
-        log.info("[Brain] 🔇 Nothing detected")
+        # log.info("[Brain] 🔇 Nothing detected") # Silenced for Zen
         _update_session_telemetry_summary(
             session_id,
             {
@@ -219,7 +239,7 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
 
     # Clear memory using our clean interface
     with session.lock:
-        log.info(f"[Brain] 🔄 Clearing engine memory for session {short_id} (Finalized)")
+        # log.info(f"[Brain] 🔄 Clearing engine memory...") # Silenced for Zen
         session.engine.clear_internal_memory()
 
 
@@ -414,13 +434,20 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
 
     stt_time = time.perf_counter() - t_connect
     
-    # Send the raw text to Groq to fix grammar and remove stutters before pasting
+    # Smart online/offline detection: skip LLM if no internet to ensure instant pasting
     t_refine_start = time.perf_counter()
-    cleaned_text = refine_text_with_fallbacks(final_text)
-    refine_time = time.perf_counter() - t_refine_start
+    if _is_online():
+        cleaned_text = refine_text_with_fallbacks(final_text)
+        refine_time = time.perf_counter() - t_refine_start
+        llm_log_str = f"{refine_time:.2f}s"
+    else:
+        log.info("[Brain] 🔌 Offline mode detected — bypassing LLM refiner for instant paste")
+        cleaned_text = final_text
+        refine_time = 0.0
+        llm_log_str = "bypassed"
 
     log.info(
-        f'[Brain] 📝 [STT: {stt_time:.2f}s | Groq: {refine_time:.2f}s] → "{cleaned_text}"'
+        f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"'
     )
     
     # We do not use telemetry for the non-streaming path currently, but we can show the table.
@@ -516,7 +543,7 @@ def handle_connection(conn):
     if not raw_audio:
         return
     blob = bytes(raw_audio)
-    log.info("📥 Utterance received", size=len(blob))
+    # log.info("📥 Utterance received", size=len(blob)) # Silenced for Zen mode
 
     if blob.startswith(b"CMD_SWITCH_MODEL:"):
         _handle_switch_model(blob)
@@ -604,38 +631,22 @@ def start_server():
     # 1. Auto-fix environment issues (e.g., macOS library paths)
     fix_macos_library_paths()
 
-    # 2. Professional Setup Wizard (Interactive Menu)
-    from rich.console import Console
-    from rich.panel import Panel
-    wizard_console = Console()
-    
-    wizard_console.print(Panel.fit(
-        "[bold cyan]🤖 VibeVoice Setup Wizard[/bold cyan]\n"
-        "Choose your primary AI for text refinement:",
-        border_style="blue"
-    ))
-    
-    # Show the options to the user
-    for i, provider in enumerate(PROVIDERS, 1):
-        wizard_console.print(f"[bold green]{i}.[/bold green] {provider['name']}")
-    
-    # Get the user's choice
-    choice = Prompt.ask(
-        "\nSelect a provider number", 
-        choices=["1", "2", "3"], 
-        default="1"
-    )
-    
-    # Set the provider and immediately check if we have the API key
-    provider_idx = int(choice) - 1
+    # 2. Setup Provider from environment (configured by wizard.py)
+    # We no longer prompt here to avoid EOFError in background.
+    provider_idx_str = os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0")
+    try:
+        provider_idx = int(provider_idx_str)
+    except ValueError:
+        provider_idx = 0
+
     set_primary_provider(provider_idx)
-    
-    selected_provider = PROVIDERS[provider_idx]
-    check_and_ask_for_api_key(selected_provider["name"], selected_provider["env_var"])
+    log.info(f"[Brain] Text refiner set to: {PROVIDERS[provider_idx]['name']}")
 
     # 3. Load the STT engine
-    backend_info["engine"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
-    log.info("[Brain] Warming up model...")
+    # Use STT_MODEL from .env (configured by wizard_tui.py)
+    stt_model = os.environ.get("STT_MODEL", "parakeet-tdt-0.6b-v3")
+    backend_info["engine"] = load_transcription_engine(stt_model)
+    log.info(f"[Brain] Warming up model: {stt_model}...")
     try:
         backend_info["engine"].transcribe_chunk(np.zeros(8000, dtype=np.float32))
     except Exception:
