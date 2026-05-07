@@ -644,6 +644,14 @@ def start_server():
         server.close()
         if os.path.exists(SOCKET_PATH):
             os.remove(SOCKET_PATH)
+            
+        # Close the LLM router connection pool safely
+        try:
+            from src.text_refiner.llm_router import global_http_client
+            global_http_client.close()
+            log.info("[Brain] 🌐 LLM Router connection pool closed")
+        except Exception as e:
+            log.warning(f"⚠️ Failed to close LLM router client: {e}")
 
 
 if __name__ == "__main__":
