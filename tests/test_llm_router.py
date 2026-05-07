@@ -9,10 +9,11 @@ def make_mock_http_error():
     request = httpx.Request("POST", "http://test")
     return httpx.HTTPStatusError("Rate Limit", request=request, response=httpx.Response(429, request=request))
 
+@patch("src.text_refiner.llm_router.check_and_ask_for_api_key")
 @patch("src.text_refiner.llm_router.call_groq")
 @patch("src.text_refiner.llm_router.call_cerebras")
 @patch("src.text_refiner.llm_router.call_together")
-def test_router_rotates_on_failure(mock_together, mock_cerebras, mock_groq):
+def test_router_rotates_on_failure(mock_together, mock_cerebras, mock_groq, mock_check_key):
     """Test that the router switches to Cerebras for the NEXT call if Groq fails."""
     import src.text_refiner.llm_router as router
     router.current_provider_index = 0 # Reset state
@@ -38,10 +39,11 @@ def test_router_rotates_on_failure(mock_together, mock_cerebras, mock_groq):
     mock_groq.assert_called_once() # Called only in the first attempt
     mock_together.assert_not_called()
 
+@patch("src.text_refiner.llm_router.check_and_ask_for_api_key")
 @patch("src.text_refiner.llm_router.call_groq")
 @patch("src.text_refiner.llm_router.call_cerebras")
 @patch("src.text_refiner.llm_router.call_together")
-def test_router_full_rotation(mock_together, mock_cerebras, mock_groq):
+def test_router_full_rotation(mock_together, mock_cerebras, mock_groq, mock_check_key):
     """Test that it loops back to the start after all providers fail."""
     import src.text_refiner.llm_router as router
     router.current_provider_index = 0

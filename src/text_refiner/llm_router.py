@@ -11,18 +11,31 @@ from src.text_refiner.providers.cerebras import call_cerebras
 from src.text_refiner.providers.together import call_together
 
 from src import log
+from src.utils.env_manager import check_and_ask_for_api_key
 
 # 1. Configuration for our Providers
 # We list them in order: Groq, Cerebras, Together AI.
 PROVIDERS = [
-    {"name": "Groq", "call": call_groq},
-    {"name": "Cerebras", "call": call_cerebras},
-    {"name": "Together AI", "call": call_together}
+    {"name": "Groq", "call": call_groq, "env_var": "GROQ_API_KEY"},
+    {"name": "Cerebras", "call": call_cerebras, "env_var": "CEREBRAS_API_KEY"},
+    {"name": "Together AI", "call": call_together, "env_var": "TOGETHER_API_KEY"}
 ]
 
 # 2. State to remember who is the current leader.
 # We start with Groq (index 0).
 current_provider_index = 0
+
+def set_primary_provider(index: int) -> None:
+    """
+    Sets which AI provider we should try to use first.
+    
+    Args:
+        index: The position in the PROVIDERS list (0, 1, or 2).
+    """
+    global current_provider_index
+    if 0 <= index < len(PROVIDERS):
+        current_provider_index = index
+        log.info(f"LLM Router: Primary provider set to {PROVIDERS[index]['name']}")
 
 # 3. We make one internet client for the whole app. 
 # We use a 4.0s timeout to ensure we stay under the 5.0s user limit.
@@ -50,9 +63,13 @@ def refine_text_with_fallbacks(raw_text: str) -> str:
     provider = PROVIDERS[current_provider_index]
     provider_name = provider["name"]
     provider_function = provider["call"]
+    provider_env_var = provider["env_var"]
 
     # 3. Try to clean the text
     try:
+        # Guarantee that we have an API key before calling
+        check_and_ask_for_api_key(provider_name, provider_env_var)
+        
         log.info(f"LLM Router: Using {provider_name} for cleanup.")
         return provider_function(global_http_client, raw_text)
     except Exception as error:

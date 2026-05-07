@@ -4,7 +4,7 @@ We use this as our first backup if Groq is not working.
 """
 import os
 import httpx
-from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION
+from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION , refine_user_prompt 
 
 def call_cerebras(client: httpx.Client, raw_text: str) -> str:
     """
@@ -19,8 +19,6 @@ def call_cerebras(client: httpx.Client, raw_text: str) -> str:
     """
     # 1. Get the secret API key
     api_key = os.environ.get("CEREBRAS_API_KEY")
-    if not api_key:
-        raise ValueError("Missing CEREBRAS_API_KEY")
         
     # 2. Setup address and headers
     url = "https://api.cerebras.ai/v1/chat/completions"
@@ -34,7 +32,7 @@ def call_cerebras(client: httpx.Client, raw_text: str) -> str:
         "model": "llama-3.3-70b",
         "messages": [
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
-            {"role": "user", "content": raw_text}
+            {"role": "user", "content": refine_user_prompt(raw_text)}
         ],
         "temperature": 0.0,
         "max_tokens": 512,

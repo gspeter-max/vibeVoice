@@ -4,7 +4,7 @@ We use this as our second backup if both Groq and Cerebras are not working.
 """
 import os
 import httpx
-from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION
+from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION, refine_user_prompt
 
 def call_together(client: httpx.Client, raw_text: str) -> str:
     """
@@ -19,8 +19,6 @@ def call_together(client: httpx.Client, raw_text: str) -> str:
     """
     # 1. Get the secret API key
     api_key = os.environ.get("TOGETHER_API_KEY")
-    if not api_key:
-        raise ValueError("Missing TOGETHER_API_KEY")
         
     # 2. Setup address and headers
     url = "https://api.together.ai/v1/chat/completions"
@@ -28,13 +26,13 @@ def call_together(client: httpx.Client, raw_text: str) -> str:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    
+
     # 3. Create the message package
     message_package = {
         "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
         "messages": [
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
-            {"role": "user", "content": raw_text}
+            {"role": "user", "content": refine_user_prompt(raw_text)}
         ],
         "temperature": 0.0,
         "max_tokens": 512,

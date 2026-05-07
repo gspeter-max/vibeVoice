@@ -4,7 +4,7 @@ We use the Llama 3.3 70B model because it is very smart and fast.
 """
 import os
 import httpx
-from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION
+from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION, refine_user_prompt
 
 def call_groq(client: httpx.Client, raw_text: str) -> str:
     """
@@ -23,8 +23,6 @@ def call_groq(client: httpx.Client, raw_text: str) -> str:
     """
     # 1. Get the secret password (API key) for Groq
     api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise ValueError("Missing GROQ_API_KEY")
         
     # 2. Setup the web address and login headers
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -38,7 +36,7 @@ def call_groq(client: httpx.Client, raw_text: str) -> str:
         "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
-            {"role": "user", "content": raw_text}
+            {"role": "user", "content": refine_user_prompt(raw_text)}
         ],
         "temperature": 0.0,
         "max_tokens": 512,
