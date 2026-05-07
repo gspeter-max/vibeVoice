@@ -16,7 +16,9 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import numpy as np
-from src.text_refiner.llm_router import refine_text_with_fallbacks
+from rich.prompt import Prompt
+from src.text_refiner.llm_router import refine_text_with_fallbacks, set_primary_provider, PROVIDERS
+from src.utils.env_manager import check_and_ask_for_api_key
 from src.streaming.streaming_shared_logic import (
     analyze_duplicate_chunk_prefix,
     remove_duplicate_chunk_prefix,
@@ -599,9 +601,39 @@ def start_server():
     """
     Initializes the Brain server and begins listening for incoming connections.
     """
-    # Auto-fix environment issues (e.g., macOS library paths)
+    # 1. Auto-fix environment issues (e.g., macOS library paths)
     fix_macos_library_paths()
 
+    # 2. Professional Setup Wizard (Interactive Menu)
+    from rich.console import Console
+    from rich.panel import Panel
+    wizard_console = Console()
+    
+    wizard_console.print(Panel.fit(
+        "[bold cyan]🤖 VibeVoice Setup Wizard[/bold cyan]\n"
+        "Choose your primary AI for text refinement:",
+        border_style="blue"
+    ))
+    
+    # Show the options to the user
+    for i, provider in enumerate(PROVIDERS, 1):
+        wizard_console.print(f"[bold green]{i}.[/bold green] {provider['name']}")
+    
+    # Get the user's choice
+    choice = Prompt.ask(
+        "\nSelect a provider number", 
+        choices=["1", "2", "3"], 
+        default="1"
+    )
+    
+    # Set the provider and immediately check if we have the API key
+    provider_idx = int(choice) - 1
+    set_primary_provider(provider_idx)
+    
+    selected_provider = PROVIDERS[provider_idx]
+    check_and_ask_for_api_key(selected_provider["name"], selected_provider["env_var"])
+
+    # 3. Load the STT engine
     backend_info["engine"] = load_transcription_engine("parakeet-tdt-0.6b-v3")
     log.info("[Brain] Warming up model...")
     try:
