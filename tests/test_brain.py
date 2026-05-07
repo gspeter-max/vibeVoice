@@ -59,7 +59,7 @@ def clear_session_store():
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
     """
     Verify that when raw audio arrives (no CMD_ prefix), brain transcribes it
-    using engine.transcribe_chunk() and pastes the result.
+    using engine.transcribe_chunk(), cleans it, and pastes the result.
     """
     # Create a mock engine that returns "hello world" when asked to transcribe
     mock_engine = MagicMock()
@@ -72,14 +72,16 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
 
     with (
         patch.object(brain, "send_hud") as mock_hud,
+        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain.handle_connection(conn)
 
     # The engine must have been asked to transcribe exactly once
     mock_engine.transcribe_chunk.assert_called_once()
+    mock_groq.assert_called_once_with("hello world")
     # The transcribed text should have been pasted with a trailing space
-    mock_paste.assert_called_once_with("hello world ")
+    mock_paste.assert_called_once_with("hello world cleaned ")
     assert any(call.args[0] == "done" for call in mock_hud.call_args_list)
 
 
@@ -99,11 +101,16 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     conn = MockConn(sample_audio_bytes)
 
-    with patch.object(brain, "send_hud"), patch.object(brain, "paste_instantly") as mock_paste:
+    with (
+        patch.object(brain, "send_hud"),
+        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "paste_instantly") as mock_paste,
+    ):
         brain.handle_connection(conn)
 
     mock_engine.transcribe_chunk.assert_called_once()
-    mock_paste.assert_called_once_with("hello world ")
+    mock_groq.assert_called_once_with("hello world")
+    mock_paste.assert_called_once_with("hello world cleaned ")
 
 
 def test_handle_connection_switch_model_command():
@@ -197,7 +204,7 @@ def test_handle_audio_chunk_dedupes_against_last_chunk_text():
 def test_finalize_session_pastes_stitched_text_directly():
     """
     Verify that after all chunks arrive and the session is closed,
-    _finalize_recording_if_ready stitches the parts and calls paste_instantly.
+    _finalize_recording_if_ready stitches the parts, cleans them using Groq, and calls paste_instantly.
     """
     session_id = "session123"
     mock_engine = MagicMock()
@@ -216,11 +223,13 @@ def test_finalize_session_pastes_stitched_text_directly():
     with (
         patch("src.backend.brain.log.info") as mock_log,
         patch.object(brain, "send_hud"),
+        patch("src.backend.brain.refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain._finalize_recording_if_ready(session_id, 0)
 
-    mock_paste.assert_called_once_with("hello world ")
+    mock_groq.assert_called_once_with("hello world")
+    mock_paste.assert_called_once_with("hello world cleaned ")
     logged_messages = [call.args[0] for call in mock_log.call_args_list]
     assert any("[Brain] 🏁" in message for message in logged_messages)
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import numpy as np
+from src.text_refiner.llm_router import refine_text_with_fallbacks
 from src.streaming.streaming_shared_logic import (
     analyze_duplicate_chunk_prefix,
     remove_duplicate_chunk_prefix,
@@ -133,22 +134,21 @@ def _get_or_create_session(session_id: str) -> SessionState:
         return session
 
 
-def _show_summary_table(session_id: str, text: str, stt_timing: float):
+def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_timing: float, refiner_timing: float):
     """
     Displays a formatted summary of the completed session in the terminal.
     Using the 'rich' library, this function prints a colorful table showing
-    the final transcribed text, the time it took to transcribe (STT), and
-    the character count. This provides developers with an easy-to-read
-    confirmation of the session results immediately after the text is pasted.
+    the raw text, the refined text, and the timing breakdown.
     """
     table = Table(title=f"📋 Session: {session_id[:8]}", box=box.ROUNDED, expand=True)
     table.add_column("Field", style="cyan")
     table.add_column("Value")
 
     table.add_row("Status", "[bold green]DONE[/bold green]")
-    table.add_row("Text", f"[bold white]{text}[/bold white]")
-    table.add_row("Timing", f"STT: {stt_timing:.2f}s")
-    table.add_row("Stats", f"{len(text)} chars")
+    table.add_row("Raw Text", f"[dim white]{raw_text}[/dim white]")
+    table.add_row("Refined", f"[bold white]{cleaned_text}[/bold white]")
+    table.add_row("Timing", f"STT: {stt_timing:.2f}s | Groq: {refiner_timing:.2f}s | Total: {(stt_timing + refiner_timing):.2f}s")
+    table.add_row("Stats", f"Before: {len(raw_text)} chars | After: {len(cleaned_text)} chars")
 
     Console().print("\n", table, "\n")
 
@@ -181,17 +181,27 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
     if text:
         stt_time = rec.stt_time
         log.info(f"[Brain] 🏁 \"{text}\" ({stt_time:.2f}s)")
+        
+        send_hud("process")
+        
+        # Send the raw text to Groq to fix grammar and remove stutters before pasting
+        t_refine_start = time.perf_counter()
+        cleaned_text = refine_text_with_fallbacks(text)
+        refine_time = time.perf_counter() - t_refine_start
+        
         _update_session_telemetry_summary(
             session_id,
             {
                 "final_text": text,
+                "cleaned_text": cleaned_text,
                 "total_chunks_received": rec.received_count,
                 "total_decode_seconds": round(stt_time, 2),
+                "refine_seconds": round(refine_time, 2),
             },
         )
-        _show_summary_table(session_id, text, stt_time)
-        send_hud("process")
-        paste_instantly(text + " ")
+        _show_summary_table(session_id, text, cleaned_text, stt_time, refine_time)
+        
+        paste_instantly(cleaned_text + " ")
         _update_session_telemetry_summary(session_id, {"final_paste_success": True})
         send_hud("done")
     else:
@@ -241,7 +251,7 @@ def _handle_audio_chunk(
 
     text = ""
     dedup_analysis = None
-    prev_text = ""
+    last_chunk_text = ""
 
     if audio is not None:
         try:
@@ -296,7 +306,7 @@ def _handle_audio_chunk(
         {
             "audio_file_path": audio_file_path,
             "decode_seconds": round(elapsed, 2),
-            "last_chunk_text": prev_text,
+            "last_chunk_text": last_chunk_text,
             "raw_text": text,
             "cleaned_text_after_dedup": dedup_analysis.cleaned_text if dedup_analysis else text,
             "dedup_stats": {
@@ -400,10 +410,21 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
         send_hud("hide")
         return
 
+    stt_time = time.perf_counter() - t_connect
+    
+    # Send the raw text to Groq to fix grammar and remove stutters before pasting
+    t_refine_start = time.perf_counter()
+    cleaned_text = refine_text_with_fallbacks(final_text)
+    refine_time = time.perf_counter() - t_refine_start
+
     log.info(
-        f'[Brain] 📝 [{time.perf_counter() - t_connect:.2f}s total] → "{final_text}"'
+        f'[Brain] 📝 [STT: {stt_time:.2f}s | Groq: {refine_time:.2f}s] → "{cleaned_text}"'
     )
-    paste_instantly(final_text + " ")
+    
+    # We do not use telemetry for the non-streaming path currently, but we can show the table.
+    _show_summary_table("one-shot", final_text, cleaned_text, stt_time, refine_time)
+    
+    paste_instantly(cleaned_text + " ")
     send_hud("done")
 
 
