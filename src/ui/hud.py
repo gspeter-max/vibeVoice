@@ -1,16 +1,14 @@
 import sys
 import math
 import time
-import random
 import platform
 import logging
 import socket
 import threading
-from typing import Optional
 from ctypes import c_void_p
 
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QScreen
 
 # Global activation policy setup for macOS
@@ -23,7 +21,7 @@ if platform.system() == "Darwin":
         pass
 
 # Constants for the indicator dimensions (Native Menu Bar size)
-INDICATOR_WIDTH = 68
+INDICATOR_WIDTH = 100
 INDICATOR_HEIGHT = 26
 
 HUD_HOST, HUD_PORT = "127.0.0.1", 57234
@@ -90,17 +88,17 @@ class RoundedRectangularIndicatorWidget(QWidget):
         self._smooth_amplitude = 0.0
         self._smooth_width = 44.0   # Idle width
         self._smooth_height = 20.0  # Idle height
+        self._smooth_spinner_opacity = 0.0 # Smooth fade in for loading spinner
+        self._smooth_bar_offset = 0.0 # Smooth left/right shift for bars
         self._last_frame_time = time.time()
 
-        # Per-bar random phase offsets create organic, non-synchronized motion.
-        # Each bar oscillates at slightly different timing, like real audio.
-        self._bar_phase_offsets = [random.uniform(0, math.pi * 2) for _ in range(10)]
+
 
         # Time-based animation start (frame-rate independent)
         self._animation_start_time = time.time()
 
         # Colors (Solid Black with White Outline)
-        self._border_color = QColor(255, 255, 255, 100)
+        self._border_color = QColor(255, 255, 255, 20)
         self._background_color = QColor(0, 0, 0, 255)
 
     def _apply_platform_specific_hardening(self):
@@ -165,20 +163,39 @@ class RoundedRectangularIndicatorWidget(QWidget):
 
         # Target pill dimensions based on state
         if self._interface_state == STATE_HIDDEN:
-            target_w = 44.0
-            target_h = 8.0  # <--- CHANGE THIS: Height when NOT recording (idle)
+            target_w = 40.0
+            target_h = 8.0  # Height when NOT recording (idle)
+        elif self._interface_state in (STATE_THINKING, STATE_PROCESSING):
+            target_w = 88.0 # Swell to fit dots and spinner side-by-side
+            target_h = 28.0
         else:
-            target_w = 68.0
-            target_h = 26.0  # <--- CHANGE THIS: Height when RECORDING (active)
+            target_w = 69.0
+            target_h = 28.0  # Height when RECORDING (active)
 
         # Smooth size lerp
-        smooth_speed_size = 12.0 if target_w > self._smooth_width else 6.0
-        lerp_factor_size = 1.0 - math.exp(-dt * smooth_speed_size)
-        self._smooth_width += (target_w - self._smooth_width) * lerp_factor_size
-        self._smooth_height += (target_h - self._smooth_height) * lerp_factor_size
+        if self._interface_state == STATE_HIDDEN:
+            # Instant snap for hiding (Zero Latency) — all smooth values
+            # reset immediately so the pill, bars, and spinner vanish at once
+            self._smooth_width = target_w
+            self._smooth_height = target_h
+            self._smooth_amplitude = 0.0
+            self._smooth_spinner_opacity = 0.0
+            self._smooth_bar_offset = 0.0
+        else:
+            # Smooth expansion and transitions when active
+            smooth_speed_size = 12.0
+            lerp_factor_size = 1.0 - math.exp(-dt * smooth_speed_size)
+            self._smooth_width += (target_w - self._smooth_width) * lerp_factor_size
+            self._smooth_height += (target_h - self._smooth_height) * lerp_factor_size
 
-        # Center the drawn pill inside the fixed 68x26 widget window
-        from PySide6.QtCore import QRectF
+            target_spinner = 1.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
+            spinner_fade_speed = 10.0 if target_spinner > self._smooth_spinner_opacity else 25.0
+            self._smooth_spinner_opacity += (target_spinner - self._smooth_spinner_opacity) * (1.0 - math.exp(-dt * spinner_fade_speed))
+            
+            target_bar_offset = -14.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
+            self._smooth_bar_offset += (target_bar_offset - self._smooth_bar_offset) * lerp_factor_size
+
+        # Center the drawn pill inside the fixed widget window
         pill_x = (self.width() - self._smooth_width) / 2.0
         pill_y = (self.height() - self._smooth_height) / 2.0
         pill_rect = QRectF(pill_x, pill_y, self._smooth_width, self._smooth_height)
@@ -198,8 +215,12 @@ class RoundedRectangularIndicatorWidget(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(pill_rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
         
-        # 3. Draw the Vertical Bars
+        # 3. Draw the Vertical Bars (Waveform)
         self._draw_vertical_bars(painter, elapsed, dt, pill_rect)
+        
+        # 4. Draw the Circular Loading Spinner
+        if self._smooth_spinner_opacity > 0.01:
+            self._draw_loading_spinner(painter, elapsed, pill_rect)
         
     def _draw_vertical_bars(self, painter: QPainter, elapsed: float, dt: float, pill_rect):
         """
@@ -214,32 +235,30 @@ class RoundedRectangularIndicatorWidget(QWidget):
         """
         mid_y = pill_rect.center().y()
 
-        # Bar layout — 6 centered bars, 2px wide with 2px gap
-        # Thin bars with full pill-shaped rounding (radius = width/2) look like
-        # smooth capsules, matching the Wispr Flow visual reference
-        num_bars = 10
-        bar_spacing = 4    # 2px bar + 2px gap
-        bar_width = 2
+        # Bar layout — 11 centered bars, 3px wide with 2px gap
+        # Full pill-shaped rounding (radius = width/2) creates smooth capsules
+        num_bars = 11
+        bar_spacing = 5    # 3px bar + 2px gap
+        bar_width = 3
         bar_rounding = bar_width / 2.0  # Full pill shape — perfectly round tips
         total_width = (num_bars - 1) * bar_spacing + bar_width
-        start_x = pill_rect.center().x() - (total_width / 2.0)
+        
+        # Shift bars to the left when spinner appears
+        start_x = pill_rect.center().x() - (total_width / 2.0) + self._smooth_bar_offset
 
         # Target amplitude based on current HUD state
         if self._interface_state == STATE_HIDDEN:
             target_amp = 0.0    # 0 = bars fade out and disappear completely
         elif self._interface_state == STATE_LISTENING:
             target_amp = 14.0 * self._base_amplitude   # Taller, prominent waves
-        elif self._interface_state == STATE_THINKING:
-            # Gentle breathing oscillation while AI processes
-            target_amp = 3.5 * (math.sin(elapsed * 1.5) * 0.3 + 1.0)
-        elif self._interface_state == STATE_PROCESSING:
-            target_amp = 5.0
+        elif self._interface_state in (STATE_THINKING, STATE_PROCESSING):
+            target_amp = 0.0    # Fade out bars entirely so spinner can show
         else:  # DONE
             target_amp = 2.0
 
         # Smooth amplitude lerp using exponential decay (frame-rate independent).
         # Rise = fast (user starts speaking, instant feedback needed).
-        # Fall = slow (gentle fade-out feels premium, not jarring).
+        # Fall = moderate (gentle fade-out but not lingering).
         smooth_speed = 8.0 if target_amp > self._smooth_amplitude else 3.0
         lerp_factor = 1.0 - math.exp(-dt * smooth_speed)
         self._smooth_amplitude += (target_amp - self._smooth_amplitude) * lerp_factor
@@ -250,32 +269,36 @@ class RoundedRectangularIndicatorWidget(QWidget):
         painter.setPen(Qt.NoPen)
 
         for i in range(num_bars):
-            offset = self._bar_phase_offsets[i]
+            # Position-based offset — each bar is slightly behind its neighbor,
+            # creating a smooth traveling wave (like a curtain ripple) instead
+            # of random independent bouncing (zigzag)
+            offset = i * 0.35
 
-            # Multi-frequency layered oscillation — three sin waves at different
-            # speeds create complex, natural movement (not robotic single-sin)
+            # Multi-frequency layered oscillation — two sin waves at different
+            # speeds create smooth, organic movement across the bar group
             wave = (
-                0.50 * math.sin(elapsed * 3.0 + offset) +
-                0.30 * math.sin(elapsed * 5.7 + offset * 1.3) +
-                0.20 * math.sin(elapsed * 1.3 + offset * 0.7)
+                0.60 * math.sin(elapsed * 2.0 + offset) +
+                0.40 * math.sin(elapsed * 3.4 + offset * 1.3)
             )
 
-            # Center-weighted bell curve — center bars reach full height,
-            # edge bars are ~45% shorter (mimics real audio spectrum shape)
-            center_weight = 1.0 - abs(i - mid_index) / mid_index * 0.45
+            # Drastic bell curve — edges shrink by 85% to become tiny dots
+            center_weight = 1.0 - abs(i - mid_index) / mid_index * 0.85
 
             # Final bar height
             bar_h = 1.5 + (amp * abs(wave) * center_weight)
             bar_h = min(bar_h, pill_rect.height() - 6)  # Stay within pill bounds
 
-            # Fade out opacity when amp approaches 0 so dots completely disappear
-            opacity_multiplier = min(1.0, amp * 2.0)
-            if opacity_multiplier <= 0.01:
-                continue
+            # Fade out opacity completely ONLY when hiding.
+            # In PROCESSING/THINKING, we want them to stay visible as flat dots.
+            if self._interface_state == STATE_HIDDEN:
+                opacity_multiplier = min(1.0, amp * 2.0)
+                if opacity_multiplier <= 0.01:
+                    continue
+            else:
+                opacity_multiplier = 1.0
 
-            # Per-bar opacity modulation — bars pulse between 180-255 alpha.
-            # Creates a subtle "breathing" effect that makes the UI feel alive.
-            base_alpha = 180 + 75 * abs(math.sin(elapsed * 2.0 + i * 0.5))
+            # Solid white bars to match the crisp Apple Siri look
+            base_alpha = 255
             alpha = int(base_alpha * opacity_multiplier)
 
             painter.setBrush(QBrush(QColor(255, 255, 255, alpha)))
@@ -285,6 +308,44 @@ class RoundedRectangularIndicatorWidget(QWidget):
 
             # drawRoundedRect with radius = bar_width/2 creates capsule/pill shape
             painter.drawRoundedRect(x, y, bar_width, bar_h, bar_rounding, bar_rounding)
+
+    def _draw_loading_spinner(self, painter: QPainter, elapsed: float, pill_rect: QRectF):
+        """Draws an iOS-style 12-tick activity indicator inside the pill."""
+        center = pill_rect.center()
+        # Shift the spinner to the right side of the pill
+        center.setX(center.x() + 25.0)
+        
+        painter.save()
+        painter.translate(center)
+        
+        num_ticks = 8
+        inner_radius = 3.5
+        outer_radius = 8.5
+        tick_width = 2.2
+        
+        # Slightly slower rotation for a premium feel
+        current_tick = int((elapsed * 8.0) % num_ticks)
+        
+        painter.setPen(Qt.NoPen)
+        
+        for i in range(num_ticks):
+            painter.save()
+            painter.rotate(i * 360/ num_ticks)  
+            
+            distance = (current_tick - i) % num_ticks
+            # distance 0 -> alpha = max
+            # distance 7 -> alpha = min
+            base_alpha = max(40, 255 - int(distance * (215.0 / num_ticks)))
+            alpha = int(base_alpha * self._smooth_spinner_opacity)
+            
+            painter.setBrush(QBrush(QColor(255, 255, 255, alpha)))
+            
+            tick_rect = QRectF(-tick_width / 2.0, -outer_radius, tick_width, outer_radius - inner_radius)
+            painter.drawRoundedRect(tick_rect, tick_width / 2.0, tick_width / 2.0)
+            
+            painter.restore()
+            
+        painter.restore()
 
 class OscillatingInterfaceController:
     """
@@ -311,7 +372,7 @@ class OscillatingInterfaceController:
 
         geo = screen.geometry()
         x = geo.x() + (geo.width() - INDICATOR_WIDTH) // 2
-        y = geo.y() + geo.height() - INDICATOR_HEIGHT
+        y = geo.y() + geo.height() - INDICATOR_HEIGHT - 10 
 
         self.widget.move(x, y)
 
