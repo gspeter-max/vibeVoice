@@ -58,6 +58,7 @@ from src.ipc.protocol import (
     format_session_commit_message,
     format_session_event_message,
 )
+from src.ui.hud_client import send_hud_command, start_volume_sender_thread
 from src import log
 try:
     from pynput import keyboard, mouse
@@ -290,50 +291,20 @@ class Ear:
         log.info(f"[Ear] Mic selected: {self.active_mic_name} ✓")
 
     def _send_hud(self, cmd):
-        """
-        Sends state commands to the HUD over a TCP socket.
-        It updates the user interface by signaling whether the app is
-        currently listening, processing, or done. This keeps the user
-        informed about the AI's internal state without needing to look
-        at the terminal window, which is especially useful for a background tool.
-        """
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.2)
-            s.connect(('127.0.0.1', 57234))
-            s.sendall(cmd.encode())
-            s.close()
-        except Exception as e:
-            log.info(f"[Ear] ❌ HUD command '{cmd}' failed: {e}")
+        """Compatibility wrapper that forwards HUD command sending to `src.ui.hud_client`."""
+
+        sent = send_hud_command(cmd, socket_factory=socket.socket)
+        if not sent:
+            log.info(f"[Ear] ❌ HUD command '{cmd}' failed")
 
     def _start_volume_sender(self):
-        """
-        Launches a background thread to stream volume data to the HUD.
-        This function uses UDP to send real-time RMS levels and frequency
-        band data (bass, mid, treble) approximately 25 times per second.
-        The HUD uses this data to drive its visual volume meter and
-        animations, providing a smooth and responsive user experience.
-        """
-        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        def _sender():
-            packets_sent = 0
-            while True:
-                with self._lock:
-                    if not self.is_recording:
-                        log.info(f"[Ear] Volume sender stopped (sent {packets_sent} packets)")
-                        break
-                    rms = self.last_rms
-                    freq_bands = self.last_frequency_bands
-                try:
-                    # Send volume + frequency bands in format: "vol:RMS,bass:BASS,mid:MID,treble:TREBLE"
-                    message = f"vol:{rms:.4f},bass:{freq_bands['bass']:.3f},mid:{freq_bands['mid']:.3f},treble:{freq_bands['treble']:.3f}"
-                    udp.sendto(message.encode(), ('127.0.0.1', VOL_PORT))
-                    packets_sent += 1
-                except Exception as e:
-                    log.info(f"[Ear] ❌ Failed to send volume: {e}")
-                time.sleep(0.04)
-            udp.close()
-        threading.Thread(target=_sender, daemon=True).start()
+        """Compatibility wrapper that starts the HUD volume sender thread."""
+
+        start_volume_sender_thread(
+            self,
+            volume_port=VOL_PORT,
+            socket_factory=socket.socket,
+        )
         log.debug("[Ear] Volume sender thread started")
 
     def _is_no_streaming_mode(self) -> bool:

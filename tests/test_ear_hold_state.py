@@ -3,6 +3,7 @@ import time
 import sys
 import os
 import json
+import threading
 from unittest.mock import Mock, patch
 
 from src.streaming.streaming_shared_logic import should_split_chunk_after_silence
@@ -76,6 +77,67 @@ def test_send_message_to_brain_returns_false_when_message_is_empty():
     from src.ipc.client import send_message_to_brain
 
     assert send_message_to_brain(b"") is False
+
+
+def test_hud_client_sends_command_over_tcp_socket():
+    from src.ui.hud_client import send_hud_command
+
+    captured = {"connected": None, "payload": None, "closed": False}
+
+    class FakeSocket:
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, address):
+            captured["connected"] = address
+
+        def sendall(self, payload):
+            captured["payload"] = payload
+
+        def close(self):
+            captured["closed"] = True
+
+    with patch("src.ui.hud_client.socket.socket", return_value=FakeSocket()):
+        assert send_hud_command("listen") is True
+
+    assert captured["connected"] == ("127.0.0.1", 57234)
+    assert captured["payload"] == b"listen"
+    assert captured["closed"] is True
+
+
+def test_hud_client_volume_sender_stops_after_recording_ends():
+    from src.ui.hud_client import start_volume_sender_thread
+
+    sent_packets = []
+
+    class FakeUdpSocket:
+        def sendto(self, payload, address):
+            sent_packets.append((payload, address))
+
+        def close(self):
+            sent_packets.append(("closed", None))
+
+    class FakeEarState:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self.is_recording = True
+            self.last_rms = 0.5
+            self.last_frequency_bands = {"bass": 0.1, "mid": 0.7, "treble": 0.2}
+
+    ear_state = FakeEarState()
+
+    def fake_sleep(_seconds):
+        with ear_state._lock:
+            ear_state.is_recording = False
+
+    with patch("src.ui.hud_client.socket.socket", return_value=FakeUdpSocket()), \
+         patch("src.ui.hud_client.time.sleep", side_effect=fake_sleep):
+        sender_thread = start_volume_sender_thread(ear_state, volume_port=57235)
+        sender_thread.join(timeout=1.0)
+
+    assert sent_packets[0][1] == ("127.0.0.1", 57235)
+    assert sent_packets[0][0].startswith(b"vol:0.5000,bass:0.100,mid:0.700,treble:0.200")
+    assert sent_packets[-1] == ("closed", None)
 
 
 def test_raw_stream_helpers_open_send_and_close_socket():
