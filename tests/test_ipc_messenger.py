@@ -2,11 +2,13 @@
 import pytest
 import json
 from src.ipc.messenger import (
+    SOCKET_PATH,
     format_audio_chunk_message,
     format_session_commit_message,
     format_session_event_message,
     format_switch_model_message,
-    parse_incoming_message
+    parse_incoming_message,
+    send_message_to_brain,
 )
 from src.ipc.protocol import (
     format_audio_chunk_message as protocol_format_audio_chunk_message,
@@ -19,6 +21,10 @@ from src.ipc.protocol import (
 def test_format_audio_chunk_message_creates_correct_header():
     result = format_audio_chunk_message("session123", 0, 5, b"audio")
     assert result == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
+
+def test_messenger_module_re_exports_transport_compatibility_surface():
+    assert SOCKET_PATH == "/tmp/parakeet.sock"
+    assert send_message_to_brain(b"") is False
 
 def test_protocol_module_matches_existing_messenger_contract():
     assert protocol_format_audio_chunk_message("session123", 0, 5, b"audio") == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"

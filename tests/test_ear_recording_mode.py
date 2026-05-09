@@ -51,6 +51,64 @@ def test_audio_ear_runtime_exports_match_compatibility_surface():
     assert ear_module.Ear is RuntimeEar
     assert ear_module.start_ear is runtime_start_ear
 
+def test_terminal_menu_run_uses_audio_ear_switch_command_seam(monkeypatch):
+    monkeypatch.setattr("sys.stdin.fileno", lambda: 0)
+    menu = ear_module.TerminalMenu()
+    captured = {}
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("termios.tcgetattr", lambda _fd: "old-settings")
+    monkeypatch.setattr("termios.tcsetattr", lambda *_args: None)
+    monkeypatch.setattr("tty.setcbreak", lambda _fd: None)
+    monkeypatch.setattr(
+        "select.select",
+        lambda _read, _write, _error, _timeout: ([sys.stdin], [], []),
+    )
+
+    def fake_read(_count):
+        menu._stop.set()
+        return "5"
+
+    monkeypatch.setattr("sys.stdin.read", fake_read)
+
+    def fake_send_switch(model_name, ear_instance=None):
+        captured["model_name"] = model_name
+        captured["ear_instance"] = ear_instance
+
+    monkeypatch.setattr(ear_module, "send_switch_command", fake_send_switch)
+    monkeypatch.setenv("RECORDING_MODE", "silence_streaming")
+
+    menu.run()
+
+    assert captured == {
+        "model_name": "nemotron-streaming-0.6b",
+        "ear_instance": None,
+    }
+
+
+def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
+    checked_paths = []
+    sent = {}
+
+    monkeypatch.setattr(
+        "src.audio.ear_runtime.menu._get_socket_path_from_audio_ear",
+        lambda: "/tmp/custom-parakeet.sock",
+    )
+
+    monkeypatch.setattr(
+        "src.audio.ear_runtime.menu.os.path.exists",
+        lambda path: checked_paths.append(path) or path == "/tmp/custom-parakeet.sock",
+    )
+    monkeypatch.setattr(
+        "src.audio.ear_runtime.menu.send_message_to_brain",
+        lambda payload, **kwargs: sent.setdefault("socket_path", kwargs.get("socket_path")) or True,
+    )
+
+    ear_module.run_self_test()
+
+    assert checked_paths == ["/tmp/custom-parakeet.sock"]
+    assert sent["socket_path"] == "/tmp/custom-parakeet.sock"
+
 def test_nemotron_in_models_when_silence_streaming():
     """
     When RECORDING_MODE is 'silence_streaming', Nemotron SHOULD be

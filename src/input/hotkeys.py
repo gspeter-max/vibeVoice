@@ -11,16 +11,27 @@ except Exception:
     # so the rest of the code can still run (even if it won't actually hear keys).
     class _FallbackKey:
         cmd_r = "cmd_r"
+
+    class _FallbackListener:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
     class _FallbackKeyboardModule:
         Key = _FallbackKey()
-        Listener = lambda *args, **kwargs: None
+        Listener = _FallbackListener
     keyboard = _FallbackKeyboardModule()
     
     class _FallbackMouseButton:
         right = "right"
     class _FallbackMouseModule:
         Button = _FallbackMouseButton()
-        Listener = lambda *args, **kwargs: None
+        Listener = _FallbackListener
     mouse = _FallbackMouseModule()
 
 # This is a specific code (Virtual Key) for the Right Command key on macOS.
@@ -98,22 +109,26 @@ class InputTrigger:
                     on_press=lambda k: self._handle_key_press(k, time.time()), 
                     on_release=lambda k: self._handle_key_release(k, time.time())
                 )
-                self._keyboard_listener_thread.start()
+                if hasattr(self._keyboard_listener_thread, "start"):
+                    self._keyboard_listener_thread.start()
             
             if self._mouse_listener_thread is None:
                 self._mouse_listener_thread = mouse.Listener(
                     on_click=self._handle_mouse_click
                 )
-                self._mouse_listener_thread.start()
+                if hasattr(self._mouse_listener_thread, "start"):
+                    self._mouse_listener_thread.start()
 
     def stop_listening(self):
         """Shuts down the background listeners and timers."""
         with self._state_lock:
             if self._keyboard_listener_thread:
-                self._keyboard_listener_thread.stop()
+                if hasattr(self._keyboard_listener_thread, "stop"):
+                    self._keyboard_listener_thread.stop()
                 self._keyboard_listener_thread = None
             if self._mouse_listener_thread:
-                self._mouse_listener_thread.stop()
+                if hasattr(self._mouse_listener_thread, "stop"):
+                    self._mouse_listener_thread.stop()
                 self._mouse_listener_thread = None
             if self._delayed_start_timer:
                 self._delayed_start_timer.cancel()

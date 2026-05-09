@@ -159,3 +159,20 @@ def test_input_trigger_mouse_hold_logic():
     # Release mouse
     trigger._handle_mouse_click(0, 0, 'right', pressed=False)
     mock_stop.assert_called_once_with(stop_session=True)
+
+def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkeypatch):
+    mock_start = MagicMock()
+    mock_stop = MagicMock()
+    mock_toggle = MagicMock()
+
+    trigger = InputTrigger(
+        on_start_recording=mock_start,
+        on_stop_recording=mock_stop,
+        on_toggle_recording=mock_toggle,
+    )
+
+    monkeypatch.setattr("src.input.hotkeys.keyboard.Listener", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.input.hotkeys.mouse.Listener", lambda *args, **kwargs: None)
+
+    trigger.start_listening()
+    trigger.stop_listening()
