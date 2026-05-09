@@ -265,6 +265,8 @@ def test_ear_uses_shared_should_split_chunk_after_silence():
 
 
 def test_select_mic_shows_contiguous_choice_indexes_and_returns_selected_device_index(monkeypatch):
+    from src.audio.ear_runtime.devices import select_mic as runtime_select_mic
+
     class FakePyAudio:
         def get_default_input_device_info(self):
             return {"index": 2}
@@ -288,8 +290,12 @@ def test_select_mic_shows_contiguous_choice_indexes_and_returns_selected_device_
         lambda prompt: captured_prompts.append(prompt) or "2",
     )
 
+    assert runtime_select_mic(FakePyAudio()) == 4
     assert select_mic(FakePyAudio()) == 4
-    assert captured_prompts == ["Select Mic Index [default 1]: "]
+    assert captured_prompts == [
+        "Select Mic Index [default 1]: ",
+        "Select Mic Index [default 1]: ",
+    ]
 
 
 def test_select_mic_returns_default_device_index_when_choice_is_blank(monkeypatch):

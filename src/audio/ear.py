@@ -10,12 +10,10 @@ Hold RIGHT CMD → speak → silence splits chunk → release → final chunk + 
 import os
 import sys
 import socket
-import json
 import threading
 import time
 import uuid
 import pyaudio
-import math
 import select
 import termios
 import tty
@@ -33,6 +31,17 @@ from src.streaming.streaming_shared_logic import (
     should_split_chunk_after_silence,
 )
 from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
+from src.audio.ear_runtime.analysis import (
+    analyze_frequency_bands,
+    boost_audio_chunk,
+    get_rms as runtime_get_rms,
+)
+from src.audio.ear_runtime.devices import select_mic as runtime_select_mic
+from src.audio.ear_runtime.platform import (
+    enable_macos_voice_isolation,
+    load_start_sound,
+    play_start_sound,
+)
 from src.ipc.client import (
     close_raw_audio_stream_to_brain,
     open_raw_audio_stream_to_brain,
@@ -45,54 +54,6 @@ from src.ipc.protocol import (
     format_session_event_message,
 )
 from src import log
-
-import platform
-
-# PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
-_start_sound = None
-
-def _load_start_sound():
-    global _start_sound
-    try:
-        from pathlib import Path
-        sound_path = str(Path(__file__).parent.parent.parent / "sound_effect" / "start.mp3")
-        
-        if platform.system() == "Darwin":
-            try:
-                from AppKit import NSSound
-                _start_sound = NSSound.alloc().initWithContentsOfFile_byReference_(sound_path, True)
-            except ImportError:
-                pass
-        
-        # Cross-platform fallback using PySide6 if AppKit fails or on Linux/Windows
-        if _start_sound is None:
-            try:
-                from PySide6.QtMultimedia import QSoundEffect
-                from PySide6.QtCore import QUrl
-                _start_sound = QSoundEffect()
-                _start_sound.setSource(QUrl.fromLocalFile(sound_path))
-                _start_sound.setVolume(1.0)
-            except ImportError:
-                log.info("[Ear] PySide6.QtMultimedia not available for sound effects")
-    except Exception as e:
-        log.info(f"[Ear] Failed to load start sound: {e}")
-
-_load_start_sound()
-
-def _play_start_sound():
-    if not _start_sound:
-        return
-        
-    try:
-        if platform.system() == "Darwin" and hasattr(_start_sound, "isPlaying"):
-            if _start_sound.isPlaying():
-                _start_sound.stop()
-            _start_sound.play()
-        else:
-            # PySide6 QSoundEffect path
-            _start_sound.play()
-    except Exception as e:
-        log.info(f"[Ear] Failed to play start sound: {e}")
 try:
     from pynput import keyboard, mouse
 except Exception:  # pragma: no cover - test environments may not support pynput backends
@@ -129,28 +90,7 @@ except Exception:  # pragma: no cover - test environments may not support pynput
     keyboard = _FallbackKeyboardModule()
     mouse = _FallbackMouseModule()
 
-# ── macOS Voice Isolation ──────────────────────────────────────────────────────
-_VOICE_ISOLATION_ACTIVE = False
-try:
-    import AVFoundation 
-    def _enable_macos_voice_isolation():
-        global _VOICE_ISOLATION_ACTIVE
-        try:
-            engine = AVFoundation.AVAudioEngine.alloc().init()
-            input_node = engine.inputNode()
-            if hasattr(input_node, 'setVoiceProcessingEnabled_error_'):
-                success, error = input_node.setVoiceProcessingEnabled_error_(True, None)
-                if success:
-                    _VOICE_ISOLATION_ACTIVE = True
-                else:
-                    log.info(f"[Ear] Voice processing not enabled: {error}")
-            else:
-                log.info("[Ear] inputNode does not support setVoiceProcessingEnabled_error_")
-        except Exception as e:
-            log.info(f"[Ear] Voice isolation init failed: {e}")
-except ImportError:
-    def _enable_macos_voice_isolation():
-        log.info("[Ear] AVFoundation not available")
+load_start_sound()
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SOCKET_PATH     = "/tmp/parakeet.sock"
@@ -225,20 +165,9 @@ def _is_right_cmd(key) -> bool:
 
 
 def get_rms(block: bytes) -> float:
-    """
-    Calculates the Root Mean Square (RMS) volume level of an audio block.
-    This provides a numerical value representing the 'loudness' of the audio.
-    By converting raw bytes into normalized shorts and then averaging their
-    squared values, we get a consistent metric that can be used for VAD
-    (Voice Activity Detection) and for driving the visual volume meter.
-    """
-    import struct
-    count = len(block) // 2
-    shorts = struct.unpack(f"{count}h", block[:count * 2])
-    if not shorts:
-        return 0.0
-    sum_sq = sum((s / 32768.0) ** 2 for s in shorts)
-    return math.sqrt(sum_sq / len(shorts))
+    """Compatibility wrapper that forwards RMS calculation to the runtime module."""
+
+    return runtime_get_rms(block)
 
 
 def send_switch_command(model_name, ear_instance=None):
@@ -356,42 +285,9 @@ class TerminalMenu(threading.Thread):
 
 
 def select_mic(p):
-    """
-    Interactive utility for selecting an input microphone from a list.
-    It scans the system for all available audio input devices and presents
-    them to the user in a numbered list. The user can then enter the
-    index of their preferred microphone, or just press Enter to use
-    the system default. This ensures the app records from the right source.
-    """
-    log.info("\n🎤  SELECT YOUR MICROPHONE:")
-    log.info("─" * 30)
-    devices = []
-    default_device = p.get_default_input_device_info()
-    default_device_index = default_device.get("index")
-    default_choice_index = 0
-    for device_index in range(p.get_device_count()):
-        info = p.get_device_info_by_index(device_index)
-        if info.get("maxInputChannels") > 0:
-            name = info.get("name")
-            choice_index = len(devices)
-            is_default = " (DEFAULT)" if device_index == default_device_index else ""
-            log.info(f" [{choice_index}] {name}{is_default}")
-            devices.append(device_index)
-            if device_index == default_device_index:
-                default_choice_index = choice_index
-    log.info("─" * 30)
-    while True:
-        try:
-            choice = input(f"Select Mic Index [default {default_choice_index}]: ").strip()
-            if not choice:
-                return default_device_index
-            choice_index = int(choice)
-            if 0 <= choice_index < len(devices):
-                return devices[choice_index]
-            else:
-                log.info("❌ Invalid index.")
-        except ValueError:
-            log.info("❌ Please enter a valid number.")
+    """Compatibility wrapper that forwards microphone selection to the runtime module."""
+
+    return runtime_select_mic(p)
 
 
 # ── Main ear class (STREAMING) ─────────────────────────────────────────────────
@@ -415,7 +311,7 @@ class Ear:
 
         # Enable macOS Voice Isolation if requested
         if os.environ.get("VOICE_ISOLATION", "0") == "1":
-            _enable_macos_voice_isolation()
+            enable_macos_voice_isolation()
         else:
             log.info("[Ear] Voice Isolation disabled by default (set VOICE_ISOLATION=1 to enable)")
 
@@ -655,20 +551,9 @@ class Ear:
         return False
 
     def _boost_audio_chunk(self, audio_chunk: bytes) -> bytes:
-        """
-        Applies a digital gain multiplier to raw 16-bit PCM audio data.
-        This is used to artificially increase the volume of the microphone
-        input before it is sent to the AI for transcription. By boosting
-        the signal, we can improve the accuracy of the transcription for
-        users with quiet microphones while ensuring the audio doesn't clip.
-        """
-        if not audio_chunk:
-            return audio_chunk
-        if len(audio_chunk) % 2:
-            audio_chunk = audio_chunk[:-1]
-        audio = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
-        boosted = (audio * self.gain_multiplier).clip(-32768, 32767).astype(np.int16)
-        return boosted.tobytes()
+        """Compatibility wrapper that applies gain through the runtime module."""
+
+        return boost_audio_chunk(audio_chunk, self.gain_multiplier)
 
     def _reset_chunk_tracking(self):
         """
@@ -918,67 +803,9 @@ class Ear:
         return (None, pyaudio.paContinue)
 
     def _analyze_frequency_bands(self, audio_samples: np.ndarray) -> dict:
-        """
-        Analyze audio samples to extract bass, mid, and treble frequency bands.
+        """Compatibility wrapper that forwards FFT band analysis to the runtime module."""
 
-        Args:
-            audio_samples: NumPy array of audio samples (int16)
-
-        Returns:
-            Dict with 'bass', 'mid', 'treble' values (0.0 to 1.0)
-        """
-        try:
-            # Convert to float for FFT
-            samples_float = audio_samples.astype(np.float32) / 32768.0
-
-            # Apply windowing function to reduce spectral leakage
-            window = np.hanning(len(samples_float))
-            windowed = samples_float * window
-
-            # Compute FFT
-            fft_result = np.fft.fft(windowed)
-            fft_magnitude = np.abs(fft_result[:len(fft_result)//2])
-
-            # Frequency bins (sample rate is 16000 Hz)
-            # Nyquist frequency = 8000 Hz
-            freq_bins = np.fft.fftfreq(len(windowed), 1.0/RATE)[:len(fft_magnitude)]
-
-            # Define frequency bands for speech
-            # Bass: 20-250 Hz (low frequency hum, vowels)
-            bass_mask = (freq_bins >= 20) & (freq_bins < 250)
-            bass_energy = np.sum(fft_magnitude[bass_mask])
-
-            # Mid: 250-4000 Hz (speech intelligibility range)
-            mid_mask = (freq_bins >= 250) & (freq_bins < 4000)
-            mid_energy = np.sum(fft_magnitude[mid_mask])
-
-            # Treble: 4000-8000 Hz (consonants, high frequency sounds)
-            treble_mask = (freq_bins >= 4000) & (freq_bins < 8000)
-            treble_energy = np.sum(fft_magnitude[treble_mask])
-
-            # Normalize to 0.0-1.0 range
-            total_energy = bass_energy + mid_energy + treble_energy
-
-            if total_energy > 0:
-                bass_norm = bass_energy / total_energy
-                mid_norm = mid_energy / total_energy
-                treble_norm = treble_energy / total_energy
-            else:
-                # Equal distribution when no signal
-                bass_norm = 0.33
-                mid_norm = 0.33
-                treble_norm = 0.34
-
-            return {
-                'bass': bass_norm,
-                'mid': mid_norm,
-                'treble': treble_norm
-            }
-
-        except Exception as e:
-            # Fallback to equal distribution if FFT fails
-            log.info(f"[Ear] ⚠️ Frequency analysis failed: {e}")
-            return {'bass': 0.33, 'mid': 0.33, 'treble': 0.34}
+        return analyze_frequency_bands(audio_samples, sample_rate=RATE)
 
     def _open_mic_stream(self):
         """Open a FRESH mic stream each recording session."""
@@ -1025,7 +852,7 @@ class Ear:
         or a single keypress. In streaming mode, it also resets the VAD
         engine and starts a fresh telemetry session to track the new recording.
         """
-        _play_start_sound()
+        play_start_sound()
 
         with self._lock:
             self.is_recording = True
