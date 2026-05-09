@@ -697,6 +697,92 @@ def test_hold_less_than_one_second_no_recording():
                 assert ear._recording_from_hold is False, "_recording_from_hold should be False"
 
 
+def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handlers(monkeypatch):
+    import src.audio.ear as ear_module
+
+    captured = {}
+
+    class FakeEar:
+        def __init__(self, input_device_index=None):
+            self.active_mic_name = "Test Device"
+            self.input_device_index = input_device_index
+            self._toggle_active = False
+
+        def _is_no_streaming_mode(self):
+            return False
+
+        def _open_brain_stream(self):
+            return True
+
+        def _start_recording_state(self, from_hold):
+            captured["started_from_hold"] = from_hold
+
+        def _send_hud(self, _cmd):
+            return None
+
+        def _start_volume_sender(self):
+            return None
+
+        def _stop_and_send(self, stop_session):
+            captured["stopped_with"] = stop_session
+
+        def record_loop(self):
+            raise KeyboardInterrupt
+
+        def cleanup(self):
+            captured["cleaned_up"] = True
+
+        def on_press(self, _key):
+            raise AssertionError("start_ear should not wire Ear.on_press")
+
+        def on_release(self, _key):
+            raise AssertionError("start_ear should not wire Ear.on_release")
+
+        def on_mouse_click(self, *_args):
+            raise AssertionError("start_ear should not wire Ear.on_mouse_click")
+
+    class FakeMenu:
+        def __init__(self, ear_instance=None):
+            captured["menu_ear_instance"] = ear_instance
+
+        def start(self):
+            captured["menu_started"] = True
+
+        def stop(self):
+            captured["menu_stopped"] = True
+
+    class FakeInputTrigger:
+        def __init__(self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs):
+            captured["on_start_recording"] = on_start_recording
+            captured["on_stop_recording"] = on_stop_recording
+            captured["on_toggle_recording"] = on_toggle_recording
+
+        def start_listening(self):
+            captured["input_trigger_started"] = True
+
+    class FakePyAudioInstance:
+        def terminate(self):
+            return None
+
+    monkeypatch.setattr(ear_module, "Ear", FakeEar)
+    monkeypatch.setattr(ear_module, "TerminalMenu", FakeMenu)
+    monkeypatch.setattr(ear_module, "InputTrigger", FakeInputTrigger)
+    monkeypatch.setattr(ear_module, "select_mic", lambda _p: 7)
+    monkeypatch.setattr(ear_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance())
+    monkeypatch.setattr(ear_module.sys.stdin, "isatty", lambda: False)
+    monkeypatch.delenv("VIBEVOICE_MIC_INDEX", raising=False)
+
+    ear_module.start_ear()
+
+    assert captured["input_trigger_started"] is True
+    assert captured["menu_started"] is True
+    assert captured["menu_stopped"] is True
+    assert captured["cleaned_up"] is True
+    assert captured["on_start_recording"].__name__ == "_start_recording_wrapper"
+    assert captured["on_stop_recording"].__name__ == "_stop_recording_wrapper"
+    assert captured["on_toggle_recording"].__name__ == "_toggle_recording_wrapper"
+
+
 def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "no_streaming")
     ear = Ear()
