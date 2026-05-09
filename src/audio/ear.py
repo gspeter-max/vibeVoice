@@ -33,6 +33,17 @@ from src.streaming.streaming_shared_logic import (
     should_split_chunk_after_silence,
 )
 from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
+from src.ipc.client import (
+    close_raw_audio_stream_to_brain,
+    open_raw_audio_stream_to_brain,
+    send_message_to_brain,
+    send_raw_audio_stream_chunk,
+)
+from src.ipc.protocol import (
+    format_audio_chunk_message,
+    format_session_commit_message,
+    format_session_event_message,
+)
 from src import log
 
 import platform
@@ -561,21 +572,20 @@ class Ear:
         payload = {"type": event_type}
         if fields:
             payload.update(fields)
-
-        # Header format: CMD_SESSION_EVENT:SESSION_ID:RECORDING_INDEX
-        header = f"CMD_SESSION_EVENT:{self._current_session_id}:{self._recording_index}\n\n".encode("utf-8")
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(5.0)
-                client.connect(SOCKET_PATH)
-                client.sendall(header + body)
-                client.shutdown(socket.SHUT_WR)
-            return True
-        except Exception as e:
-            log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}': {e}")
-            return False
+        message_bytes = format_session_event_message(
+            self._current_session_id,
+            self._recording_index,
+            payload,
+        )
+        sent = send_message_to_brain(
+            message_bytes,
+            timeout_seconds=5.0,
+            socket_path=SOCKET_PATH,
+            socket_factory=socket.socket,
+        )
+        if not sent:
+            log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}'")
+        return sent
 
     def _send_audio_chunk_to_brain(self, utterance_bytes: bytes) -> bool:
         """
@@ -591,15 +601,19 @@ class Ear:
         session_id = self._current_session_id
         seq = self._chunk_seq
         self._chunk_seq += 1
-        # Header format: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
-        header = f"CMD_AUDIO_CHUNK:{session_id}:{self._recording_index}:{seq}\n\n".encode("utf-8")
-
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(5.0)
-                client.connect(SOCKET_PATH)
-                client.sendall(header + utterance_bytes)
-                client.shutdown(socket.SHUT_WR)
+        message_bytes = format_audio_chunk_message(
+            session_id,
+            self._recording_index,
+            seq,
+            utterance_bytes,
+        )
+        sent = send_message_to_brain(
+            message_bytes,
+            timeout_seconds=5.0,
+            socket_path=SOCKET_PATH,
+            socket_factory=socket.socket,
+        )
+        if sent:
             self._send_session_event_to_brain(
                 "chunk_sent_to_brain",
                 {
@@ -608,9 +622,8 @@ class Ear:
                 },
             )
             return True
-        except Exception as e:
-            log.error("❌ Failed to send chunk", error=str(e))
-            return False
+        log.error("❌ Failed to send chunk")
+        return False
 
     def _commit_recording_session(self) -> bool:
         """
@@ -624,19 +637,22 @@ class Ear:
             return False
 
         session_id = self._current_session_id
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(5.0)
-                client.connect(SOCKET_PATH)
-                # Header format: CMD_SESSION_COMMIT:SESSION_ID:RECORDING_INDEX
-                client.sendall(f"CMD_SESSION_COMMIT:{session_id}:{self._recording_index}".encode("utf-8"))
-                client.shutdown(socket.SHUT_WR)
+        message_bytes = format_session_commit_message(
+            session_id,
+            self._recording_index,
+        )
+        sent = send_message_to_brain(
+            message_bytes,
+            timeout_seconds=5.0,
+            socket_path=SOCKET_PATH,
+            socket_factory=socket.socket,
+        )
+        if sent:
             log.info("✅ Session committed", session=session_id[:8], recording=self._recording_index)
             self._recording_index += 1  # button released → next press gets the next recording slot
             return True
-        except Exception as e:
-            log.error("❌ Failed to commit session", error=str(e))
-            return False
+        log.error("❌ Failed to commit session")
+        return False
 
     def _boost_audio_chunk(self, audio_chunk: bytes) -> bytes:
         """
@@ -809,32 +825,29 @@ class Ear:
             if not os.path.exists(SOCKET_PATH):
                 log.info(f"\r❌ Brain socket not found\n")
                 return False
-            try:
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect(SOCKET_PATH)
-                self._brain_sock = sock
-                return True
-            except Exception as e:
-                log.info(f"\r❌ Brain connect failed: {e}\n")
+            sock = open_raw_audio_stream_to_brain(
+                timeout_seconds=5.0,
+                socket_path=SOCKET_PATH,
+                socket_factory=socket.socket,
+            )
+            if sock is None:
+                log.info(f"\r❌ Brain connect failed\n")
                 return False
+            self._brain_sock = sock
+            return True
 
     def _stream_chunk_to_brain(self, chunk_bytes: bytes):
         """Send raw audio bytes over the open no_streaming socket."""
         with self._brain_sock_lock:
             if self._brain_sock is None:
                 return
+            sent = send_raw_audio_stream_chunk(self._brain_sock, chunk_bytes)
+            if sent:
+                return
             try:
-                self._brain_sock.sendall(chunk_bytes)
+                raise BrokenPipeError()
             except (BrokenPipeError, ConnectionResetError):
                 log.info(f"\r⚠️  Brain disconnected — will transcribe on release\n")
-                try:
-                    self._brain_sock.close()
-                except Exception:
-                    pass
-                self._brain_sock = None
-            except Exception as e:
-                log.info(f"\r❌ Stream send error: {e}\n")
                 try:
                     self._brain_sock.close()
                 except Exception:
@@ -846,11 +859,7 @@ class Ear:
         with self._brain_sock_lock:
             if self._brain_sock is None:
                 return
-            try:
-                self._brain_sock.shutdown(socket.SHUT_WR)
-                self._brain_sock.close()
-            except Exception:
-                pass
+            close_raw_audio_stream_to_brain(self._brain_sock)
             self._brain_sock = None
 
     def _audio_callback(self, in_data, frame_count, time_info, status):

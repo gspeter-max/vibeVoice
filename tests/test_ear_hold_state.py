@@ -71,6 +71,50 @@ def test_ear_has_hold_state_variables():
     assert not hasattr(ear, '_mouse_clicks_required'), "Ear should NOT have _mouse_clicks_required attribute (removed)"
     assert not hasattr(ear, '_mouse_click_timeout'), "Ear should NOT have _mouse_click_timeout attribute (removed)"
 
+
+def test_send_message_to_brain_returns_false_when_message_is_empty():
+    from src.ipc.client import send_message_to_brain
+
+    assert send_message_to_brain(b"") is False
+
+
+def test_raw_stream_helpers_open_send_and_close_socket():
+    from src.ipc.client import (
+        open_raw_audio_stream_to_brain,
+        send_raw_audio_stream_chunk,
+        close_raw_audio_stream_to_brain,
+    )
+
+    captured = {"connected": False, "payloads": [], "shutdown_called": False, "closed": False}
+
+    class FakeSocket:
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, address):
+            captured["connected"] = True
+            captured["address"] = address
+
+        def sendall(self, payload):
+            captured["payloads"].append(payload)
+
+        def shutdown(self, _how):
+            captured["shutdown_called"] = True
+
+        def close(self):
+            captured["closed"] = True
+
+    with patch("src.ipc.client.socket.socket", return_value=FakeSocket()):
+        socket_handle = open_raw_audio_stream_to_brain()
+        assert socket_handle is not None
+        assert send_raw_audio_stream_chunk(socket_handle, b"chunk-bytes") is True
+        close_raw_audio_stream_to_brain(socket_handle)
+
+    assert captured["connected"] is True
+    assert captured["payloads"] == [b"chunk-bytes"]
+    assert captured["shutdown_called"] is True
+    assert captured["closed"] is True
+
 def test_mouse_press_starts_hold_timer():
     """Test that pressing mouse button starts hold timer."""
     ear = Ear()
