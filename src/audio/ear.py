@@ -12,11 +12,8 @@ import sys
 import socket
 import threading
 import time
-import uuid
 import pyaudio
-import select
 import termios
-import tty
 import numpy as np
 
 from src.utils.env_utils import get_float_from_environment
