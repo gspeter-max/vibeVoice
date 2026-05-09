@@ -26,7 +26,9 @@ class MockPyAudio:
 sys.modules['pyaudio'] = MockPyAudio()
 
 import src.audio.ear as ear_module
+from src.audio.ear_runtime.controller import Ear as RuntimeEar
 from src.audio.ear_runtime.menu import TerminalMenu as RuntimeTerminalMenu
+from src.audio.ear_runtime.runtime import start_ear as runtime_start_ear
 
 def test_nemotron_not_in_models_when_no_streaming():
     """
@@ -43,6 +45,11 @@ def test_nemotron_not_in_models_when_no_streaming():
 def test_terminal_menu_remains_available_from_audio_ear_module():
     assert hasattr(ear_module, "TerminalMenu")
     assert ear_module.TerminalMenu is RuntimeTerminalMenu
+
+
+def test_audio_ear_runtime_exports_match_compatibility_surface():
+    assert ear_module.Ear is RuntimeEar
+    assert ear_module.start_ear is runtime_start_ear
 
 def test_nemotron_in_models_when_silence_streaming():
     """
