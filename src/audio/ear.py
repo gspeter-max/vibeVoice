@@ -37,6 +37,11 @@ from src.audio.ear_runtime.analysis import (
     get_rms as runtime_get_rms,
 )
 from src.audio.ear_runtime.devices import select_mic as runtime_select_mic
+from src.audio.ear_runtime.menu import (
+    TerminalMenu as RuntimeTerminalMenu,
+    run_self_test as runtime_run_self_test,
+    send_switch_command as runtime_send_switch_command,
+)
 from src.audio.ear_runtime.platform import (
     enable_macos_voice_isolation,
     load_start_sound,
@@ -171,117 +176,18 @@ def get_rms(block: bytes) -> float:
 
 
 def send_switch_command(model_name, ear_instance=None):
-    """
-    Sends a request to the Brain to switch the active transcription model.
-    If an Ear instance is provided, its current_model state is updated to
-    allow for model-specific behavior changes (like heartbeat intervals).
-    """
-    log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
-    if ear_instance:
-        ear_instance.current_model = model_name
-        
-    try:
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.connect(SOCKET_PATH)
-        command = f"CMD_SWITCH_MODEL:{model_name}"
-        client.sendall(command.encode('utf-8'))
-        client.shutdown(socket.SHUT_WR)
-        client.close()
-    except Exception as e:
-        log.info(f"\n❌ Failed to send switch command: {e}\n")
+    """Compatibility wrapper that forwards model switching to the runtime module."""
+
+    return runtime_send_switch_command(model_name, ear_instance)
 
 
 def run_self_test():
-    """
-    Executes a diagnostic test by sending synthetic audio to the Brain.
-    It generates a 1-second sine wave at 440Hz and attempts to transmit it
-    over the Unix socket. This helps verify that the communication path
-    between the Ear and the Brain is working correctly and that the Brain
-    is ready to accept and process audio data without needing a microphone.
-    """
+    """Compatibility wrapper that forwards the synthetic self-test to the runtime module."""
 
-    log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
-    duration = 1.0
-    frequency = 440.0
-    t = np.linspace(0, duration, int(RATE * duration), endpoint=False)
-    audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16).tobytes()
-
-    # Retry logic for more robust connection
-    max_retries = 3
-    retry_delay = 1  # seconds
-
-    for attempt in range(max_retries):
-        try:
-            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.settimeout(5)  # Shorter timeout for retries
-
-            # Check if socket exists first
-            if not os.path.exists(SOCKET_PATH):
-                if attempt < max_retries - 1:
-                    log.info(f"\r⏳ Socket not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n")
-                    time.sleep(retry_delay)
-                    continue
-                else:
-                    log.info(f"\r❌ Self-test failed: Socket not found at {SOCKET_PATH}\n")
-                    log.info("   Is Brain running? Check this terminal for Brain output.\n")
-                    return
-
-            client.connect(SOCKET_PATH)
-            client.sendall(audio_data)
-            client.shutdown(socket.SHUT_WR)
-            client.close()
-
-            log.info("\r✅ Self-test audio sent to Brain\n")
-            return
-
-        except ConnectionRefusedError:
-            if attempt < max_retries - 1:
-                log.info(f"\r⏳ Brain busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})\n")
-                time.sleep(retry_delay)
-            else:
-                log.info(f"\r❌ Self-test failed: Brain not accepting connections\n")
-                log.info("   Brain might be loading model. Check this terminal for Brain output.\n")
-
-        except Exception as e:
-            log.info(f"\r❌ Self-test failed: {e}\n")
-            break
+    return runtime_run_self_test(sample_rate=RATE)
 
 
-class TerminalMenu(threading.Thread):
-    """
-    Background thread that listens for keyboard input in the terminal.
-    Allows switching models and running self-tests without blocking recording.
-    """
-    def __init__(self, ear_instance=None):
-        super().__init__(daemon=True)
-        self._stop = threading.Event()
-        self.fd = sys.stdin.fileno()
-        self.ear = ear_instance
-
-    def run(self):
-        if not sys.stdin.isatty():
-            return
-        old_settings = termios.tcgetattr(self.fd)
-        try:
-            tty.setcbreak(self.fd)
-            while not self._stop.is_set():
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    c = sys.stdin.read(1)
-                    if c in '12345':
-                        idx = int(c) - 1
-                        active_models = get_active_models()
-                        if idx < len(active_models):
-                            send_switch_command(active_models[idx], self.ear)
-                    elif c.lower() == 't':
-                        threading.Thread(target=run_self_test, daemon=True).start()
-                    elif c == '\x03':
-                        os.kill(os.getpid(), 2)
-                        break
-        finally:
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, old_settings)
-
-    def stop(self):
-        self._stop.set()
+TerminalMenu = RuntimeTerminalMenu
 
 
 def select_mic(p):
