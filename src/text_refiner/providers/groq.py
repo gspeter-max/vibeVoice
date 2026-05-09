@@ -38,7 +38,7 @@ def call_groq(client: httpx.Client, raw_text: str) -> str:
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
             {"role": "user", "content": refine_user_prompt(raw_text)}
         ],
-        "temperature": 0.0,
+        "temperature": 0.2,
         "max_tokens": 512,
     }
     

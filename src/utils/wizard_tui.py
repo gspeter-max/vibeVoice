@@ -178,11 +178,18 @@ class WizardApp(App):
         self.pyaudio_instance = pyaudio.PyAudio()
         self.microphones = self._get_microphones()
         self.selected_mic_index = os.environ.get("VIBEVOICE_MIC_INDEX")
-        if self.selected_mic_index is None:
+        
+        valid_indices = [idx for name, idx in self.microphones]
+        if self.selected_mic_index not in valid_indices:
             try:
                 self.selected_mic_index = str(self.pyaudio_instance.get_default_input_device_info()["index"])
+                if self.selected_mic_index not in valid_indices:
+                    self.selected_mic_index = valid_indices[0] if valid_indices else "0"
             except:
-                self.selected_mic_index = "0"
+                self.selected_mic_index = valid_indices[0] if valid_indices else "0"
+                
+        if not self.microphones:
+            self.microphones.append(("No Microphone Found", "0"))
 
         # 3. Software/Mode State
         self.recording_mode = os.environ.get("RECORDING_MODE", "silence_streaming")

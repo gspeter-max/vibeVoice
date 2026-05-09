@@ -236,8 +236,8 @@ class RoundedRectangularIndicatorWidget(QWidget):
         mid_y = pill_rect.center().y()
 
         # Bar layout — 11 centered bars, 3px wide with 2px gap
-        # Full pill-shaped rounding (radius = width/2) creates smooth capsules
-        num_bars = 11
+        # Full pill-shaped rounding (radius = width/2) creates smooth capsules.  
+        num_bars = 9
         bar_spacing = 5    # 3px bar + 2px gap
         bar_width = 3
         bar_rounding = bar_width / 2.0  # Full pill shape — perfectly round tips

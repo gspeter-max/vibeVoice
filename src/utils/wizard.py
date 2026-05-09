@@ -20,7 +20,7 @@ from src.utils.env_manager import is_interactive
 def run_wizard():
     """
     Launches the Textual Bento Wizard.
-    If not interactive, skips to avoid crashing in background.
+    If not interactive, skips to avoid crashing in background ( becuase in tests we are running the app in background ).
     """
     if not is_interactive():
         return

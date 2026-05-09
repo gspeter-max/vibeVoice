@@ -259,6 +259,7 @@ def run_self_test():
     between the Ear and the Brain is working correctly and that the Brain
     is ready to accept and process audio data without needing a microphone.
     """
+
     log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
     duration = 1.0
     frequency = 440.0
