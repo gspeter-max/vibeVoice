@@ -127,7 +127,12 @@ class StreamingSessionTelemetryRecorder:
     ) -> None:
         """Updates summary statistics for a specific chunk."""
         chunk = self._ensure_chunk(recording_index, chunk_index)
-        chunk["summary"].update(fields)
+        # Convert all fields to simple primitives to avoid JSON serialization errors (e.g. MagicMock in tests)
+        safe_fields = {
+            k: v if isinstance(v, (str, int, float, bool, type(None))) else str(v)
+            for k, v in fields.items()
+        }
+        chunk["summary"].update(safe_fields)
         self.write_snapshot()
 
     def update_session_summary(self, fields: dict[str, Any]) -> None:
@@ -143,7 +148,12 @@ class StreamingSessionTelemetryRecorder:
             fields = dict(fields)
             fields["flags"] = current_flags
 
-        self.payload["session_summary"].update(fields)
+        # Convert all fields to simple primitives to avoid JSON serialization errors
+        safe_fields = {
+            k: v if isinstance(v, (str, int, float, bool, type(None), dict)) else str(v)
+            for k, v in fields.items()
+        }
+        self.payload["session_summary"].update(safe_fields)
         self.write_snapshot()
 
     def write_snapshot(self) -> None:
@@ -170,7 +180,7 @@ def _model_name_for_telemetry() -> str | None:
     engine = backend_info.get("engine")
     if engine is None:
         return None
-    return getattr(engine, "model_name", "unknown_model")
+    return str(getattr(engine, "model_name", "unknown_model"))
 
 
 def _telemetry_seed() -> dict:

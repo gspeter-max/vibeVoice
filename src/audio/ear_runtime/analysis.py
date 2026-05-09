@@ -91,3 +91,26 @@ def analyze_frequency_bands(
     except Exception as error:
         log.info(f"[Ear] ⚠️ Frequency analysis failed: {error}")
         return {"bass": 0.33, "mid": 0.33, "treble": 0.34}
+
+
+def get_active_models() -> list[str]:
+    """
+    Dynamically returns the list of available transcription models.
+    Nemotron is specifically designed for streaming audio, so we only
+    expose it if the user has explicitly selected the 'silence_streaming' mode.
+    This prevents users from selecting an incompatible model in standard mode.
+    """
+    models = [
+        "fast-conformer-ctc-en-24500",
+        "moonshine-base",
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-0.6b-v3",
+    ]
+
+    # Only append Nemotron if we are in streaming mode
+    from src.audio.ear_runtime.config import RECORDING_MODE
+    if RECORDING_MODE == "silence_streaming":
+        models.append("nemotron-streaming-0.6b")
+
+    return models
+

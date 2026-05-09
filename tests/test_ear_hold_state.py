@@ -32,7 +32,7 @@ class MockPyAudio:
 
 sys.modules['pyaudio'] = MockPyAudio()
 
-from src.audio.ear import Ear, select_mic
+from src.audio.ear_runtime.controller import Ear, select_mic
 
 # Patch the _open_mic_stream method to avoid audio setup issues
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ def patch_open_mic_stream(monkeypatch):
     """Patch _open_mic_stream to avoid actual audio setup."""
     def dummy_open_stream(self):
         pass
-    monkeypatch.setattr("src.audio.ear.Ear._open_mic_stream", dummy_open_stream)
+    monkeypatch.setattr("src.audio.ear_runtime.controller.Ear._open_mic_stream", dummy_open_stream)
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def patch_silero_vad(monkeypatch):
             reset=lambda: None,
             is_speech=lambda *_a, **_k: 1.0,
         )
-    monkeypatch.setattr("src.audio.ear.SileroVAD", dummy_vad)
+    monkeypatch.setattr("src.audio.ear_runtime.controller.SileroVAD", dummy_vad)
 
 def test_ear_has_hold_state_variables():
     """Test that Ear initializes with hold-related state variables."""
@@ -250,7 +250,7 @@ def test_key_release_finalizes_immediately_when_recording():
     ear.is_recording = True
     ear._cmd_press_time = time.time() - 1.0
 
-    with patch("src.audio.ear._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -263,7 +263,7 @@ def test_quick_cmd_tap_enters_toggle_mode_without_stopping():
     ear.is_recording = True
     ear._cmd_press_time = time.time()
 
-    with patch("src.audio.ear._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -277,7 +277,7 @@ def test_second_cmd_press_stops_recording_when_toggle_active():
     ear.is_recording = True
     ear._toggle_active = True
 
-    with patch("src.audio.ear._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_press(object())
 
@@ -291,7 +291,7 @@ def test_key_release_does_nothing_when_toggle_already_active():
     ear.is_recording = True
     ear._toggle_active = True
 
-    with patch("src.audio.ear._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -299,7 +299,7 @@ def test_key_release_does_nothing_when_toggle_already_active():
 
 
 def test_stop_and_send_uses_no_streaming_path(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "no_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
     ear = Ear()
     ear.is_recording = True
 
@@ -312,7 +312,7 @@ def test_stop_and_send_uses_no_streaming_path(monkeypatch):
 
 
 def test_stop_and_send_uses_silence_streaming_path(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "silence_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "silence_streaming")
     ear = Ear()
 
     with patch.object(ear, "_stop_no_streaming") as mock_stop_no_streaming, \
@@ -349,7 +349,7 @@ def test_silence_boundary_splits_chunk_while_recording_continues():
 
 
 def test_ear_uses_shared_should_split_chunk_after_silence():
-    import src.audio.ear as ear_module
+    import src.audio.ear_runtime.controller as ear_module
 
     assert ear_module.should_split_chunk_after_silence is should_split_chunk_after_silence
 
@@ -445,7 +445,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
 
 
 def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "no_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
     ear = Ear()
     ear.is_recording = True
 
@@ -476,10 +476,10 @@ def test_audio_callback_uses_boosted_audio_for_vad():
 
 
 def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "no_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
     ear = Ear()
 
-    with patch("src.audio.ear._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_open_brain_stream", return_value=True) as mock_open, \
          patch.object(ear, "_start_volume_sender"), \
          patch.object(ear, "_send_hud"):
@@ -538,7 +538,7 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
     ear._current_session_id = "session123"
     ear._chunk_seq = 7
 
-    captured = {}
+    captured = []
 
     class FakeSocket:
         def __init__(self, *args, **kwargs):
@@ -551,7 +551,7 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
             return None
 
         def sendall(self, data):
-            captured["data"] = data
+            captured.append(data)
 
         def shutdown(self, _how):
             return None
@@ -565,13 +565,13 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
         def __exit__(self, *_exc):
             return None
 
-    with patch("src.audio.ear.socket.socket", return_value=FakeSocket()):
+    with patch("src.audio.ear_runtime.controller.socket.socket", return_value=FakeSocket()):
         sent = ear._send_audio_chunk_to_brain(b"\x01\x00" * 2)
 
     assert sent is True
     # New 4-part header: CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQ
-    assert captured["data"].startswith(b"CMD_AUDIO_CHUNK:session123:0:7\n\n")
-    assert captured["data"].endswith(b"\x01\x00" * 2)
+    assert captured[0].startswith(b"CMD_AUDIO_CHUNK:session123:0:7\n\n")
+    assert captured[0].endswith(b"\x01\x00" * 2)
 
 
 def test_session_event_send_uses_json_payload_and_session_header():
@@ -607,7 +607,7 @@ def test_session_event_send_uses_json_payload_and_session_header():
         def __exit__(self, *_exc):
             return None
 
-    with patch("src.audio.ear.socket.socket", return_value=FakeSocket()):
+    with patch("src.audio.ear_runtime.controller.socket.socket", return_value=FakeSocket()):
         sent = ear._send_session_event_to_brain(
             "chunk_sent_to_brain",
             {"chunk_index": 7, "audio_bytes": 42},
@@ -698,7 +698,8 @@ def test_hold_less_than_one_second_no_recording():
 
 
 def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handlers(monkeypatch):
-    import src.audio.ear as ear_module
+    import src.audio.ear_runtime.runtime as runtime_module
+    import src.audio.ear_runtime.controller as ear_controller
 
     captured = {}
 
@@ -764,15 +765,15 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
         def terminate(self):
             return None
 
-    monkeypatch.setattr(ear_module, "Ear", FakeEar)
-    monkeypatch.setattr(ear_module, "TerminalMenu", FakeMenu)
-    monkeypatch.setattr(ear_module, "InputTrigger", FakeInputTrigger)
-    monkeypatch.setattr(ear_module, "select_mic", lambda _p: 7)
-    monkeypatch.setattr(ear_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance())
-    monkeypatch.setattr(ear_module.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(runtime_module, "Ear", FakeEar)
+    monkeypatch.setattr(runtime_module, "TerminalMenu", FakeMenu)
+    monkeypatch.setattr(runtime_module, "InputTrigger", FakeInputTrigger)
+    monkeypatch.setattr(runtime_module, "select_mic", lambda _p: 7)
+    monkeypatch.setattr(runtime_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance())
+    monkeypatch.setattr(runtime_module.sys.stdin, "isatty", lambda: False)
     monkeypatch.delenv("VIBEVOICE_MIC_INDEX", raising=False)
 
-    ear_module.start_ear()
+    runtime_module.start_ear()
 
     assert captured["input_trigger_started"] is True
     assert captured["menu_started"] is True
@@ -784,7 +785,7 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
 
 
 def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "no_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
     ear = Ear()
     ear.is_recording = True
     ear._chunk_started_at = time.time() - 2.0
@@ -799,8 +800,8 @@ def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatc
 
 
 def test_record_loop_tick_finalizes_on_silence_in_silence_streaming_mode(monkeypatch):
-    monkeypatch.setattr("src.audio.ear.RECORDING_MODE", "silence_streaming")
-    monkeypatch.setattr("src.audio.ear.MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING", 1.0)
+    monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "silence_streaming")
+    monkeypatch.setattr("src.audio.ear_runtime.controller.MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING", 1.0)
     ear = Ear()
     ear.is_recording = True
     ear._chunk_started_at = time.time() - 2.0

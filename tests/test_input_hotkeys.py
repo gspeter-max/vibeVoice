@@ -171,8 +171,8 @@ def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkey
         on_toggle_recording=mock_toggle,
     )
 
-    monkeypatch.setattr("src.input.hotkeys.keyboard.Listener", lambda *args, **kwargs: None)
-    monkeypatch.setattr("src.input.hotkeys.mouse.Listener", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.input.hotkeys.keyboard.Listener", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr("src.input.hotkeys.mouse.Listener", lambda *args, **kwargs: None, raising=False)
 
     trigger.start_listening()
     trigger.stop_listening()

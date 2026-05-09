@@ -7,6 +7,7 @@ It tries different AI companies in order so we never fail.
 import httpx
 from typing import Optional
 from src.text_refiner.providers.groq import call_groq
+from src.text_refiner.providers.nvidia import call_nvidia
 from src.text_refiner.providers.cerebras import call_cerebras
 from src.text_refiner.providers.together import call_together
 
@@ -14,25 +15,33 @@ from src import log
 from src.utils.env_manager import check_and_ask_for_api_key
 
 # 1. Configuration for our Providers
-# We list them in order: Groq, Cerebras, Together AI.
+# Fallback order: Groq → NVIDIA (GLM-5.1) → Cerebras → Together AI.
+# If the current leader fails, we rotate to the next one automatically.
 PROVIDERS = [
     {
-        "name": "Groq", 
-        "call": call_groq, 
+        "name": "Groq",
+        "call": call_groq,
         "env_var": "GROQ_API_KEY",
         "description": "Fastest Performance",
         "feature": "Ultra-low latency"
     },
     {
-        "name": "Cerebras", 
-        "call": call_cerebras, 
+        "name": "NVIDIA",
+        "call": call_nvidia,
+        "env_var": "NVIDIA_API_KEY",
+        "description": "NVIDIA NIM — Nemotron-70B",
+        "feature": "Instruction-tuned Llama 3.1 by NVIDIA"
+    },
+    {
+        "name": "Cerebras",
+        "call": call_cerebras,
         "env_var": "CEREBRAS_API_KEY",
         "description": "High-quality Alternative",
         "feature": "Llama-3.1 70B support"
     },
     {
-        "name": "Together AI", 
-        "call": call_together, 
+        "name": "Together AI",
+        "call": call_together,
         "env_var": "TOGETHER_API_KEY",
         "description": "Versatile Models",
         "feature": "Large context window"

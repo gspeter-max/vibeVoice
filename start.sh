@@ -73,7 +73,6 @@ fi
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
 export BACKEND="${BACKEND:-parakeet}"
-export VOICE_ISOLATION="${VOICE_ISOLATION:-0}"
 export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
 export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
@@ -142,5 +141,4 @@ log_info "HUD PID: $HUD_PID | log: logs/hud.log"
 sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
-"$VENV_PYTHON" src/audio/ear.py
-
+"$VENV_PYTHON" src/audio/ear_runtime/runtime.py

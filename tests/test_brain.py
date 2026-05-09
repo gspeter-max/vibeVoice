@@ -221,15 +221,24 @@ def test_finalize_session_pastes_stitched_text_directly():
 
     with (
         patch("src.backend.brain.log.info") as mock_log,
+        patch.object(brain, "_show_summary_table") as mock_summary_table,
         patch.object(brain, "send_hud"),
         patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
         patch.object(brain, "paste_instantly") as mock_paste,
     ):
         brain._finalize_recording_if_ready(session_id, 0)
     mock_groq.assert_called_once_with("hello world")
+    mock_summary_table.assert_called_once()
+    summary_args = mock_summary_table.call_args.args
+    assert summary_args[:4] == (
+        session_id,
+        "hello world",
+        "hello world cleaned",
+        0.0,
+    )
+    assert isinstance(summary_args[4], float)
     mock_paste.assert_called_once_with("hello world cleaned ")
-    logged_messages = [call.args[0] for call in mock_log.call_args_list]
-    assert any("[Brain] 🏁" in message for message in logged_messages)
+    assert not any("[Brain] 🏁" in call.args[0] for call in mock_log.call_args_list if call.args)
 
 
 def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
@@ -259,9 +268,9 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
 
 def test_brain_logs_match_pulse_format(capsys):
     """
-    Verify that Brain logs follow the 'The Pulse' design.
-    - Start: '[Brain] 🎙️  Recording started...'
-    - End: '[Brain] 🏁 "text" (Xs)'
+    Verify that Brain now uses the Zen-style completion summary.
+    - Start still logs: '[Brain] 🎙️  Recording started...'
+    - End now renders the Rich summary table instead of the old pulse finish log
     """
     from unittest.mock import MagicMock
     import src.backend.brain as brain
@@ -289,5 +298,8 @@ def test_brain_logs_match_pulse_format(capsys):
     stdout = captured.out
 
     assert "[Brain] 🎙️  Recording started..." in stdout
-    assert '[Brain] 🏁 "Hello" (' in stdout
-    assert "s)" in stdout
+    assert "📋 Session:" in stdout
+    assert "Status" in stdout
+    assert "DONE" in stdout
+    assert "Raw Text" in stdout
+    assert "Hello" in stdout

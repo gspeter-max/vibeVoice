@@ -15,7 +15,7 @@ from textual.binding import Binding
 # Import existing logic
 from src.text_refiner.llm_router import PROVIDERS
 from src.utils.env_manager import save_to_env
-from src.audio.ear import get_active_models
+from src.audio.ear_runtime.controller import get_active_models
 
 class ApiKeyModal(ModalScreen[Optional[str]]):
     """A modal dialog to enter an API key."""

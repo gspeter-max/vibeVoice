@@ -101,8 +101,7 @@ def run_self_test(sample_rate: int = 16000):
 def _get_active_models_for_menu() -> list[str]:
     """Load the current active-model list lazily to avoid circular imports."""
 
-    from src.audio.ear import get_active_models
-
+    from .controller import get_active_models
     return get_active_models()
 
 
