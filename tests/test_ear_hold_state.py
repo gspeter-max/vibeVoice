@@ -73,6 +73,34 @@ def test_ear_has_hold_state_variables():
     assert not hasattr(ear, '_mouse_click_timeout'), "Ear should NOT have _mouse_click_timeout attribute (removed)"
 
 
+def test_capture_session_keeps_session_id_across_recordings_and_increments_on_commit_only():
+    from src.streaming.capture_session import CaptureSession
+
+    session = CaptureSession(sample_rate=16000, overlap_seconds=0.002)
+    first_session_id = session.current_session_id
+
+    session.begin_recording(now_seconds=1.0)
+    assert session.current_recording_index == 0
+
+    session.mark_recording_committed()
+    assert session.current_session_id == first_session_id
+    assert session.current_recording_index == 1
+
+
+def test_capture_session_resets_chunk_sequence_after_final_stop():
+    from src.streaming.capture_session import CaptureSession
+
+    session = CaptureSession(sample_rate=16000, overlap_seconds=0.002)
+    session.begin_recording(now_seconds=1.0)
+    assert session.current_chunk_sequence_number == 0
+
+    session.mark_chunk_sent()
+    assert session.current_chunk_sequence_number == 1
+
+    session.mark_recording_committed()
+    assert session.current_chunk_sequence_number == 0
+
+
 def test_send_message_to_brain_returns_false_when_message_is_empty():
     from src.ipc.client import send_message_to_brain
 

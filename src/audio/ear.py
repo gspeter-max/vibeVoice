@@ -58,6 +58,7 @@ from src.ipc.protocol import (
     format_session_commit_message,
     format_session_event_message,
 )
+from src.streaming.capture_session import CaptureSession
 from src.ui.hud_client import send_hud_command, start_volume_sender_thread
 from src import log
 try:
@@ -256,13 +257,17 @@ class Ear:
         self._vad_no_speech_warned = False
         # Session ID is generated ONCE when the app launches — it never changes.
         # _recording_index tracks how many times the user has pressed the record button.
-        self._current_session_id = uuid.uuid4().hex
-        self._recording_index = 0
-        self._chunk_seq = 0
-        self._chunk_started_at = 0.0
+        self._capture_session = CaptureSession(
+            sample_rate=RATE,
+            overlap_seconds=OVERLAP_SECONDS,
+        )
+        self._current_session_id = self._capture_session.current_session_id
+        self._recording_index = self._capture_session.current_recording_index
+        self._chunk_seq = self._capture_session.current_chunk_sequence_number
+        self._chunk_started_at = self._capture_session.chunk_started_at_seconds
         self.current_model = "parakeet-tdt-0.6b-v3" # Default model
-        self._chunk_overlap_audio_bytes = int(RATE * 2 * OVERLAP_SECONDS)
-        self._last_chunk_tail_bytes = b""
+        self._chunk_overlap_audio_bytes = self._capture_session.overlap_audio_byte_count
+        self._last_chunk_tail_bytes = self._capture_session.last_chunk_tail_bytes
 
         # ★ VAD: buffer full utterances locally before sending to Brain
         try:
@@ -315,6 +320,36 @@ class Ear:
         """Return True when Ear should split speech on silence."""
         return RECORDING_MODE == SILENCE_STREAMING_MODE
 
+    def _sync_legacy_capture_session_fields(self) -> None:
+        """Copy state from `CaptureSession` onto legacy Ear fields.
+
+        Older tests and compatibility code still read these Ear attributes
+        directly, so the refactor keeps them updated as mirrors of the new
+        capture-session owner.
+        """
+
+        self._current_session_id = self._capture_session.current_session_id
+        self._recording_index = self._capture_session.current_recording_index
+        self._chunk_seq = self._capture_session.current_chunk_sequence_number
+        self._chunk_started_at = self._capture_session.chunk_started_at_seconds
+        self._chunk_overlap_audio_bytes = self._capture_session.overlap_audio_byte_count
+        self._last_chunk_tail_bytes = self._capture_session.last_chunk_tail_bytes
+
+    def _sync_capture_session_from_legacy_fields(self) -> None:
+        """Push legacy Ear field values back into `CaptureSession` when needed.
+
+        Some compatibility tests still mutate the old Ear attributes directly.
+        Before delegated helpers use the new session object, we mirror those
+        legacy values back into the source-of-truth state holder.
+        """
+
+        self._capture_session.current_session_id = self._current_session_id
+        self._capture_session.current_recording_index = self._recording_index
+        self._capture_session.current_chunk_sequence_number = self._chunk_seq
+        self._capture_session.chunk_started_at_seconds = self._chunk_started_at
+        self._capture_session.last_chunk_tail_bytes = self._last_chunk_tail_bytes
+        self._capture_session.overlap_audio_byte_count_override = self._chunk_overlap_audio_bytes
+
     def _begin_recording_session(self):
         """
         Initializes a new streaming session with a unique ID.
@@ -324,8 +359,8 @@ class Ear:
         process a series of related audio chunks as a single conversation.
         """
         # session_id was already created in __init__; just reset the per-recording counters.
-        self._chunk_seq = 0
-        self._chunk_started_at = time.time()
+        self._capture_session.begin_recording(time.time())
+        self._sync_legacy_capture_session_fields()
         self._send_session_event_to_brain(
             "session_started",
             {"recording_mode": RECORDING_MODE},
@@ -342,6 +377,7 @@ class Ear:
         if not self._telemetry_enabled or not self._current_session_id:
             return False
 
+        self._sync_capture_session_from_legacy_fields()
         payload = {"type": event_type}
         if fields:
             payload.update(fields)
@@ -371,12 +407,14 @@ class Ear:
         if not utterance_bytes or not self._current_session_id:
             return False
 
-        session_id = self._current_session_id
-        seq = self._chunk_seq
-        self._chunk_seq += 1
+        self._sync_capture_session_from_legacy_fields()
+        session_id = self._capture_session.current_session_id
+        recording_index = self._capture_session.current_recording_index
+        seq = self._capture_session.mark_chunk_sent()
+        self._sync_legacy_capture_session_fields()
         message_bytes = format_audio_chunk_message(
             session_id,
-            self._recording_index,
+            recording_index,
             seq,
             utterance_bytes,
         )
@@ -409,10 +447,12 @@ class Ear:
         if not self._current_session_id:
             return False
 
-        session_id = self._current_session_id
+        self._sync_capture_session_from_legacy_fields()
+        session_id = self._capture_session.current_session_id
+        recording_index = self._capture_session.current_recording_index
         message_bytes = format_session_commit_message(
             session_id,
-            self._recording_index,
+            recording_index,
         )
         sent = send_message_to_brain(
             message_bytes,
@@ -421,8 +461,9 @@ class Ear:
             socket_factory=socket.socket,
         )
         if sent:
-            log.info("✅ Session committed", session=session_id[:8], recording=self._recording_index)
-            self._recording_index += 1  # button released → next press gets the next recording slot
+            log.info("✅ Session committed", session=session_id[:8], recording=recording_index)
+            self._capture_session.mark_recording_committed()
+            self._sync_legacy_capture_session_fields()
             return True
         log.error("❌ Failed to commit session")
         return False
@@ -460,17 +501,14 @@ class Ear:
         the Brain with enough surrounding information to maintain a smooth
         and accurate flow of text across all chunks in a session.
         """
-        silence_audio_byte_count = int(silence_seconds * RATE * 2)
-        overlap_application_result = apply_last_chunk_overlap(
-            current_chunk_audio_bytes=audio_chunk_for_brain,
-            last_chunk_tail_bytes=self._last_chunk_tail_bytes,
-            overlap_audio_byte_count=self._chunk_overlap_audio_bytes,
-            silence_audio_byte_count=silence_audio_byte_count,
-            sample_rate=RATE,
+        self._sync_capture_session_from_legacy_fields()
+        overlapped_audio_bytes = self._capture_session.prepare_chunk_for_send(
+            audio_chunk_for_brain,
             stop_session=stop_session,
+            silence_seconds=silence_seconds,
         )
-        self._last_chunk_tail_bytes = overlap_application_result.next_chunk_tail_bytes
-        return overlap_application_result.overlapped_audio_bytes
+        self._sync_legacy_capture_session_fields()
+        return overlapped_audio_bytes
 
     def _flush_current_chunk(self, *, stop_session: bool) -> bool:
         """
@@ -500,12 +538,11 @@ class Ear:
         utterance = self._utterance_gate.flush()
         if not utterance:
             if stop_session:
-                self._last_chunk_tail_bytes = b""
+                self._capture_session.clear_overlap_tail()
                 log.info("[Ear] 🔇 No speech captured; stopping recording")
                 # Always commit so the Brain closes out this recording slot
                 self._commit_recording_session()
-                # Reset per-recording seq counter; session ID stays alive
-                self._chunk_seq = 0
+                self._sync_legacy_capture_session_fields()
             return False
 
         utterance_for_brain = self._boost_audio_chunk(utterance)
@@ -543,10 +580,9 @@ class Ear:
             )
         if stop_session:
             self._commit_recording_session()
-            # Reset per-recording seq counter; session ID stays alive for the app lifetime
-            self._chunk_seq = 0
         else:
-            self._chunk_started_at = time.time()
+            self._capture_session.chunk_started_at_seconds = time.time()
+        self._sync_legacy_capture_session_fields()
         return sent
 
     def _stop_no_streaming(self):
@@ -741,7 +777,8 @@ class Ear:
             self._vad_no_speech_warned = False
             self._recording_level_log_time = 0.0
 
-        self._last_chunk_tail_bytes = b""
+        self._capture_session.clear_overlap_tail()
+        self._sync_legacy_capture_session_fields()
         if self._is_silence_streaming_mode():
             self._utterance_gate.reset()
             self._begin_recording_session()
