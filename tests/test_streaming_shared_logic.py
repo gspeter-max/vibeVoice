@@ -2,7 +2,6 @@ from src.streaming.streaming_shared_logic import (
     apply_last_chunk_overlap,
     analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,
-    remove_duplicate_chunk_prefix,
     should_split_chunk_after_silence,
 )
 
@@ -50,28 +49,63 @@ def test_apply_last_chunk_overlap_skips_silence():
     assert result.next_chunk_tail_bytes == b"\x05\x00\x06\x00"
 
 
-def test_remove_duplicate_chunk_prefix_removes_exact_overlap_only():
-    assert remove_duplicate_chunk_prefix(
+def test_analyze_duplicate_chunk_prefix_removes_exact_overlapping_words_from_start():
+    """
+    When chunk 2 starts with the same words that chunk 1 ended with,
+    analyze_ should remove those repeated words and return only the new content.
+
+    Example:
+      chunk 1 ends with:   "things are happening fine"
+      chunk 2 starts with: "things are happening fine and doing work"
+      Result should be:    "and doing work"
+    """
+    result = analyze_duplicate_chunk_prefix(
         "things are happening fine",
         "things are happening fine and doing work",
         max_overlap_words=8,
-    ) == "and doing work"
+    )
+    assert result.cleaned_text == "and doing work"
+    assert result.trim_applied is True
 
 
-def test_remove_duplicate_chunk_prefix_ignores_case_and_edge_punctuation_for_matching():
-    assert remove_duplicate_chunk_prefix(
+def test_analyze_duplicate_chunk_prefix_ignores_letter_case_and_punctuation_when_matching():
+    """
+    The matching should be case-insensitive and should ignore punctuation at word edges.
+    "that I made." and "That I made" should be treated as the same words.
+
+    Example:
+      chunk 1 ends with:   "that I made."
+      chunk 2 starts with: "That I made a few months ago..."
+      Result should be:    "a few months ago while writing an article for Italian Wired."
+    """
+    result = analyze_duplicate_chunk_prefix(
         "that I made.",
         "That I made a few months ago while writing an article for Italian Wired.",
         max_overlap_words=8,
-    ) == "a few months ago while writing an article for Italian Wired."
+    )
+    assert result.cleaned_text == "a few months ago while writing an article for Italian Wired."
+    assert result.trim_applied is True
 
 
-def test_remove_duplicate_chunk_prefix_keeps_text_when_overlap_trim_would_be_too_small():
-    assert remove_duplicate_chunk_prefix(
+def test_analyze_duplicate_chunk_prefix_keeps_original_text_when_trim_would_leave_almost_nothing():
+    """
+    Safety check: if removing the overlapping words would leave the new chunk with
+    1 or fewer words, we skip the trim to avoid losing real content.
+
+    Example:
+      chunk 1 ends with:   "once in my"
+      chunk 2 starts with: "once in my life."
+      Removing "once in my" would leave only "life." — just 1 word.
+      So the full text "once in my life." should be kept unchanged.
+    """
+    result = analyze_duplicate_chunk_prefix(
         "once in my",
         "once in my life.",
         max_overlap_words=8,
-    ) == "once in my life."
+    )
+    assert result.cleaned_text == "once in my life."
+    assert result.skipped_because_result_too_small is True
+    assert result.trim_applied is False
 
 
 def test_analyze_duplicate_chunk_prefix_reports_trim_details():
