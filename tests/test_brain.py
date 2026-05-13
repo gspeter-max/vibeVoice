@@ -12,15 +12,10 @@ It now holds a single 'engine' object that conforms to the TranscriptionEngine r
 All mocks here use mock_engine with is_stateful() and transcribe_chunk() methods.
 """
 
-import json
-import sys
-import types
 from unittest.mock import MagicMock, patch
-
-import numpy as np
 import pytest
 
-import src.backend.brain as brain
+import src.backend.brain as brai
 import src.backend.state as state
 
 
@@ -153,9 +148,6 @@ def test_handle_connection_skips_too_short_audio():
     mock_engine.transcribe_chunk.assert_not_called()
     mock_paste.assert_not_called()
 
-
-
-
 def test_handle_streaming_audio_chunk_dedupes_against_last_chunk_text():
     """
     Verify that for a STATELESS engine, two sequential audio chunks are deduplicated.
@@ -262,11 +254,6 @@ def test_brain_logs_match_pulse_format(capsys):
     - Start still logs: '[Brain] 🎙️  Recording started...'
     - End now renders the Rich summary table instead of the old pulse finish log
     """
-    from unittest.mock import MagicMock
-    import src.backend.brain as brain
-    import src.backend.state as state
-    import numpy as np
-
     mock_engine = MagicMock()
     mock_engine.is_stateful.return_value = False
     mock_engine.transcribe_chunk.return_value = "Hello"

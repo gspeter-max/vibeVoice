@@ -258,7 +258,7 @@ def character_similarity(words_a: list[str], words_b: list[str]) -> float:
     
     score = SequenceMatcher(None, str_a, str_b).ratio()
     log.debug(
-        f"[Dedup] char_similarity",
+        "[Dedup] char_similarity",
         str_a=str_a,
         str_b=str_b,
         score=round(score, 4),
@@ -285,7 +285,7 @@ def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
 
     score = len(intersection) / len(union) if union else 0.0
     log.debug(
-        f"[Dedup] token_overlap",
+        "[Dedup] token_overlap",
         words_a=words_a,
         words_b=words_b,
         shared_words=sorted(intersection),
@@ -294,6 +294,7 @@ def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
         score=round(score, 4),
     )
     return score
+
 
 def analyze_duplicate_chunk_prefix(
     last_chunk_text: str,
@@ -364,6 +365,7 @@ def analyze_duplicate_chunk_prefix(
             )
 
     return result
+
 
 def normalize_text_for_word_error_rate(text: str) -> str:
     """
