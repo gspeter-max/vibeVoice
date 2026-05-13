@@ -21,10 +21,8 @@ from src.text_refiner.llm_router import refine_text_with_fallbacks, set_primary_
 from src.utils.env_manager import check_and_ask_for_api_key
 from src.streaming.streaming_shared_logic import (
     analyze_duplicate_chunk_prefix,
-    remove_duplicate_chunk_prefix,
 )
 from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
-from src.utils.env_utils import get_float_from_environment
 from src.utils.bootstrap import fix_macos_library_paths
 from src import log
 from rich.console import Console
@@ -33,7 +31,6 @@ from rich import box
 
 import platform
 
-# PRELOAD SOUND EFFECT FOR INSTANT ZERO-LATENCY PLAYBACK
 _finish_sound = None
 
 def _load_finish_sound():
@@ -91,9 +88,6 @@ from src.backend.data_record.telemetry import (
     _update_chunk_telemetry_summary,
     _update_session_telemetry_summary,
     _handle_session_telemetry_event,
-    STREAMING_TELEMETRY_ENABLED,
-    STREAMING_TELEMETRY_DIR,
-    RECORDING_MODE
 )
 
 NO_STREAMING_MODE = "no_streaming"
@@ -107,28 +101,14 @@ except ImportError:  # pragma: no cover
             return None
 
 
-# Constants
-SOCKET_PATH = "/tmp/parakeet.sock"
-HUD_HOST, HUD_PORT = "127.0.0.1", 57234
+# Constants — read from central settings so they can be overridden via .env
+from src.utils.settings import settings
 keyboard = Controller()
 
-# Environment Config
-BACKEND = os.environ.get("BACKEND", "parakeet").lower().strip()
-
 def _is_no_streaming_mode() -> bool:
-    return RECORDING_MODE == NO_STREAMING_MODE
+    return settings.recording_mode == NO_STREAMING_MODE
 
 
-def _is_online(timeout=0.5) -> bool:
-    """
-    Checks for internet connectivity by attempting a quick connection to a reliable DNS server.
-    Used to prevent the app from hanging on LLM requests when the user is offline.
-    """
-    try:
-        socket.create_connection(("1.1.1.1", 53), timeout=timeout)
-        return True
-    except OSError:
-        return False
 
 
 def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
@@ -154,7 +134,7 @@ def send_hud(cmd: str):
     feedback on whether the AI is currently listening or transcribing audio.
     """
     try:
-        with socket.create_connection((HUD_HOST, HUD_PORT), timeout=0.2) as s:
+        with socket.create_connection((settings.hud_host, settings.hud_port), timeout=0.2) as s:
             s.sendall(cmd.encode())
     except Exception:
         pass
@@ -170,10 +150,10 @@ def _get_or_create_session(session_id: str) -> SessionState:
     """
     with session_store_lock:
         if session := session_store.get(session_id):
-            if STREAMING_TELEMETRY_ENABLED and session.telemetry_recorder is None:
+            if settings.streaming_telemetry_enabled and session.telemetry_recorder is None:
                 session.telemetry_recorder = StreamingSessionTelemetryRecorder(
                     session_id=session_id,
-                    output_dir=STREAMING_TELEMETRY_DIR,
+                    output_dir=settings.streaming_telemetry_dir,
                     summary_seed=_telemetry_seed(),
                 )
             return session
@@ -182,10 +162,10 @@ def _get_or_create_session(session_id: str) -> SessionState:
             engine = backend_info.get("engine")
 
         telemetry_recorder = None
-        if STREAMING_TELEMETRY_ENABLED:
+        if settings.streaming_telemetry_enabled:
             telemetry_recorder = StreamingSessionTelemetryRecorder(
                 session_id=session_id,
-                output_dir=STREAMING_TELEMETRY_DIR,
+                output_dir=settings.streaming_telemetry_dir,
                 summary_seed=_telemetry_seed(),
             )
 
@@ -245,19 +225,12 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
     short_id = session_id[:8]
     if text:
         stt_time = rec.stt_time
-        # log.info replaced by _show_summary_table for Zen mode
         
         send_hud("process")
-        
-        # Smart online/offline detection: skip LLM if no internet to ensure instant pasting
+
         t_refine_start = time.perf_counter()
-        if _is_online():
-            cleaned_text = refine_text_with_fallbacks(text)
-            refine_time = time.perf_counter() - t_refine_start
-        else:
-            log.info("[Brain] 🔌 Offline mode detected — bypassing LLM refiner for instant paste")
-            cleaned_text = text
-            refine_time = 0.0
+        cleaned_text = refine_text_with_fallbacks(text)
+        refine_time = time.perf_counter() - t_refine_start
         
         _update_session_telemetry_summary(
             session_id,
@@ -269,13 +242,12 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
                 "refine_seconds": round(refine_time, 2),
             },
         )
-        _show_summary_table(session_id, text, cleaned_text, stt_time, refine_time)
-        
         paste_instantly(cleaned_text + " ")
+        _show_summary_table(session_id, text, cleaned_text, stt_time, refine_time)
         _update_session_telemetry_summary(session_id, {"final_paste_success": True})
         send_hud("done")
+
     else:
-        # log.info("[Brain] 🔇 Nothing detected") # Silenced for Zen
         _update_session_telemetry_summary(
             session_id,
             {
@@ -285,19 +257,16 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         )
         send_hud("hide")
 
-    # Clear memory using our clean interface
     with session.lock:
-        # log.info(f"[Brain] 🔄 Clearing engine memory...") # Silenced for Zen
         session.engine.clear_internal_memory()
 
 
-# Keep the old name as an alias so any test code referencing it still works during migration
 def _finalize_session_if_ready(session_id: str) -> None:
     """Deprecated: finalizes recording index 0 only. Use _finalize_recording_if_ready."""
     _finalize_recording_if_ready(session_id, 0)
 
 
-def _handle_audio_chunk(
+def handle_streaming_audio_chunk(
     session_id: str, rec_idx: int, seq: int, audio_bytes: bytes
 ) -> None:
     """
@@ -482,26 +451,19 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
 
     stt_time = time.perf_counter() - t_connect
     
-    # Smart online/offline detection: skip LLM if no internet to ensure instant pasting
     t_refine_start = time.perf_counter()
-    if _is_online():
-        cleaned_text = refine_text_with_fallbacks(final_text)
-        refine_time = time.perf_counter() - t_refine_start
-        llm_log_str = f"{refine_time:.2f}s"
-    else:
-        log.info("[Brain] 🔌 Offline mode detected — bypassing LLM refiner for instant paste")
-        cleaned_text = final_text
-        refine_time = 0.0
-        llm_log_str = "bypassed"
+    cleaned_text = refine_text_with_fallbacks(final_text)
+    refine_time = time.perf_counter() - t_refine_start
+    llm_log_str = f"{refine_time:.2f}s"
 
     log.info(
         f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"'
     )
     
+    paste_instantly(cleaned_text + " ")
     # We do not use telemetry for the non-streaming path currently, but we can show the table.
     _show_summary_table("one-shot", final_text, cleaned_text, stt_time, refine_time)
     
-    paste_instantly(cleaned_text + " ")
     send_hud("done")
 
 
@@ -629,7 +591,7 @@ def _handle_switch_model(blob: bytes):
         with backend_lock:
             import gc
 
-            backend_info["engine"] = None
+            backend_info["engine"] = None # first unload the model to free memory
             gc.collect()
             backend_info["engine"] = load_transcription_engine(new_model)
             
@@ -676,7 +638,7 @@ def _handle_chunk_command(blob: bytes):
             size=len(audio_bytes),
             session=session_id[:8],
         )
-        _handle_audio_chunk(session_id, int(rec_idx_str), int(seq_text), audio_bytes)
+        handle_streaming_audio_chunk(session_id, int(rec_idx_str), int(seq_text), audio_bytes)
     except Exception as e:
         log.warning("⚠️  Bad chunk header", error=str(e))
 
@@ -688,34 +650,25 @@ def start_server():
     # 1. Auto-fix environment issues (e.g., macOS library paths)
     fix_macos_library_paths()
 
-    # 2. Setup Provider from environment (configured by wizard.py)
-    # We no longer prompt here to avoid EOFError in background.
-    provider_idx_str = os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0")
-    try:
-        provider_idx = int(provider_idx_str)
-    except ValueError:
-        provider_idx = 0
+    safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
+    set_primary_provider(safe_provider_index)
+    log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
 
-    set_primary_provider(provider_idx)
-    log.info(f"[Brain] Text refiner set to: {PROVIDERS[provider_idx]['name']}")
-
-    # 3. Load the STT engine
-    # Use STT_MODEL from .env (configured by wizard_tui.py)
-    stt_model = os.environ.get("STT_MODEL", "parakeet-tdt-0.6b-v3")
-    backend_info["engine"] = load_transcription_engine(stt_model)
-    log.info(f"[Brain] Warming up model: {stt_model}...")
+    backend_info["engine"] = load_transcription_engine(settings.stt_model)
+    log.info(f"[Brain] Warming up model: {settings.stt_model}...")
     try:
         backend_info["engine"].transcribe_chunk(np.zeros(8000, dtype=np.float32))
-    except Exception:
-        pass
+    except Exception as e:
+        log.error(f"[Brain] ❌ Warm-up failed {e}")
+        sys.exit(1)
     log.info("[Brain] Warm-up done ✓")
 
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
+    if os.path.exists(settings.socket_path):
+        os.remove(settings.socket_path)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(SOCKET_PATH)
+    server.bind(settings.socket_path)
     server.listen(10)
-    log.info(f"[Brain] ✅ Streaming server ready at {SOCKET_PATH}")
+    log.info(f"[Brain] ✅ Streaming server ready at {settings.socket_path}")
 
     try:
         while True:
@@ -742,8 +695,8 @@ def start_server():
             log.warning(f"⚠️ Failed to write shutdown telemetry: {e}")
     finally:
         server.close()
-        if os.path.exists(SOCKET_PATH):
-            os.remove(SOCKET_PATH)
+        if os.path.exists(settings.socket_path):
+            os.remove(settings.socket_path)
             
         # Close the LLM router connection pool safely
         try:
