@@ -326,11 +326,11 @@ def analyze_duplicate_chunk_prefix(
     prev_original, prev_normalized = build_original_words_and_overlap_matching_words(last_chunk_text)
     curr_original, curr_normalized = build_original_words_and_overlap_matching_words(current_chunk_text)
 
+    # The normalized list is built 1-to-1 from the original list,
+    # so their lengths are always equal — no need to check both.
     largest_possible_overlap = min(
         len(prev_normalized),
         len(curr_normalized),
-        len(prev_original),
-        len(curr_original),
         max_overlap_words,
     )
 
@@ -349,8 +349,12 @@ def analyze_duplicate_chunk_prefix(
                 curr_original, trimmed, overlap_word_count
             )
             
+            # If we skip the trim, keep the full current text unchanged.
+            # If we apply the trim, join only the words after the overlap.
+            cleaned_text = current_chunk_text.strip() if skipped else " ".join(trimmed).strip()
+
             return ChunkDeduplicationResult(
-                cleaned_text=current_chunk_text.strip() if skipped else " ".join(trimmed).strip(),
+                cleaned_text=cleaned_text,
                 overlap_word_count=overlap_word_count,
                 char_score=char_score,
                 token_score=token_score,
@@ -360,9 +364,6 @@ def analyze_duplicate_chunk_prefix(
             )
 
     return result
-
-
-
 
 def normalize_text_for_word_error_rate(text: str) -> str:
     """
