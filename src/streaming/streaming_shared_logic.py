@@ -295,33 +295,6 @@ def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
     )
     return score
 
-def combined_overlap_score(
-    words_a: list[str],
-    words_b: list[str],
-    char_weight: float = 0.6,
-    token_weight: float = 0.4,
-) -> float:
-    """
-    Combines character and token scores into a single confidence metric.
-    By blending both character similarity and word-set overlap, we create
-    a robust detection system that isn't easily fooled by typos or word
-    reordering. This weighted average provides the final 'truth' score that
-    the Brain uses to decide if it should delete a chunk of text as a
-    duplicate, ensuring the final transcript remains clean and accurate.
-    """
-    char_score = character_similarity(words_a, words_b)
-    token_score = token_overlap_score(words_a, words_b)
-
-    combined = (char_score * char_weight) + (token_score * token_weight)
-    log.debug(
-        "[Dedup] combined_score",
-        char_score=round(char_score, 4),
-        token_score=round(token_score, 4),
-        combined=round(combined, 4),
-    )
-    return combined
-
-
 def analyze_duplicate_chunk_prefix(
     last_chunk_text: str,
     current_chunk_text: str,
