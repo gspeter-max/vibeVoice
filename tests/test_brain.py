@@ -22,7 +22,6 @@ import pytest
 
 import src.backend.brain as brain
 import src.backend.state as state
-from src.streaming.streaming_shared_logic import remove_duplicate_chunk_prefix
 
 
 class MockConn:
@@ -92,7 +91,8 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
     Verify that in 'no_streaming' mode, audio is buffered and then transcribed
     all at once using engine.transcribe_chunk().
     """
-    monkeypatch.setattr(brain, "RECORDING_MODE", "no_streaming")
+    # RECORDING_MODE was moved to settings — patch the settings object
+    monkeypatch.setattr(brain.settings, "recording_mode", "no_streaming")
 
     mock_engine = MagicMock()
     mock_engine.transcribe_chunk.return_value = "hello world"
@@ -154,20 +154,9 @@ def test_handle_connection_skips_too_short_audio():
     mock_paste.assert_not_called()
 
 
-def test_dedupe_with_last_chunk_removes_repeated_prefix():
-    """
-    Direct unit test for the deduplication helper function.
-    Verifies that overlapping words from the previous chunk are trimmed off.
-    """
-    cleaned = remove_duplicate_chunk_prefix(
-        "I want to see that things are happening fine",
-        "things are happening fine and doing H3 grid",
-    )
-
-    assert cleaned == "doing H3 grid"
 
 
-def test_handle_audio_chunk_dedupes_against_last_chunk_text():
+def test_handle_streaming_audio_chunk_dedupes_against_last_chunk_text():
     """
     Verify that for a STATELESS engine, two sequential audio chunks are deduplicated.
     The second chunk's text should have the repeated prefix from chunk 1 removed.
@@ -189,8 +178,8 @@ def test_handle_audio_chunk_dedupes_against_last_chunk_text():
     session_id = "session123"
     audio_bytes = b"\x00\x10" * 32000
 
-    brain._handle_audio_chunk(session_id, 0, 0, audio_bytes)
-    brain._handle_audio_chunk(session_id, 0, 1, audio_bytes)
+    brain.handle_streaming_audio_chunk(session_id, 0, 0, audio_bytes)
+    brain.handle_streaming_audio_chunk(session_id, 0, 1, audio_bytes)
 
     session = state.session_store[session_id]
     assert (
@@ -246,8 +235,9 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
     Verify that a CMD_SESSION_EVENT triggers writing a telemetry JSON file to disk.
     """
     import src.backend.data_record.telemetry as telemetry
-    monkeypatch.setattr(telemetry, "STREAMING_TELEMETRY_ENABLED", True)
-    monkeypatch.setattr(telemetry, "STREAMING_TELEMETRY_DIR", tmp_path)
+    # These constants were moved to settings — patch the settings object
+    monkeypatch.setattr(telemetry.settings, "streaming_telemetry_enabled", True)
+    monkeypatch.setattr(telemetry.settings, "streaming_telemetry_dir", tmp_path)
     # Set a mock engine in global state so telemetry seed can read the model name
     mock_engine = MagicMock()
     mock_engine.model_name = "base.en"
@@ -286,7 +276,7 @@ def test_brain_logs_match_pulse_format(capsys):
     state.backend_info["engine"] = mock_engine
     
     # 1. Send first chunk (non-silent)
-    brain._handle_audio_chunk(session_id, 0, 0, b"\x01\x10" * 1600)
+    brain.handle_streaming_audio_chunk(session_id, 0, 0, b"\x01\x10" * 1600)
     # 2. Commit session (needed for finalization)
     session = brain._get_or_create_session(session_id)
     rec = session.get_or_create_recording(0)
