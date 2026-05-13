@@ -34,6 +34,14 @@ sys.modules['pyaudio'] = MockPyAudio()
 
 from src.audio.ear_runtime.controller import Ear, select_mic
 
+class FakePyAudio:
+    def get_default_input_device_info(self):
+        return {"index": 0}
+    def get_device_info_by_index(self, index):
+        return {"name": "Test Device"}
+    def terminate(self):
+        pass
+
 # Patch the _open_mic_stream method to avoid audio setup issues
 @pytest.fixture(autouse=True)
 def patch_open_mic_stream(monkeypatch):
@@ -53,24 +61,19 @@ def patch_silero_vad(monkeypatch):
         )
     monkeypatch.setattr("src.audio.ear_runtime.controller.SileroVAD", dummy_vad)
 
-def test_ear_has_hold_state_variables():
-    """Test that Ear initializes with hold-related state variables."""
-    ear = Ear()
+def test_ear_does_not_own_mouse_hold_state():
+    """
+    Mouse hold state (press time, holding flag, recording-from-hold flag) is
+    managed exclusively by InputTrigger. Ear must NOT have those fields.
+    InputTrigger.check_mouse_hold_threshold() is the single source of truth.
+    """
+    ear = Ear(pyaudio_lib=FakePyAudio())
 
-    # New hold state variables should exist
-    assert hasattr(ear, '_mouse_press_start_time'), "Ear should have _mouse_press_start_time attribute"
-    assert ear._mouse_press_start_time == 0.0, "_mouse_press_start_time should initialize to 0.0"
-
-    assert hasattr(ear, '_is_holding'), "Ear should have _is_holding attribute"
-    assert ear._is_holding is False, "_is_holding should initialize to False"
-
-    assert hasattr(ear, '_recording_from_hold'), "Ear should have _recording_from_hold attribute"
-    assert ear._recording_from_hold is False, "_recording_from_hold should initialize to False"
-
-    # Old click state variables should NOT exist
-    assert not hasattr(ear, '_mouse_click_count'), "Ear should NOT have _mouse_click_count attribute (removed)"
-    assert not hasattr(ear, '_mouse_clicks_required'), "Ear should NOT have _mouse_clicks_required attribute (removed)"
-    assert not hasattr(ear, '_mouse_click_timeout'), "Ear should NOT have _mouse_click_timeout attribute (removed)"
+    # These fields lived on Ear before the refactor — they are now gone.
+    assert not hasattr(ear, '_is_holding'), "_is_holding was moved to InputTrigger"
+    assert not hasattr(ear, '_mouse_press_start_time'), "_mouse_press_start_time was moved to InputTrigger"
+    assert not hasattr(ear, '_recording_from_hold'), "_recording_from_hold was moved to InputTrigger"
+    assert not hasattr(ear, 'on_mouse_click'), "on_mouse_click was removed; InputTrigger handles mouse events"
 
 
 def test_capture_session_keeps_session_id_across_recordings_and_increments_on_commit_only():
@@ -205,48 +208,62 @@ def test_raw_stream_helpers_open_send_and_close_socket():
     assert captured["shutdown_called"] is True
     assert captured["closed"] is True
 
-def test_mouse_press_starts_hold_timer():
-    """Test that pressing mouse button starts hold timer."""
-    ear = Ear()
+def test_record_loop_tick_delegates_mouse_hold_to_input_trigger():
+    """
+    _record_loop_tick must call input_trigger.check_mouse_hold_threshold() on
+    every tick when an InputTrigger is provided. This is how the 1-second
+    right-mouse-button hold-to-record activates — InputTrigger owns all mouse
+    state; Ear just polls it each cycle.
+    """
+    ear = Ear(pyaudio_lib=FakePyAudio())
 
-    # Simulate mouse press
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
+    mock_trigger = Mock()
+    mock_trigger.check_mouse_hold_threshold.return_value = False
 
-    # Should set press time and holding flag
-    assert ear._is_holding is True
-    assert ear._mouse_press_start_time > 0
-    assert ear._recording_from_hold is False
+    ear._record_loop_tick(input_trigger=mock_trigger)
+
+    mock_trigger.check_mouse_hold_threshold.assert_called_once()
 
 
-def test_mouse_release_stops_hold_timer():
-    """Test that releasing mouse button clears holding flag."""
-    ear = Ear()
-
-    # Press
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
-    assert ear._is_holding is True
-
-    # Release
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
-    assert ear._is_holding is False
+def test_record_loop_tick_does_not_error_without_input_trigger():
+    """
+    _record_loop_tick is safe to call with no input_trigger argument.
+    This keeps unit tests for other tick behaviour simple — they don't
+    need to supply a trigger if they're not testing mouse hold.
+    """
+    ear = Ear(pyaudio_lib=FakePyAudio())
+    # Must not raise even with no trigger passed
+    ear._record_loop_tick(input_trigger=None)
 
 
 def test_mouse_release_finalizes_immediately_when_recording():
-    """Test that releasing while recording finalizes immediately."""
-    ear = Ear()
-    ear.is_recording = True
-    ear._recording_from_hold = True
+    """Releasing the right mouse button stops recording via InputTrigger callbacks."""
+    import src.input.hotkeys as hotkeys_module
+    from src.input.hotkeys import InputTrigger
 
-    with patch.object(ear, "_stop_and_send") as mock_stop:
-        ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
+    # Use the actual button value that hotkeys.py compares against internally
+    right_button = getattr(hotkeys_module.mouse.Button, 'right', 'right')
 
-    assert ear._is_holding is False
+    mock_stop = Mock()
+    trigger = InputTrigger(
+        on_start_recording=Mock(),
+        on_stop_recording=mock_stop,
+        on_toggle_recording=Mock(),
+    )
+
+    with patch('src.input.hotkeys.time.time', return_value=0.0):
+        trigger._handle_mouse_click(0, 0, right_button, pressed=True)
+
+    with patch('src.input.hotkeys.time.time', return_value=1.1):
+        trigger.check_mouse_hold_threshold()  # starts recording
+
+    trigger._handle_mouse_click(0, 0, right_button, pressed=False)
     mock_stop.assert_called_once_with(stop_session=True)
 
 
 def test_key_release_finalizes_immediately_when_recording():
     """Right CMD release should finalize now (no extra silence wait)."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._cmd_press_time = time.time() - 1.0
 
@@ -259,7 +276,7 @@ def test_key_release_finalizes_immediately_when_recording():
 
 def test_quick_cmd_tap_enters_toggle_mode_without_stopping():
     """Short Right CMD tap should keep recording active and arm toggle mode."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._cmd_press_time = time.time()
 
@@ -273,7 +290,7 @@ def test_quick_cmd_tap_enters_toggle_mode_without_stopping():
 
 def test_second_cmd_press_stops_recording_when_toggle_active():
     """Second Right CMD press should stop an active toggle recording."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._toggle_active = True
 
@@ -287,7 +304,7 @@ def test_second_cmd_press_stops_recording_when_toggle_active():
 
 def test_key_release_does_nothing_when_toggle_already_active():
     """Releasing Right CMD should be ignored once toggle mode is active."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._toggle_active = True
 
@@ -300,7 +317,7 @@ def test_key_release_does_nothing_when_toggle_already_active():
 
 def test_stop_and_send_uses_no_streaming_path(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
 
     with patch.object(ear, "_stop_no_streaming") as mock_stop_no_streaming, \
@@ -313,7 +330,7 @@ def test_stop_and_send_uses_no_streaming_path(monkeypatch):
 
 def test_stop_and_send_uses_silence_streaming_path(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "silence_streaming")
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
 
     with patch.object(ear, "_stop_no_streaming") as mock_stop_no_streaming, \
          patch.object(ear, "_flush_current_chunk") as mock_flush:
@@ -325,7 +342,7 @@ def test_stop_and_send_uses_silence_streaming_path(monkeypatch):
 
 def test_silence_boundary_splits_chunk_while_recording_continues():
     """Test that a silence boundary sends a chunk but keeps recording active."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._total_frames = 8
 
@@ -408,7 +425,7 @@ def test_select_mic_returns_default_device_index_when_choice_is_blank(monkeypatc
 
 
 def test_flush_current_chunk_prepends_last_chunk_overlap_for_nonfinal_chunk():
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._current_session_id = "sess"
     ear._chunk_overlap_audio_bytes = 4
@@ -426,7 +443,7 @@ def test_flush_current_chunk_prepends_last_chunk_overlap_for_nonfinal_chunk():
 
 
 def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._current_session_id = "sess"
     ear._chunk_overlap_audio_bytes = 4
@@ -446,7 +463,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
 
 def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
 
     with patch.object(ear, "_stream_chunk_to_brain") as mock_stream:
@@ -457,7 +474,7 @@ def test_audio_callback_streams_chunks_in_no_streaming_mode(monkeypatch):
 
 def test_audio_callback_uses_boosted_audio_for_vad():
     """VAD should receive the boosted signal that's used for transcription."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear.gain_multiplier = 4.0
 
@@ -477,7 +494,7 @@ def test_audio_callback_uses_boosted_audio_for_vad():
 
 def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
 
     with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
          patch.object(ear, "_open_brain_stream", return_value=True) as mock_open, \
@@ -491,7 +508,7 @@ def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
 
 def test_flush_current_chunk_boosts_before_sending_to_brain():
     """Test that audio sent to Brain is boosted while VAD stays raw."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._total_frames = 4
     ear.gain_multiplier = 2.0
@@ -514,7 +531,7 @@ def test_flush_current_chunk_boosts_before_sending_to_brain():
 
 def test_flush_current_chunk_sends_commit_even_if_last_chunk_empty():
     """If final flush is empty, Ear must still commit already-sent chunks."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._current_session_id = "session123"
     gate = Mock()
@@ -534,7 +551,7 @@ def test_flush_current_chunk_sends_commit_even_if_last_chunk_empty():
 
 def test_audio_chunk_send_uses_session_header_and_sequence():
     """Test that Ear formats chunk payloads with session id and chunk sequence."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear._current_session_id = "session123"
     ear._chunk_seq = 7
 
@@ -576,7 +593,7 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
 
 def test_session_event_send_uses_json_payload_and_session_header():
     """Test that Ear formats telemetry events with session id and JSON payload."""
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear._telemetry_enabled = True
     ear._current_session_id = "session123"
 
@@ -624,78 +641,6 @@ def test_session_event_send_uses_json_payload_and_session_header():
     }
 
 
-def test_only_right_button_triggers_hold():
-    """Test that only right mouse button triggers hold logic."""
-    ear = Ear()
-
-    # Left button press should be ignored
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.left, pressed=True)
-    assert ear._is_holding is False
-
-    # Right button press should work
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
-    assert ear._is_holding is True
-
-
-def test_early_release_does_not_start_recording():
-    """Test that releasing before 1 second does not start recording."""
-    ear = Ear()
-
-    # Press and immediately release (< 1 second)
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
-    ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=False)
-
-    # Should not be recording
-    assert ear.is_recording is False
-    assert ear._recording_from_hold is False
-
-
-def test_hold_one_second_starts_recording():
-    """Test that holding for 1+ seconds starts recording."""
-    import time as time_module
-
-    ear = Ear()
-
-    # Mock the brain stream and other dependencies
-    with patch.object(ear, '_open_brain_stream', return_value=True):
-        with patch.object(ear, '_send_hud'):
-            with patch.object(ear, '_start_volume_sender'):
-                # Press mouse button
-                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
-
-                # Wait 1.1 seconds (exceeds 1.0s threshold)
-                time_module.sleep(1.1)
-
-                # Call the record loop tick (single iteration)
-                ear._record_loop_tick()
-
-                # Should have started recording
-                assert ear.is_recording is True, "is_recording should be True after 1.1s hold"
-                assert ear._recording_from_hold is True, "_recording_from_hold should be True"
-
-
-def test_hold_less_than_one_second_no_recording():
-    """Test that holding < 1 second does not start recording."""
-    import time as time_module
-
-    ear = Ear()
-
-    with patch.object(ear, '_open_brain_stream', return_value=True):
-        with patch.object(ear, '_send_hud'):
-            with patch.object(ear, '_start_volume_sender'):
-                # Press mouse button
-                ear.on_mouse_click(100, 100, sys.modules['pynput.mouse'].Button.right, pressed=True)
-
-                # Wait only 0.5 seconds (below threshold)
-                time_module.sleep(0.5)
-
-                # Call the record loop tick
-                ear._record_loop_tick()
-
-                # Should NOT have started recording
-                assert ear.is_recording is False, "is_recording should be False after 0.5s hold"
-                assert ear._recording_from_hold is False, "_recording_from_hold should be False"
-
 
 def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handlers(monkeypatch):
     import src.audio.ear_runtime.runtime as runtime_module
@@ -727,7 +672,9 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
         def _stop_and_send(self, stop_session):
             captured["stopped_with"] = stop_session
 
-        def record_loop(self):
+        def record_loop(self, input_trigger=None):
+            # record_loop now accepts input_trigger and would call
+            # input_trigger.check_mouse_hold_threshold() on each tick.
             raise KeyboardInterrupt
 
         def cleanup(self):
@@ -738,9 +685,6 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
 
         def on_release(self, _key):
             raise AssertionError("start_ear should not wire Ear.on_release")
-
-        def on_mouse_click(self, *_args):
-            raise AssertionError("start_ear should not wire Ear.on_mouse_click")
 
     class FakeMenu:
         def __init__(self, ear_instance=None):
@@ -786,7 +730,7 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
 
 def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "no_streaming")
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._chunk_started_at = time.time() - 2.0
     ear._utterance_gate = Mock()
@@ -802,7 +746,7 @@ def test_record_loop_tick_skips_silence_finalize_in_no_streaming_mode(monkeypatc
 def test_record_loop_tick_finalizes_on_silence_in_silence_streaming_mode(monkeypatch):
     monkeypatch.setattr("src.audio.ear_runtime.controller.RECORDING_MODE", "silence_streaming")
     monkeypatch.setattr("src.audio.ear_runtime.controller.MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING", 1.0)
-    ear = Ear()
+    ear = Ear(pyaudio_lib=FakePyAudio())
     ear.is_recording = True
     ear._chunk_started_at = time.time() - 2.0
     ear._utterance_gate = Mock()

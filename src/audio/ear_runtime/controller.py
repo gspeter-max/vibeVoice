@@ -42,7 +42,7 @@ from src.audio.ear_runtime.menu import (
     run_self_test as runtime_run_self_test,
     send_switch_command as runtime_send_switch_command,
 )
-from src.audio.ear_runtime.platform import (
+from src.audio.ear_runtime.system_audio import (
     enable_macos_voice_isolation,
     load_start_sound,
     play_start_sound,
@@ -194,8 +194,8 @@ class Ear:
     logical chunks. It coordinates with the Brain via sockets to send
     audio data and with the HUD to provide visual feedback to the user.
     """
-    def __init__(self, input_device_index=None):
-        self.pyaudio_library_for_capturing_audio = pyaudio.PyAudio()
+    def __init__(self, input_device_index=None, pyaudio_lib=None):
+        self.pyaudio_library_for_capturing_audio = pyaudio_lib or pyaudio.PyAudio()
         self.stream = None
         self.is_recording = False
         self._lock = threading.Lock()
@@ -225,11 +225,6 @@ class Ear:
         self._brain_sock = None
         self._brain_sock_lock = threading.Lock()
         self._telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
-
-        # ★ MOUSE CONTROL: Hold-to-record for voice activation
-        self._mouse_press_start_time = 0.0  # When mouse button was pressed
-        self._is_holding = False              # Currently holding mouse button
-        self._recording_from_hold = False     # Recording started from mouse hold
 
         self._chunk_speech_logged = False
         self._silence_pending_logged = False
@@ -824,40 +819,6 @@ class Ear:
             self._toggle_active = True
             log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
 
-    def on_mouse_click(self, x, y, button, pressed):
-        """
-        Handle mouse button press/release for hold-to-record recording control.
-        This allows the user to trigger recording using the Right Mouse Button.
-        Like the keyboard hotkey, it supports hold-to-record behavior, where
-        releasing the mouse button after a sustained hold will stop the
-        recording. This provides an alternative input method for users who
-        prefer using their mouse over keyboard shortcuts for voice activation.
-        """
-        # Only right button triggers hold logic (avoids text selection from left button)
-        if button != mouse.Button.right:
-            return
-
-        if pressed:
-            # MOUSE BUTTON PRESSED: Start hold timer
-            self._mouse_press_start_time = time.time()
-            self._is_holding = True
-            # No visual feedback during hold delay (silent wait)
-
-        else:
-            # MOUSE BUTTON RELEASED: Stop recording or cancel hold
-            self._is_holding = False
-
-            # Only stop if we started recording from this specific hold
-            if self._recording_from_hold:
-                # Check if actually recording before stopping
-                with self._lock:
-                    if not self.is_recording:
-                        self._recording_from_hold = False
-                        return
-                log.info("\r[Ear] ⏹️  Mouse released - finalizing now")
-                self._stop_and_send(stop_session=True)
-                self._recording_from_hold = False
-
     def _stop_and_send(self, *, stop_session: bool = True):
         """
         Unified method to stop recording and transmit the final data.
@@ -871,56 +832,39 @@ class Ear:
             return
         self._flush_current_chunk(stop_session=stop_session)
 
-    def record_loop(self):
+    def record_loop(self, input_trigger=None):
         """
         Main background loop that manages the active recording state.
-        This loop runs continuously while the Ear is active, checking for
-        mouse hold durations and updating the visual volume meter in the
-        terminal. It also monitors the VAD engine for silence timeouts to
-        automatically split speech into chunks during long dictation sessions.
+
+        Args:
+            input_trigger: The InputTrigger instance from hotkeys.py. When provided,
+                           each tick calls input_trigger.check_mouse_hold_threshold()
+                           to handle right-mouse-button hold-to-record activation.
         """
         while True:
             time.sleep(0.05)
-            self._record_loop_tick()
+            self._record_loop_tick(input_trigger=input_trigger)
 
-    def _record_loop_tick(self):
+    def _record_loop_tick(self, input_trigger=None):
         """
         Internal tick function called by the record loop to update state.
-        It checks if a mouse hold has reached the 1-second threshold to start
-        recording and handles the periodic logging of microphone levels.
-        In streaming mode, it also queries the VAD engine to see if a
-        silence threshold has been hit, triggering an automatic chunk split
-        to keep the transcription feedback fast and responsive.
+
+        Delegates mouse hold-to-record checking to InputTrigger, which is the
+        single source of truth for mouse button state. On every tick, if an
+        input_trigger is provided, it polls check_mouse_hold_threshold() to
+        see if the right mouse button has been held for >= 1 second.
+
+        Args:
+            input_trigger: Optional InputTrigger instance. When provided,
+                           mouse hold-to-record is active.
         """
         with self._lock:
             recording = self.is_recording
             rms = self.last_rms
 
-        # CHECK: Hold duration >= 1.0s → Start recording
-        # Read hold state with lock protection
-        with self._lock:
-            is_holding = self._is_holding
-            press_start_time = self._mouse_press_start_time
-
-        if is_holding and not recording:
-            hold_duration = time.time() - press_start_time
-
-            if hold_duration >= 1.0:
-                # Hold duration exceeded threshold - start recording
-                if self._is_no_streaming_mode():
-                    if not self._open_brain_stream():
-                        log.info("\r[Ear] ❌ Failed to open brain stream")
-                        with self._lock:
-                            self._is_holding = False
-                        return
-
-                self._start_recording_state(from_hold=True)
-
-                log.info("\r\n" + "─" * 50)
-                log.info(f"\r🎙️  RECORDING via MOUSE HOLD ({self.active_mic_name})")
-
-                threading.Thread(target=self._send_hud, args=("listen",), daemon=True).start()
-                self._start_volume_sender()
+        # Delegate mouse hold check to InputTrigger — it owns all mouse state.
+        if input_trigger is not None:
+            input_trigger.check_mouse_hold_threshold()
 
         # Display volume meter when recording
         if recording:
@@ -968,11 +912,6 @@ class Ear:
     def cleanup(self):
         """
         Performs a clean shutdown of all Ear resources.
-        It closes the microphone stream, terminates the PyAudio instance,
-        and ensures that any open network sockets to the Brain are
-        disconnected. This function is vital for preventing 'zombie'
-        processes or locked audio hardware when the user exits the
-        application using Ctrl+C or by closing the terminal window.
         """
         self._close_brain_stream()
         self._close_mic_stream()
