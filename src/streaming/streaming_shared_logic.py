@@ -362,42 +362,6 @@ def analyze_duplicate_chunk_prefix(
     return result
 
 
-def remove_duplicate_chunk_prefix(
-    last_chunk_text: str,
-    current_chunk_text: str,
-    *,
-    max_overlap_words: int = 15,
-) -> str:
-    """
-    This is the main function that prevents words from appearing twice 
-    in your transcript. 
-    
-    It compares the END of the previous text with the START of the new text.
-    If it finds a match, it removes the repeated words from the new text.
-    
-    Step-by-step:
-    1. Break both texts into cleaned words.
-    2. Look for the largest possible match (up to 15 words).
-    3. If the last 15 words of the old text match the first 15 of the new text, 
-       delete those 15 from the new text.
-    4. If not, try 14 words, then 13, then 12... down to 2.
-    5. If a match is found, return the new text without those words.
-    """
-    analysis = analyze_duplicate_chunk_prefix(
-        last_chunk_text,
-        current_chunk_text,
-        max_overlap_words=max_overlap_words,
-    )
-    if analysis.trim_applied:
-        log.debug(
-            "[Dedup] trimmed overlap",
-            removed_count=analysis.overlap_word_count,
-            score=round(analysis.combined_score, 4),
-            last_chunk_words=len(split_text_into_comparable_words(last_chunk_text)),
-            current_words=len(split_text_into_comparable_words(current_chunk_text)),
-            result_words=len(split_text_into_comparable_words(analysis.cleaned_text)),
-        )
-    return analysis.cleaned_text
 
 
 def normalize_text_for_word_error_rate(text: str) -> str:

@@ -9,6 +9,7 @@ from src.streaming.streaming_shared_logic import (
     DEFAULT_SILENCE_TIMEOUT_SECONDS,
     DEFAULT_VAD_ENERGY_THRESHOLD,
     DEFAULT_VAD_SCORE_THRESHOLD,
+    analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,
 )
 
@@ -21,7 +22,6 @@ from evaluation.parakeet_v2_streaming_evaluation import (
     load_selected_dataset_items_audio_and_reference_text,
     load_pcm16k_audio_array_from_audio_feature_value,
     main,
-    remove_repeated_words_from_current_chunk_text,
     resolve_dataset_config_name_to_load,
     run_fake_microphone_stream_for_one_dataset_item,
     save_streaming_evaluation_run_to_json_file,
@@ -55,14 +55,26 @@ def test_add_last_chunk_overlap_to_current_chunk_audio():
     assert next_overlap_audio == b"\x05\x00\x06\x00"
 
 
-def test_remove_repeated_words_from_current_chunk_text():
-    cleaned_text = remove_repeated_words_from_current_chunk_text(
+def test_analyze_duplicate_chunk_prefix_removes_repeated_words_from_current_chunk():
+    """
+    Verify that analyze_duplicate_chunk_prefix removes overlapping words
+    from the start of the new chunk when they match the end of the last chunk.
+
+    This is the single source of truth for dedup — no wrapper needed.
+
+    Example:
+      last chunk ends with:    "things are happening fine"
+      current chunk starts with: "things are happening fine and doing H3 grid"
+      Result should be:        "and doing H3 grid"
+    """
+    result = analyze_duplicate_chunk_prefix(
         last_chunk_text="things are happening fine",
         current_chunk_text="things are happening fine and doing H3 grid",
         max_overlap_words=8,
     )
 
-    assert cleaned_text == "and doing H3 grid"
+    assert result.cleaned_text == "and doing H3 grid"
+    assert result.trim_applied is True
 
 
 def test_calculate_word_error_rate_for_final_streaming_text():
