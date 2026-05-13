@@ -134,6 +134,11 @@ def test_input_trigger_mouse_hold_logic():
     """
     Verifies that holding the right mouse button for 1 second triggers recording.
     """
+    import src.input.hotkeys as hotkeys_module
+    # Use the actual button value from the hotkeys module so the comparison
+    # inside _handle_mouse_click works regardless of pynput version.
+    right_button = getattr(hotkeys_module.mouse.Button, 'right', 'right')
+
     mock_start = MagicMock()
     mock_stop = MagicMock()
     trigger = InputTrigger(
@@ -142,22 +147,18 @@ def test_input_trigger_mouse_hold_logic():
         on_toggle_recording=MagicMock()
     )
     
-    # Simulate Right Mouse Press
-    with patch('time.time', return_value=10.0):
-        trigger._handle_mouse_click(0, 0, 'right', pressed=True)
+    with patch('src.input.hotkeys.time.time', return_value=10.0):
+        trigger._handle_mouse_click(0, 0, right_button, pressed=True)
         
-    # Check threshold at 10.5s (not long enough)
-    with patch('time.time', return_value=10.5):
+    with patch('src.input.hotkeys.time.time', return_value=10.5):
         assert trigger.check_mouse_hold_threshold() is False
         mock_start.assert_not_called()
         
-    # Check threshold at 11.1s (long enough!)
-    with patch('time.time', return_value=11.1):
+    with patch('src.input.hotkeys.time.time', return_value=11.1):
         assert trigger.check_mouse_hold_threshold() is True
         mock_start.assert_called_once_with(from_hold=True)
         
-    # Release mouse
-    trigger._handle_mouse_click(0, 0, 'right', pressed=False)
+    trigger._handle_mouse_click(0, 0, right_button, pressed=False)
     mock_stop.assert_called_once_with(stop_session=True)
 
 def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkeypatch):

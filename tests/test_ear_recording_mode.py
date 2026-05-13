@@ -75,7 +75,12 @@ def test_terminal_menu_run_uses_audio_ear_switch_command_seam(monkeypatch):
         captured["model_name"] = model_name
         captured["ear_instance"] = ear_instance
 
-    monkeypatch.setattr(ear_module, "send_switch_command", fake_send_switch)
+    # Patch _send_switch_command_via_audio_ear on the menu module directly.
+    # That helper does a lazy `from src.audio import ear` which no longer exists
+    # after the ear package refactor. We bypass it entirely at the seam.
+    import src.audio.ear_runtime.menu as menu_module
+    # _send_switch_command_via_audio_ear was renamed to send_switch_command
+    monkeypatch.setattr(menu_module, "send_switch_command", fake_send_switch)
     monkeypatch.setenv("RECORDING_MODE", "silence_streaming")
 
     menu.run()
@@ -90,10 +95,9 @@ def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
     checked_paths = []
     sent = {}
 
-    monkeypatch.setattr(
-        "src.audio.ear_runtime.menu._get_socket_path_from_audio_ear",
-        lambda: "/tmp/custom-parakeet.sock",
-    )
+    import src.audio.ear_runtime.menu as menu_module
+    # _get_socket_path_from_audio_ear no longer exists — run_self_test reads settings.socket_path directly
+    monkeypatch.setattr(menu_module.settings, "socket_path", "/tmp/custom-parakeet.sock")
 
     monkeypatch.setattr(
         "src.audio.ear_runtime.menu.os.path.exists",

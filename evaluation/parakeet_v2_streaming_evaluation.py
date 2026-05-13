@@ -438,8 +438,6 @@ def run_fake_microphone_stream_for_one_dataset_item(
                 parakeet_v2_model,
                 overlap_application_result.overlapped_audio_bytes,
             )
-            # Use analyze_ directly — it is the single source of truth.
-            # .cleaned_text gives us the deduplicated string we need.
             cleaned_chunk_text_after_dedup = analyze_duplicate_chunk_prefix(
                 last_chunk_text,
                 raw_chunk_text_with_overlap,
@@ -489,8 +487,6 @@ def run_fake_microphone_stream_for_one_dataset_item(
             parakeet_v2_model,
             final_overlap_application_result.overlapped_audio_bytes,
         )
-        # Use analyze_ directly — it is the single source of truth.
-        # .cleaned_text gives us the deduplicated string we need.
         cleaned_final_chunk_text_after_dedup = analyze_duplicate_chunk_prefix(
             last_chunk_text,
             raw_final_chunk_text_with_overlap,

@@ -75,7 +75,7 @@ def start_ear():
     log.info("Ready. Press hotkey to record.")
 
     try:
-        ear.record_loop()
+        ear.record_loop(input_trigger=input_trigger)
     except KeyboardInterrupt:
         log.info("\r\n\nShutting down Ear...")
     finally:

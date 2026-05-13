@@ -57,21 +57,17 @@ def save_to_env(key: str, value: str) -> None:
 
 def check_and_ask_for_api_key(provider_name: str, env_var_name: str) -> None:
     """
-    Checks if an API key exists. If missing and interactive, prompts user.
+    Checks if an API key exists. If missing and interactive, prompts user to enter it.
     """
-    # 1. Check environment/env file logic
+    from dotenv import load_dotenv
+
+    # load_dotenv is idempotent — safe to call repeatedly, won't overwrite real os.environ values.
+    load_dotenv()
+
     if os.environ.get(env_var_name):
         return
 
-    if os.path.exists(".env"):
-        with open(".env", "r") as env_file:
-            for line in env_file:
-                if line.startswith(f"{env_var_name}="):
-                    value = line.strip().split("=", 1)[1]
-                    os.environ[env_var_name] = value
-                    return
-
-    # 2. Key is missing. Check if we can actually ask the user.
+    # Key is missing — check if we can prompt the user.
     if not is_interactive():
         console.print(f"[bold red]❌ API key missing for {provider_name} and no terminal detected to ask.[/bold red]")
         return

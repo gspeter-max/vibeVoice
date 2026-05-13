@@ -14,8 +14,7 @@ All mocks here use mock_engine with is_stateful() and transcribe_chunk() methods
 
 from unittest.mock import MagicMock, patch
 import pytest
-
-import src.backend.brain as brai
+import src.backend.brain as brain
 import src.backend.state as state
 
 

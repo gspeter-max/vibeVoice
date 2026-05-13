@@ -4,7 +4,7 @@ test_brain_nemotron.py — Tests for the Nemotron (stateful) engine path in brai
 After Phase 2 wiring, brain.py uses the TranscriptionEngine interface.
 These tests verify that:
   - load_transcription_engine returns a single NemotronEngine for nemotron models
-  - _handle_audio_chunk correctly calls engine.transcribe_chunk() for stateful engines
+  - handle_streaming_audio_chunk correctly calls engine.transcribe_chunk() for stateful engines
   - _finalize_recording_if_ready always calls engine.clear_internal_memory()
 """
 
@@ -28,9 +28,9 @@ def test_brain_routes_to_nemotron():
 
 @patch.object(brain, "_get_or_create_session")
 @patch.object(brain, "_normalize_audio")
-def test_handle_audio_chunk_uses_transcribe_chunk_for_stateful_engine(mock_norm, mock_get_session):
+def test_handle_streaming_audio_chunk_uses_transcribe_chunk_for_stateful_engine(mock_norm, mock_get_session):
     """
-    Verify that _handle_audio_chunk calls engine.transcribe_chunk() for a stateful engine,
+    Verify that handle_streaming_audio_chunk calls engine.transcribe_chunk() for a stateful engine,
     and stores the full cumulative text in transcript_parts[0].
     """
     mock_norm.return_value = np.zeros(1600)
@@ -49,7 +49,7 @@ def test_handle_audio_chunk_uses_transcribe_chunk_for_stateful_engine(mock_norm,
     mock_rec.transcript_parts = {}
     mock_session.get_or_create_recording.return_value = mock_rec
 
-    brain._handle_audio_chunk("session1", 0, 0, b'\x00\x00' * 1600)
+    brain.handle_streaming_audio_chunk("session1", 0, 0, b'\x00\x00' * 1600)
 
     # The engine must have been asked to transcribe once
     mock_engine.transcribe_chunk.assert_called_once()

@@ -6,14 +6,10 @@ constructing the full microphone runtime.
 """
 
 from __future__ import annotations
-
 import math
 import struct
-
 import numpy as np
-
 from src import log
-
 
 def get_rms(audio_block_bytes: bytes) -> float:
     """Measure the root-mean-square loudness of one PCM-16 audio block.
@@ -23,7 +19,7 @@ def get_rms(audio_block_bytes: bytes) -> float:
     range, and returns the RMS value as one stable loudness number.
     """
 
-    sample_count = len(audio_block_bytes) // 2
+    sample_count = len(audio_block_bytes) // 2 # 16-bit audio sample is 2 bytes, so we divide by 2 to get the number of samples
     pcm_samples = struct.unpack(f"{sample_count}h", audio_block_bytes[: sample_count * 2])
     if not pcm_samples:
         return 0.0

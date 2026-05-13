@@ -15,25 +15,7 @@ import numpy as np
 from src import log
 from src.ipc.client import send_message_to_brain
 from src.ipc.protocol import format_switch_model_message
-
-
-def _get_socket_path_from_audio_ear() -> str:
-    """Read the compatibility socket path from `src.audio.ear` at call time."""
-
-    from src.audio import ear as ear_module
-
-    return ear_module.SOCKET_PATH
-
-
-def _send_switch_command_via_audio_ear(
-    model_name: str,
-    ear_instance=None,
-) -> None:
-    """Route menu-driven switching through the compatibility seam in `src.audio.ear`."""
-
-    from src.audio import ear as ear_module
-
-    ear_module.send_switch_command(model_name, ear_instance)
+from src.utils.settings import settings
 
 
 def send_switch_command(model_name, ear_instance=None):
@@ -45,7 +27,7 @@ def send_switch_command(model_name, ear_instance=None):
 
     sent = send_message_to_brain(
         format_switch_model_message(model_name),
-        socket_path=_get_socket_path_from_audio_ear(),
+        socket_path=settings.socket_path,
     )
     if not sent:
         log.info("\n❌ Failed to send switch command\n")
@@ -69,9 +51,8 @@ def run_self_test(sample_rate: int = 16000):
 
     max_retries = 3
     retry_delay_seconds = 1
-    socket_path = _get_socket_path_from_audio_ear()
     for attempt_index in range(max_retries):
-        if not os.path.exists(socket_path):
+        if not os.path.exists(settings.socket_path):
             if attempt_index < max_retries - 1:
                 log.info(
                     f"\r⏳ Socket not ready, retrying in {retry_delay_seconds}s... "
@@ -79,11 +60,11 @@ def run_self_test(sample_rate: int = 16000):
                 )
                 time.sleep(retry_delay_seconds)
                 continue
-            log.info(f"\r❌ Self-test failed: Socket not found at {socket_path}\n")
+            log.info(f"\r❌ Self-test failed: Socket not found at {settings.socket_path}\n")
             log.info("   Is Brain running? Check this terminal for Brain output.\n")
             return
 
-        if send_message_to_brain(audio_data, socket_path=socket_path):
+        if send_message_to_brain(audio_data, socket_path=settings.socket_path):
             log.info("\r✅ Self-test audio sent to Brain\n")
             return
 
@@ -128,7 +109,7 @@ class TerminalMenu(threading.Thread):
                         choice_index = int(pressed_key) - 1
                         active_models = _get_active_models_for_menu()
                         if choice_index < len(active_models):
-                            _send_switch_command_via_audio_ear(
+                            send_switch_command(
                                 active_models[choice_index],
                                 self.ear,
                             )

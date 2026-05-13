@@ -4,38 +4,33 @@ from unittest.mock import patch, MagicMock, mock_open
 import pytest
 from src.utils.env_manager import check_and_ask_for_api_key
 
+@patch("src.utils.env_manager.is_interactive", return_value=True)
 @patch("src.utils.env_manager.Prompt.ask")
-def test_check_and_ask_for_api_key_when_missing(mock_ask):
+@patch("dotenv.load_dotenv")  # Patch __init__ export — that is what 'from dotenv import load_dotenv' resolves to
+def test_check_and_ask_for_api_key_when_missing(mock_load_dotenv, mock_ask, mock_is_interactive):
     """
     Test that the function asks for the API key if it is missing 
     and writes it to the .env file.
     """
-    # 1. Setup: API key is not in environment
     mock_ask.return_value = "secret_key_123"
     
-    # 2. Mock the file opening and environment
     m = mock_open()
     with patch.dict("os.environ", {}, clear=False):
-        # Ensure the key is NOT there
         if "GROQ_API_KEY" in os.environ:
             del os.environ["GROQ_API_KEY"]
             
         with patch("builtins.open", m):
             with patch("os.path.exists", return_value=False):
-                # 3. Call the function
                 check_and_ask_for_api_key("Groq", "GROQ_API_KEY")
         
-    # 4. Check that it asked the user
     mock_ask.assert_called_once()
-    
-    # 5. Check that it tried to write to .env
-    # It should open in 'a' (append) mode
-    m.assert_called_with(".env", "a")
-    handle = m()
-    handle.write.assert_called()
-    
-    # Check that the written string contains the key and value
-    written_data = "".join(call.args[0] for call in handle.write.call_args_list)
+    m.assert_called_with(".env", "w")
+
+    file_handle = m.return_value.__enter__.return_value
+    file_handle.writelines.assert_called()
+
+    written_lines = file_handle.writelines.call_args[0][0]
+    written_data = "".join(written_lines)
     assert "GROQ_API_KEY=secret_key_123" in written_data
 
 def test_check_and_ask_for_api_key_when_exists():

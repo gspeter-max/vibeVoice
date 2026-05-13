@@ -17,8 +17,7 @@ def test_telemetry_disabled_fast_return(monkeypatch):
     Verify that if telemetry is disabled, getting a recorder returns None instantly.
     """
     import src.backend.data_record.telemetry as telemetry
-    monkeypatch.setattr(telemetry, "STREAMING_TELEMETRY_ENABLED", False)
-    # Should return None immediately without errors
+    monkeypatch.setattr(telemetry.settings, "streaming_telemetry_enabled", False)
     assert telemetry._telemetry_recorder_for_session("test_sess") is None
 
 def test_model_name_for_telemetry_missing_engine():

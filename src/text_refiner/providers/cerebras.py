@@ -1,5 +1,6 @@
 """
 This file handles sending text to the Cerebras API.
+We use gpt-oss-120b — OpenAI's open-weight 120B reasoning model running on Cerebras hardware.
 We use this as our first backup if Groq is not working.
 """
 import os
@@ -27,9 +28,8 @@ def call_cerebras(client: httpx.Client, raw_text: str) -> str:
         "Content-Type": "application/json"
     }
     
-    # 3. Create the message package
     message_package = {
-        "model": "llama-3.3-70b",
+        "model": "llama3.1-8b",
         "messages": [
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
             {"role": "user", "content": refine_user_prompt(raw_text)}

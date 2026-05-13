@@ -8,6 +8,7 @@ This file should have no dependencies on other ear_runtime modules.
 import os
 import pyaudio
 from src.utils.env_utils import get_float_from_environment
+from src.utils.settings import settings
 from src.streaming.streaming_shared_logic import (
     DEFAULT_ENERGY_RATIO,
     DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
@@ -38,10 +39,10 @@ CHUNK = 1024
 """Number of audio frames per buffer chunk."""
 
 # ── Recording Modes ──────────────────────────────────────────────────────────
-BACKEND = os.environ.get("BACKEND", "parakeet")
+BACKEND = settings.backend
 """The transcription backend to use (e.g., 'parakeet', 'nemotron')."""
 
-RECORDING_MODE = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
+RECORDING_MODE = settings.recording_mode
 """
 The send style for audio data:
 - 'no_streaming': send raw audio and let Brain wait for socket close.

@@ -1,6 +1,6 @@
 """
 This file handles sending text to the NVIDIA NIM API.
-We use the Nemotron-70B model — NVIDIA's instruction-tuned Llama 3.1.
+We use the Nemotron Super 49B V1 model — NVIDIA's instruction-tuned Llama 3.3.
 NVIDIA NIM is OpenAI-compatible, so we use the same httpx pattern
 as our other providers — no new SDK dependency needed.
 """
@@ -11,9 +11,9 @@ from src.text_refiner.prompts.cleaner_prompt import SYSTEM_CLEANUP_INSTRUCTION, 
 
 def call_nvidia(client: httpx.Client, raw_text: str) -> str:
     """
-    Send the raw text to NVIDIA NIM (Nemotron-70B) to fix grammar and spelling.
+    Send the raw text to NVIDIA NIM (Nemotron Super 49B V1) to fix grammar and spelling.
 
-    Nemotron is NVIDIA's instruction-tuned version of Llama 3.1.
+    Nemotron Super 49B is NVIDIA's instruction-tuned version of Llama 3.3.
     It follows instructions precisely — ideal for our grammar cleanup task.
 
     Args:
@@ -39,10 +39,10 @@ def call_nvidia(client: httpx.Client, raw_text: str) -> str:
         "Content-Type": "application/json",
     }
 
-    # 3. Build the request body for Nemotron-70B
+    # 3. Build the request body for Nemotron Super 49B V1
     #    - stream: False → we want one full response, not chunks
     message_package = {
-        "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "model": "nvidia/llama-3.3-nemotron-super-49b-v1",
         "messages": [
             {"role": "system", "content": SYSTEM_CLEANUP_INSTRUCTION},
             {"role": "user", "content": refine_user_prompt(raw_text)},

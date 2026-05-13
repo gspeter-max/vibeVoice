@@ -16,15 +16,7 @@ from src.backend.state import (
     backend_info, session_store, session_store_lock, SessionState
 )
 
-# Constants
-BACKEND = os.environ.get("BACKEND", "parakeet").lower().strip()
-RECORDING_MODE = os.environ.get("RECORDING_MODE", "silence_streaming").strip().lower()
-STREAMING_TELEMETRY_ENABLED = (
-    os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
-)
-STREAMING_TELEMETRY_DIR = Path(
-    os.environ.get("STREAMING_TELEMETRY_DIR", "logs/streaming_sessions")
-)
+from src.utils.settings import settings
 
 
 @dataclass
@@ -192,10 +184,10 @@ def _telemetry_seed() -> dict:
     telemetry file that documents the exact settings and hardware state for debugging.
     """
     return {
-        "recording_mode": RECORDING_MODE,
-        "backend": BACKEND,
+        "recording_mode": settings.recording_mode,
+        "backend": settings.backend,
         "model": _model_name_for_telemetry(),
-        "telemetry_enabled": STREAMING_TELEMETRY_ENABLED,
+        "telemetry_enabled": settings.streaming_telemetry_enabled,
         "flags": {
             "vad_no_speech_warning_seen": False,
             "dedup_trim_applied": False,
@@ -224,7 +216,7 @@ def _telemetry_recorder_for_session(
     ensuring that a session state object exists to hold the recorder. This acts
     as a centralized factory for managing logging objects during streaming.
     """
-    if not STREAMING_TELEMETRY_ENABLED:
+    if not settings.streaming_telemetry_enabled:
         return None
 
     with session_store_lock:
@@ -234,7 +226,7 @@ def _telemetry_recorder_for_session(
 
         recorder = StreamingSessionTelemetryRecorder(
             session_id=session_id,
-            output_dir=STREAMING_TELEMETRY_DIR,
+            output_dir=settings.streaming_telemetry_dir,
             summary_seed=_telemetry_seed(),
         )
         if session is None:

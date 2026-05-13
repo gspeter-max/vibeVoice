@@ -168,7 +168,8 @@ class WizardApp(App):
     def __init__(self):
         super().__init__()
         # 1. AI Provider State
-        self.selected_provider_index = int(os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0"))
+        raw_provider_index = int(os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0"))
+        self.selected_provider_index = min(raw_provider_index, len(PROVIDERS) - 1)
         self.api_keys = {
             p["env_var"]: os.environ.get(p["env_var"], "") 
             for p in PROVIDERS
