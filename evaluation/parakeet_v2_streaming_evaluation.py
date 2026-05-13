@@ -13,9 +13,9 @@ from src.streaming.streaming_shared_logic import (
     DEFAULT_SILENCE_TIMEOUT_SECONDS,
     DEFAULT_VAD_ENERGY_THRESHOLD,
     DEFAULT_VAD_SCORE_THRESHOLD,
+    analyze_duplicate_chunk_prefix,
     apply_last_chunk_overlap,
     normalize_text_for_word_error_rate,
-    remove_duplicate_chunk_prefix,
     should_split_chunk_after_silence,
 )
 
@@ -223,17 +223,6 @@ def split_text_into_comparable_words(text: str) -> list[str]:
     return [word for word in text.strip().split() if word]
 
 
-def remove_repeated_words_from_current_chunk_text(
-    last_chunk_text: str,
-    current_chunk_text: str,
-    *,
-    max_overlap_words: int = 8,
-) -> str:
-    return remove_duplicate_chunk_prefix(
-        last_chunk_text,
-        current_chunk_text,
-        max_overlap_words=max_overlap_words,
-    )
 
 
 def transcribe_one_audio_chunk(
@@ -449,11 +438,13 @@ def run_fake_microphone_stream_for_one_dataset_item(
                 parakeet_v2_model,
                 overlap_application_result.overlapped_audio_bytes,
             )
-            cleaned_chunk_text_after_dedup = remove_duplicate_chunk_prefix(
+            # Use analyze_ directly — it is the single source of truth.
+            # .cleaned_text gives us the deduplicated string we need.
+            cleaned_chunk_text_after_dedup = analyze_duplicate_chunk_prefix(
                 last_chunk_text,
                 raw_chunk_text_with_overlap,
                 max_overlap_words=max_overlap_words,
-            )
+            ).cleaned_text
             chunk_duration_seconds_before_overlap = len(raw_chunk_audio) / 2 / DEFAULT_SAMPLE_RATE
             chunk_events.append(
                 build_chunk_event(
@@ -498,11 +489,13 @@ def run_fake_microphone_stream_for_one_dataset_item(
             parakeet_v2_model,
             final_overlap_application_result.overlapped_audio_bytes,
         )
-        cleaned_final_chunk_text_after_dedup = remove_duplicate_chunk_prefix(
+        # Use analyze_ directly — it is the single source of truth.
+        # .cleaned_text gives us the deduplicated string we need.
+        cleaned_final_chunk_text_after_dedup = analyze_duplicate_chunk_prefix(
             last_chunk_text,
             raw_final_chunk_text_with_overlap,
             max_overlap_words=max_overlap_words,
-        )
+        ).cleaned_text
         chunk_duration_seconds_before_overlap = len(final_chunk_audio) / 2 / DEFAULT_SAMPLE_RATE
         final_chunk_age_seconds = 0.0
         if chunk_started_at_seconds is not None:
