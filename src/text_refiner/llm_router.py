@@ -4,12 +4,9 @@ This file is the main door to all AI text cleaners.
 It holds one internet connection open to save time.
 It tries different AI companies in order so we never fail.
 """
+import os
 import httpx
-from typing import Optional
-from src.text_refiner.providers.groq import call_groq
-from src.text_refiner.providers.cerebras import call_cerebras
-# NVIDIA and Together AI removed — NVIDIA model was deprecated, Together AI key is missing.
-# Provider files are kept in /providers/ in case they are needed again later.
+from src.text_refiner.providers.generic_openai_provider import call_openai_compatible_api
 
 from src import log
 from src.utils.env_manager import check_and_ask_for_api_key
@@ -20,15 +17,17 @@ from src.utils.env_manager import check_and_ask_for_api_key
 PROVIDERS = [
     {
         "name": "Groq",
-        "call": call_groq,
         "env_var": "GROQ_API_KEY",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "model": "llama-3.3-70b-versatile",
         "description": "Fastest Performance",
         "feature": "Ultra-low latency"
     },
     {
         "name": "Cerebras",
-        "call": call_cerebras,
         "env_var": "CEREBRAS_API_KEY",
+        "url": "https://api.cerebras.ai/v1/chat/completions",
+        "model": "llama3.1-8b",
         "description": "Fast Backup",
         "feature": "Llama 3.1 8B on Cerebras hardware"
     },
@@ -46,7 +45,7 @@ def set_primary_provider(index: int) -> None:
     Sets which AI provider we should try to use first.
     
     Args:
-        index: The position in the PROVIDERS list (0, 1, or 2).
+        index: The position in the PROVIDERS list (0 or 1).
     """
     global current_provider_index
     if 0 <= index < len(PROVIDERS):
@@ -74,16 +73,27 @@ def refine_text_with_fallbacks(raw_text: str) -> str:
     # 2. Get the current provider info
     provider = PROVIDERS[current_provider_index]
     provider_name = provider["name"]
-    provider_function = provider["call"]
     provider_env_var = provider["env_var"]
 
     # 3. Try to clean the text
     try:
-        # Guarantee that we have an API key before calling
+        # Guarantee that we have an API key before calling.
+        # check_and_ask_for_api_key ensures the key is present in os.environ.
         check_and_ask_for_api_key(provider_name, provider_env_var)
         
         log.info(f"LLM Router: Using {provider_name} for cleanup.")
-        return provider_function(global_http_client, raw_text)
+        
+        # We read directly from os.environ to ensure we get the latest key
+        # if it was added during runtime.
+        api_key = os.environ.get(provider_env_var, "")
+        
+        return call_openai_compatible_api(
+            client=global_http_client,
+            api_key=api_key,
+            url=provider["url"],
+            model=provider["model"],
+            raw_text=raw_text
+        )
     except Exception as error:
         # 4. If it fails (timeout, network, or key), we rotate to the next provider
         current_provider_index = (current_provider_index + 1) % len(PROVIDERS)
