@@ -1,4 +1,3 @@
-import pytest
 from PySide6.QtGui import QColor
 from src.ui.theme_manager import ThemeManager, THEME_ORIGINAL
 

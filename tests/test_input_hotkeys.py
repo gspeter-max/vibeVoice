@@ -1,7 +1,4 @@
 # tests/test_input_hotkeys.py
-import pytest
-import time
-import threading
 from unittest.mock import MagicMock, patch
 from src.input.hotkeys import InputTrigger, _is_right_cmd
 

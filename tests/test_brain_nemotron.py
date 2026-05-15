@@ -8,7 +8,6 @@ These tests verify that:
   - _finalize_recording_if_ready always calls engine.clear_internal_memory()
 """
 
-import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
 import src.backend.brain as brain
@@ -72,7 +71,8 @@ def test_finalize_recording_if_ready_always_clears_engine_memory(mock_paste, moc
 
     # Build a real SessionState with the engine
     session = brain.SessionState(engine=mock_engine)
-    mock_rec = brain.RecordingState()
+    import src.backend.state as state
+    mock_rec = state.RecordingState()
     mock_rec.finalized = False
     mock_rec.closed = True
     mock_rec.done_count = 1

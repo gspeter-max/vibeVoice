@@ -1,7 +1,6 @@
 # tests/test_env_manager.py
 import os
-from unittest.mock import patch, MagicMock, mock_open
-import pytest
+from unittest.mock import patch, mock_open
 from src.utils.env_manager import check_and_ask_for_api_key
 
 @patch("src.utils.env_manager.is_interactive", return_value=True)

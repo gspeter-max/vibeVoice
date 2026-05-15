@@ -200,7 +200,7 @@ def test_check_if_brain_program_is_running_from_file_avoids_stale_files(tmp_path
         
         # Test should fail because the process is not alive, even though file exists
         result = verify_startup.check_if_brain_program_is_running_from_file(timeout_seconds=0.1, pid_path=str(pid_file))
-        assert result == False
+        assert not result
 
 def test_check_if_brain_program_is_running_fails_fast_on_main_crash():
     """
@@ -213,7 +213,7 @@ def test_check_if_brain_program_is_running_fails_fast_on_main_crash():
     verify_startup.main_app_process = mock_process
     
     result = verify_startup.check_if_brain_program_is_running_from_file(timeout_seconds=10)
-    assert result == False
+    assert not result
 
 def test_check_if_brain_program_is_ready_to_receive_data_timeout():
     """
@@ -225,7 +225,7 @@ def test_check_if_brain_program_is_ready_to_receive_data_timeout():
     
     with patch('os.path.exists', return_value=False):
         result = verify_startup.check_if_brain_program_is_ready_to_receive_data(timeout_seconds=0.1)
-        assert result == False
+        assert not result
 
 
 # -----------------------------------------------------------------------------
@@ -244,7 +244,7 @@ def test_check_if_hud_display_program_is_ready_to_receive_data_refused():
         mock_instance.connect.side_effect = ConnectionRefusedError
         
         result = verify_startup.check_if_hud_display_program_is_ready_to_receive_data(timeout_seconds=0.1)
-        assert result == False
+        assert not result
 
 def test_send_fake_audio_to_brain_and_see_if_it_survives_success():
     """
@@ -256,7 +256,7 @@ def test_send_fake_audio_to_brain_and_see_if_it_survives_success():
         with patch('time.sleep'):
             with patch('verify_startup.check_if_brain_program_is_running_from_file', return_value=True):
                 result = verify_startup.send_fake_audio_to_brain_and_see_if_it_survives()
-                assert result == True
+                assert result
 
 def test_send_fake_command_to_hud_and_see_if_it_survives_crashes():
     """
@@ -268,4 +268,4 @@ def test_send_fake_command_to_hud_and_see_if_it_survives_crashes():
         with patch('time.sleep'):
             with patch('verify_startup.check_if_hud_display_program_is_running_from_file', return_value=False):
                 result = verify_startup.send_fake_command_to_hud_and_see_if_it_survives()
-                assert result == False
+                assert not result

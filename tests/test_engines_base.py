@@ -8,7 +8,7 @@ def test_engine_interface_requires_is_stateful_method():
     
     with pytest.raises(TypeError) as exc_info:
         # Should fail because it doesn't implement abstract methods
-        engine = BadEngine()
+        BadEngine()
     
     error_message = str(exc_info.value)
     assert "Can't instantiate abstract class" in error_message

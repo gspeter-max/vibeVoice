@@ -1,6 +1,4 @@
-import logging
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import patch
 import src.ui.hud as hud
 
 def test_hud_logs_interface_commands(capsys):
@@ -11,13 +9,13 @@ def test_hud_logs_interface_commands(capsys):
     """
     from PySide6.QtWidgets import QApplication
     import sys
-    app = QApplication.instance() or QApplication(sys.argv)
+    QApplication.instance() or QApplication(sys.argv)
 
-    with patch("src.ui.hud.RoundedRectangularIndicatorWidget") as MockWidget:
+    with patch("src.ui.hud.RoundedRectangularIndicatorWidget"):
         controller = hud.OscillatingInterfaceController()
         
         # Test 'listen' command
-        with patch("src.ui.hud.logging") as mock_logging:
+        with patch("src.ui.hud.logging"):
             # We check if it doesn't crash and updates state
             controller.on_interface_command("listen", 0.5)
             assert controller.widget.update_interface_state.called

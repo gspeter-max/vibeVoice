@@ -1,5 +1,4 @@
 import sys
-import pytest
 
 def test_state_independent_of_brain():
     """

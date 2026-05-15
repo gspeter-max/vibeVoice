@@ -18,24 +18,7 @@ import src.backend.brain as brain
 import src.backend.state as state
 
 
-class MockConn:
-    """
-    A fake socket connection used in tests.
-    It returns audio chunks one at a time, and returns an empty
-    bytes object at the end to signal that the connection is closed.
-    """
-    def __init__(self, *chunks):
-        # Store the chunks and add an empty bytes sentinel at the end
-        self._chunks = list(chunks) + [b""]
-
-    def settimeout(self, _timeout):
-        return None
-
-    def recv(self, _size):
-        return self._chunks.pop(0)
-
-    def close(self):
-        return None
+from tests.conftest import MockConn
 
 
 @pytest.fixture(autouse=True)

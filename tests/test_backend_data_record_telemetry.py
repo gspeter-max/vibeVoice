@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import MagicMock
 
 def test_telemetry_independent_of_brain():
     """
@@ -9,7 +7,6 @@ def test_telemetry_independent_of_brain():
     import sys
     if "src.backend.brain" in sys.modules:
         del sys.modules["src.backend.brain"]
-    import src.backend.data_record.telemetry as telemetry
     assert "src.backend.brain" not in sys.modules
 
 def test_telemetry_disabled_fast_return(monkeypatch):

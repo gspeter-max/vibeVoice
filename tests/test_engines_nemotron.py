@@ -1,10 +1,9 @@
-import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock
 from src.engines.nemotron import NemotronEngine
 
 def test_nemotron_engine_is_stateful():
-    with patch("src.engines.nemotron.LegacyNemotron") as mock_legacy:
+    with patch("src.engines.nemotron.LegacyNemotron"):
         engine = NemotronEngine()
         assert engine.is_stateful() is True
 

@@ -1,5 +1,4 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import src.ui.hud as hud
 
 def test_hud_constants_exist():
@@ -14,7 +13,7 @@ def test_widget_initialization():
     # We need a QApplication for UI tests
     from PySide6.QtWidgets import QApplication
     import sys
-    app = QApplication.instance() or QApplication(sys.argv)
+    QApplication.instance() or QApplication(sys.argv)
     
     widget = hud.RoundedRectangularIndicatorWidget()
     assert widget.width() == hud.INDICATOR_WIDTH
@@ -25,7 +24,7 @@ def test_controller_interface_commands():
     """Verify OscillatingInterfaceController routes commands to the widget."""
     from PySide6.QtWidgets import QApplication
     import sys
-    app = QApplication.instance() or QApplication(sys.argv)
+    QApplication.instance() or QApplication(sys.argv)
     
     with patch("src.ui.hud.RoundedRectangularIndicatorWidget") as MockWidget:
         mock_widget_instance = MockWidget.return_value
@@ -47,7 +46,7 @@ def test_widget_state_transitions():
     """Verify widget internal state updates correctly."""
     from PySide6.QtWidgets import QApplication
     import sys
-    app = QApplication.instance() or QApplication(sys.argv)
+    QApplication.instance() or QApplication(sys.argv)
     
     widget = hud.RoundedRectangularIndicatorWidget()
     widget.update_interface_state(hud.STATE_LISTENING, 0.8)

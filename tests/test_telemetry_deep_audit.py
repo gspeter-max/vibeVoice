@@ -1,5 +1,4 @@
 import json
-import pytest
 from pathlib import Path
 from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
 

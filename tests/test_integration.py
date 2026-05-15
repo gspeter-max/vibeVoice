@@ -12,24 +12,10 @@ We mock it with is_stateful()=False and transcribe_chunk() returning a fixed str
 from unittest.mock import MagicMock, patch
 
 import src.backend.brain as brain
+from tests.conftest import MockConn
 
 
-class MockConn:
-    """
-    A fake socket connection that returns pre-defined audio chunks
-    and then returns an empty bytes object to signal the connection is closed.
-    """
-    def __init__(self, *chunks):
-        self._chunks = list(chunks) + [b""]
 
-    def settimeout(self, _timeout):
-        return None
-
-    def recv(self, _size):
-        return self._chunks.pop(0)
-
-    def close(self):
-        return None
 
 
 def test_socket_communication(sample_audio_bytes):
@@ -55,7 +41,7 @@ def test_socket_communication(sample_audio_bytes):
     commit = b"CMD_SESSION_COMMIT:session123:0"
 
     with patch.object(brain, "keyboard", MagicMock()), \
-         patch.object(brain, "refine_text_with_fallbacks", return_value="integrated test result cleaned") as mock_groq, \
+         patch.object(brain, "refine_text_with_fallbacks", return_value="integrated test result cleaned"), \
          patch.object(brain, "paste_instantly") as mock_paste, \
          patch.object(brain, "send_hud") as mock_hud:
 

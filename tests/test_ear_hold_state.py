@@ -1,36 +1,11 @@
 import pytest
 import time
 import sys
-import os
 import json
 import threading
 from unittest.mock import Mock, patch
 
 from src.streaming.streaming_shared_logic import should_split_chunk_after_silence
-
-# Mock pynput before importing Ear
-sys.modules['pynput'] = type(sys)('pynput')
-sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
-sys.modules['pynput.mouse'] = type(sys)('pynput.mouse')
-
-# Add Button mock
-class MockButton:
-    left = 'left'
-    right = 'right'
-
-sys.modules['pynput.mouse'].Button = MockButton()
-
-# Mock pyaudio
-class MockPyAudio:
-    paInt16 = 16
-    paContinue = 0
-    class PyAudio:
-        def get_default_input_device_info(self):
-            return {"index": 0}
-        def get_device_info_by_index(self, index):
-            return {"name": "Test Device"}
-
-sys.modules['pyaudio'] = MockPyAudio()
 
 from src.audio.ear_runtime.controller import Ear, select_mic
 
@@ -128,7 +103,7 @@ def test_hud_client_sends_command_over_tcp_socket():
         def close(self):
             captured["closed"] = True
 
-    with patch("src.ui.hud_client.socket.socket", return_value=FakeSocket()):
+    with patch("src.utils.socket_utils.socket.socket", return_value=FakeSocket()):
         assert send_hud_command("listen") is True
 
     assert captured["connected"] == ("127.0.0.1", 57234)
@@ -161,7 +136,7 @@ def test_hud_client_volume_sender_stops_after_recording_ends():
         with ear_state._lock:
             ear_state.is_recording = False
 
-    with patch("src.ui.hud_client.socket.socket", return_value=FakeUdpSocket()), \
+    with patch("src.utils.socket_utils.socket.socket", return_value=FakeUdpSocket()), \
          patch("src.ui.hud_client.time.sleep", side_effect=fake_sleep):
         sender_thread = start_volume_sender_thread(ear_state, volume_port=57235)
         sender_thread.join(timeout=1.0)
@@ -197,7 +172,7 @@ def test_raw_stream_helpers_open_send_and_close_socket():
         def close(self):
             captured["closed"] = True
 
-    with patch("src.ipc.client.socket.socket", return_value=FakeSocket()):
+    with patch("src.utils.socket_utils.socket.socket", return_value=FakeSocket()):
         socket_handle = open_raw_audio_stream_to_brain()
         assert socket_handle is not None
         assert send_raw_audio_stream_chunk(socket_handle, b"chunk-bytes") is True
@@ -644,7 +619,6 @@ def test_session_event_send_uses_json_payload_and_session_header():
 
 def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handlers(monkeypatch):
     import src.audio.ear_runtime.runtime as runtime_module
-    import src.audio.ear_runtime.controller as ear_controller
 
     captured = {}
 

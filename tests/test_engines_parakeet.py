@@ -1,6 +1,5 @@
-import pytest
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from src.engines.parakeet import ParakeetEngine
 
 def test_parakeet_engine_is_stateless():
@@ -9,7 +8,7 @@ def test_parakeet_engine_is_stateless():
         assert engine.is_stateful() is False
 
 def test_parakeet_engine_transcribes_audio():
-    with patch("src.backend.backend_parakeet.load_speech_recognition_model_from_disk") as mock_load, \
+    with patch("src.backend.backend_parakeet.load_speech_recognition_model_from_disk"), \
          patch("src.backend.backend_parakeet.convert_audio_to_text") as mock_convert:
         
         mock_convert.return_value = "hello world"

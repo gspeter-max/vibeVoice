@@ -1,29 +1,8 @@
 import os
-import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 import sys
 
-# Standard mock setup for Ear tests to avoid audio hardware issues
-sys.modules['pynput'] = type(sys)('pynput')
-sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
-sys.modules['pynput.mouse'] = type(sys)('pynput.mouse')
 
-class MockButton:
-    left = 'left'
-    right = 'right'
-
-sys.modules['pynput.mouse'].Button = MockButton()
-
-class MockPyAudio:
-    paInt16 = 16
-    paContinue = 0
-    class PyAudio:
-        def get_default_input_device_info(self):
-            return {"index": 0}
-        def get_device_info_by_index(self, index):
-            return {"name": "Test Device"}
-
-sys.modules['pyaudio'] = MockPyAudio()
 
 import src.audio.ear_runtime.controller as ear_module
 from src.audio.ear_runtime.controller import Ear as RuntimeEar
