@@ -1,37 +1,27 @@
-# tests/test_ipc_messenger.py
-import pytest
+# tests/test_ipc_protocol.py
 import json
-from src.ipc.messenger import (
+from src.ipc.client import (
     SOCKET_PATH,
+    send_message_to_brain,
+)
+from src.ipc.protocol import (
     format_audio_chunk_message,
     format_session_commit_message,
     format_session_event_message,
     format_switch_model_message,
     parse_incoming_message,
-    send_message_to_brain,
-)
-from src.ipc.protocol import (
-    format_audio_chunk_message as protocol_format_audio_chunk_message,
-    format_session_commit_message as protocol_format_session_commit_message,
-    format_session_event_message as protocol_format_session_event_message,
-    format_switch_model_message as protocol_format_switch_model_message,
-    parse_incoming_message as protocol_parse_incoming_message,
 )
 
 def test_format_audio_chunk_message_creates_correct_header():
     result = format_audio_chunk_message("session123", 0, 5, b"audio")
     assert result == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
 
-def test_messenger_module_re_exports_transport_compatibility_surface():
-    assert SOCKET_PATH == "/tmp/parakeet.sock"
-    assert send_message_to_brain(b"") is False
-
-def test_protocol_module_matches_existing_messenger_contract():
-    assert protocol_format_audio_chunk_message("session123", 0, 5, b"audio") == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
-    assert protocol_format_session_commit_message("session123", 0) == b"CMD_SESSION_COMMIT:session123:0"
-    assert protocol_format_session_event_message("session123", 0, {"type": "test"}) == b'CMD_SESSION_EVENT:session123:0\n\n{"type":"test"}'
-    assert protocol_format_switch_model_message("parakeet-v2") == b"CMD_SWITCH_MODEL:parakeet-v2"
-    assert protocol_parse_incoming_message(b"CMD_SWITCH_MODEL:nemotron-v1") == {
+def test_protocol_formatting():
+    assert format_audio_chunk_message("session123", 0, 5, b"audio") == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
+    assert format_session_commit_message("session123", 0) == b"CMD_SESSION_COMMIT:session123:0"
+    assert format_session_event_message("session123", 0, {"type": "test"}) == b'CMD_SESSION_EVENT:session123:0\n\n{"type":"test"}'
+    assert format_switch_model_message("parakeet-v2") == b"CMD_SWITCH_MODEL:parakeet-v2"
+    assert parse_incoming_message(b"CMD_SWITCH_MODEL:nemotron-v1") == {
         "command_type": "switch_model",
         "model_name": "nemotron-v1"
     }
