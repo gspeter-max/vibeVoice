@@ -24,12 +24,10 @@ class VibeVoiceSettings(BaseSettings):
     # ── API Keys ───────────────────────────────────────────────────────────
     groq_api_key: str = ""
     cerebras_api_key: str = ""
-    nvidia_api_key: str = ""
-    together_api_key: str = ""
 
     # ── Provider & Model ───────────────────────────────────────────────────
     vibevoice_provider_index: int = 0
-    """Index into the PROVIDERS list in llm_router.py (0=Groq, 1=NVIDIA, 2=Cerebras, 3=Together)."""
+    """Index into the PROVIDERS list in llm_router.py (0=Groq, 1=Cerebras)."""
 
     stt_model: str = "parakeet-tdt-0.6b-v3"
     """Speech-to-text model name loaded on startup."""
