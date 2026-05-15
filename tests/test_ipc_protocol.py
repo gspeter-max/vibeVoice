@@ -16,16 +16,6 @@ def test_format_audio_chunk_message_creates_correct_header():
     result = format_audio_chunk_message("session123", 0, 5, b"audio")
     assert result == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
 
-def test_protocol_formatting():
-    assert format_audio_chunk_message("session123", 0, 5, b"audio") == b"CMD_AUDIO_CHUNK:session123:0:5\n\naudio"
-    assert format_session_commit_message("session123", 0) == b"CMD_SESSION_COMMIT:session123:0"
-    assert format_session_event_message("session123", 0, {"type": "test"}) == b'CMD_SESSION_EVENT:session123:0\n\n{"type":"test"}'
-    assert format_switch_model_message("parakeet-v2") == b"CMD_SWITCH_MODEL:parakeet-v2"
-    assert parse_incoming_message(b"CMD_SWITCH_MODEL:nemotron-v1") == {
-        "command_type": "switch_model",
-        "model_name": "nemotron-v1"
-    }
-
 def test_format_session_commit_message():
     result = format_session_commit_message("session123", 0)
     assert result == b"CMD_SESSION_COMMIT:session123:0"
