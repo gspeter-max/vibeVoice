@@ -5,7 +5,7 @@ import json
 import threading
 from unittest.mock import Mock, patch
 
-from src.streaming.streaming_shared_logic import should_split_chunk_after_silence
+from src.streaming.session import should_split_chunk_after_silence
 
 from src.audio.ear_runtime.controller import Ear, select_mic
 

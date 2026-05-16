@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from src.streaming.streaming_shared_logic import apply_last_chunk_overlap
+from src.streaming.session import apply_last_chunk_overlap
 
 
 @dataclass

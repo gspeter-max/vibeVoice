@@ -5,7 +5,6 @@ Provides theme management for a dark HUD with premium white waveform bars.
 """
 
 from PySide6.QtGui import QColor, QPen, QBrush
-from PySide6.QtCore import Qt
 
 # Theme constant
 THEME_ORIGINAL = 0

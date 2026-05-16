@@ -125,7 +125,6 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
     log.info(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_folder_path}...")
 
     # Step 5: Find out how many CPU threads to use for speed
-    # Use PARAKEET_THREADS env var, or default to 6 if missing or malformed
     number_of_cpu_threads_to_use = get_integer_from_environment("PARAKEET_THREADS", 6)
 
     log.info(f"[sherpa-onnx] Using {number_of_cpu_threads_to_use} threads")
@@ -168,7 +167,7 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
             debug=False,
         )
 
-    log.info(f"[sherpa-onnx] ✅ Model loaded.")
+    log.info("[sherpa-onnx] ✅ Model loaded.")
     
     # Step 7: Return the loaded model
     return loaded_speech_recognizer

@@ -5,11 +5,10 @@ import platform
 import logging
 import socket
 import threading
-from ctypes import c_void_p
 
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QScreen
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush
 
 # Global activation policy setup for macOS
 if platform.system() == "Darwin":

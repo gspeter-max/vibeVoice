@@ -15,19 +15,10 @@ import socket
 import threading
 import time
 import pyaudio
-import termios
 import numpy as np
 
 from src import log
-from src.utils.env_utils import get_float_from_environment
-from src.streaming.streaming_shared_logic import (
-    DEFAULT_ENERGY_RATIO,
-    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
-    DEFAULT_OVERLAP_SECONDS,
-    DEFAULT_SILENCE_TIMEOUT_SECONDS,
-    DEFAULT_VAD_ENERGY_THRESHOLD,
-    DEFAULT_VAD_SCORE_THRESHOLD,
-    apply_last_chunk_overlap,
+from src.streaming.session import (
     should_split_chunk_after_silence,
 )
 from src.audio.vad_segmenter import SileroVAD, SileroUtteranceGate
@@ -43,7 +34,6 @@ from src.audio.ear_runtime.menu import (
     send_switch_command as runtime_send_switch_command,
 )
 from src.audio.ear_runtime.system_audio import (
-    enable_macos_voice_isolation,
     load_start_sound,
     play_start_sound,
 )
@@ -60,7 +50,6 @@ from src.ipc.protocol import (
 )
 from src.streaming.capture_session import CaptureSession
 from src.ui.hud_client import send_hud_command, start_volume_sender_thread
-from src.input.hotkeys import InputTrigger
 from .config import (
     BACKEND,
     CHANNELS,
@@ -492,7 +481,7 @@ class Ear:
         """
         now = time.time()
         silence_elapsed = self._utterance_gate.silence_elapsed(now)
-        had_session = bool(self._current_session_id)
+        bool(self._current_session_id)
 
         with self._lock:
             if not self.is_recording:
@@ -592,7 +581,7 @@ class Ear:
             if self._brain_sock is not None:
                 return True
             if not os.path.exists(SOCKET_PATH):
-                log.info(f"\r❌ Brain socket not found\n")
+                log.info("\r❌ Brain socket not found\n")
                 return False
             sock = open_raw_audio_stream_to_brain(
                 timeout_seconds=5.0,
@@ -600,7 +589,7 @@ class Ear:
                 socket_factory=socket.socket,
             )
             if sock is None:
-                log.info(f"\r❌ Brain connect failed\n")
+                log.info("\r❌ Brain connect failed\n")
                 return False
             self._brain_sock = sock
             return True
@@ -616,7 +605,7 @@ class Ear:
             try:
                 raise BrokenPipeError()
             except (BrokenPipeError, ConnectionResetError):
-                log.info(f"\r⚠️  Brain disconnected — will transcribe on release\n")
+                log.info("\r⚠️  Brain disconnected — will transcribe on release\n")
                 try:
                     self._brain_sock.close()
                 except Exception:

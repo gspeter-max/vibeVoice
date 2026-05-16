@@ -10,6 +10,8 @@ from __future__ import annotations
 import socket
 from typing import Callable
 
+from src.utils.socket_utils import create_and_connect_unix_socket
+
 
 SOCKET_PATH = "/tmp/parakeet.sock"
 
@@ -31,13 +33,13 @@ def send_message_to_brain(
     if not message_bytes:
         return False
 
-    if socket_factory is None:
-        socket_factory = socket.socket
-
     try:
-        with socket_factory(socket.AF_UNIX, socket.SOCK_STREAM) as client_socket:
-            client_socket.settimeout(timeout_seconds)
-            client_socket.connect(socket_path)
+        # Use our shared utility to create and connect the socket
+        with create_and_connect_unix_socket(
+            socket_path=socket_path,
+            timeout_seconds=timeout_seconds,
+            socket_factory=socket_factory
+        ) as client_socket:
             client_socket.sendall(message_bytes)
             client_socket.shutdown(socket.SHUT_WR)
         return True
@@ -56,14 +58,13 @@ def open_raw_audio_stream_to_brain(
     when the socket path is missing or the connection attempt fails.
     """
 
-    if socket_factory is None:
-        socket_factory = socket.socket
-
     try:
-        client_socket = socket_factory(socket.AF_UNIX, socket.SOCK_STREAM)
-        client_socket.settimeout(timeout_seconds)
-        client_socket.connect(socket_path)
-        return client_socket
+        # Use our shared utility to create and connect the socket
+        return create_and_connect_unix_socket(
+            socket_path=socket_path,
+            timeout_seconds=timeout_seconds,
+            socket_factory=socket_factory
+        )
     except Exception:
         return None
 

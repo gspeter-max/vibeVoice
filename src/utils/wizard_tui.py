@@ -7,7 +7,7 @@ import os
 import pyaudio
 from typing import Optional, List, Tuple
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, Grid
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Header, Footer, Static, Button, Label, Input, Switch, Select
 from textual.screen import ModalScreen
 from textual.binding import Binding

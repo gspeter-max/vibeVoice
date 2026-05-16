@@ -12,16 +12,10 @@ import time
 import threading
 import subprocess
 import json
-from pathlib import Path
-from dataclasses import dataclass, field
+
 
 import numpy as np
-from rich.prompt import Prompt
 from src.text_refiner.llm_router import refine_text_with_fallbacks, set_primary_provider, PROVIDERS
-from src.utils.env_manager import check_and_ask_for_api_key
-from src.streaming.streaming_shared_logic import (
-    analyze_duplicate_chunk_prefix,
-)
 from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
 from src.utils.bootstrap import fix_macos_library_paths
 from src import log
@@ -79,7 +73,7 @@ def _play_finish_sound():
 from src.backend.state import (
     backend_info, backend_lock,
     session_store, session_store_lock,
-    RecordingState, SessionState
+    SessionState
 )
 
 from src.backend.data_record.telemetry import (
@@ -181,7 +175,7 @@ def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_t
     Displays a formatted summary of the completed session in the terminal.
     """
     # Clear the previous meter line from Ear
-    sys.stdout.write(f"\r\033[K")
+    sys.stdout.write("\r\033[K")
     sys.stdout.flush()
 
     table = Table(title=f"📋 Session: {session_id[:8]}", box=box.ROUNDED, expand=True)
@@ -222,7 +216,7 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         text = " ".join(parts).strip()
         rec.finalized = True
 
-    short_id = session_id[:8]
+    session_id[:8]
     if text:
         stt_time = rec.stt_time
         
@@ -311,12 +305,11 @@ def handle_streaming_audio_chunk(
                     if engine.is_stateful():
                         # For cumulative engines, we store the full text in part 0
                         rec.transcript_parts = {0: text}
-                        analysis_cleaned_text = text
                     else:
                         # Stateless backends transcribe chunks independently
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
                         # Deduplicate the new chunk against the last chunk text
-                        from src.streaming.streaming_shared_logic import analyze_duplicate_chunk_prefix
+                        from src.streaming.session import analyze_duplicate_chunk_prefix
                         dedup_analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
 
                         rec.transcript_parts[seq] = dedup_analysis.cleaned_text
@@ -437,7 +430,7 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
             send_hud("hide")
             return
 
-        log.info(f"[Brain] 🎙️  Final utterance decode")
+        log.info("[Brain] 🎙️  Final utterance decode")
         send_hud("process")
         final_text = engine.transcribe_chunk(audio)
         if not final_text:

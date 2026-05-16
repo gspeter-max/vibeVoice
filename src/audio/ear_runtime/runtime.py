@@ -11,7 +11,7 @@ import time
 import pyaudio
 
 from src import log
-from src.audio.ear_runtime.controller import Ear, get_rms, select_mic, TerminalMenu, BACKEND
+from src.audio.ear_runtime.controller import Ear, select_mic, TerminalMenu, BACKEND
 from src.input.hotkeys import InputTrigger
 
 def start_ear():

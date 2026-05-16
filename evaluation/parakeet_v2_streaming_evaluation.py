@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from src import log 
 import numpy as np
-from src.streaming.streaming_shared_logic import (
+from src.streaming.session import (
     analyze_duplicate_chunk_prefix,
     apply_last_chunk_overlap,
     normalize_text_for_word_error_rate,

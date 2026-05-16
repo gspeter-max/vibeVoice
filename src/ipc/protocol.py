@@ -34,11 +34,7 @@ def format_audio_chunk_message(
 
 
 def format_session_commit_message(session_id: str, recording_index: int) -> bytes:
-    """Build the exact wire message that closes one recording.
-
-    The commit message contains no JSON body and no separator bytes.
-    It is a single command string encoded as UTF-8 bytes.
-    """
+    """Build the exact wire message that closes one recording."""
 
     command_string = f"CMD_SESSION_COMMIT:{session_id}:{recording_index}"
     return command_string.encode("utf-8")
@@ -49,11 +45,7 @@ def format_session_event_message(
     recording_index: int,
     event_payload: dict,
 ) -> bytes:
-    """Build the exact wire message for one telemetry or session event.
-
-    The body is compact JSON with no extra whitespace. The header/body
-    boundary is always two newline bytes.
-    """
+    """Build the exact wire message for one telemetry or session event."""
 
     header_string = f"CMD_SESSION_EVENT:{session_id}:{recording_index}\n\n"
     compact_json_body = json.dumps(event_payload, separators=(",", ":"))

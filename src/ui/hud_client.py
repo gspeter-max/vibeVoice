@@ -11,6 +11,7 @@ import threading
 import time
 
 from src import log
+from src.utils.socket_utils import create_and_connect_tcp_socket, create_udp_socket
 
 
 HUD_HOST = "127.0.0.1"
@@ -32,13 +33,14 @@ def send_hud_command(
     socket send and returns `True` on success or `False` on failure.
     """
 
-    if socket_factory is None:
-        socket_factory = socket.socket
-
     try:
-        hud_socket = socket_factory(socket.AF_INET, socket.SOCK_STREAM)
-        hud_socket.settimeout(timeout_seconds)
-        hud_socket.connect((host, port))
+        # Use our shared utility to create and connect the TCP socket
+        hud_socket = create_and_connect_tcp_socket(
+            host=host,
+            port=port,
+            timeout_seconds=timeout_seconds,
+            socket_factory=socket_factory
+        )
         hud_socket.sendall(command_text.encode())
         hud_socket.close()
         return True
@@ -61,10 +63,8 @@ def start_volume_sender_thread(
     The helper returns the created thread so tests can join it deterministically.
     """
 
-    if socket_factory is None:
-        socket_factory = socket.socket
-
-    udp_socket = socket_factory(socket.AF_INET, socket.SOCK_DGRAM)
+    # Use our shared utility to create the UDP socket
+    udp_socket = create_udp_socket(socket_factory=socket_factory)
 
     def _sender():
         packets_sent = 0

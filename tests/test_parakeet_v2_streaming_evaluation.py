@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from src.utils.settings import settings
-from src.streaming.streaming_shared_logic import (
+from src.streaming.session import (
     analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,
 )
