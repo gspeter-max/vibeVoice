@@ -2,13 +2,8 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+from src.utils.settings import settings
 from src.streaming.streaming_shared_logic import (
-    DEFAULT_ENERGY_RATIO,
-    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
-    DEFAULT_OVERLAP_SECONDS,
-    DEFAULT_SILENCE_TIMEOUT_SECONDS,
-    DEFAULT_VAD_ENERGY_THRESHOLD,
-    DEFAULT_VAD_SCORE_THRESHOLD,
     analyze_duplicate_chunk_prefix,
     normalize_text_for_word_error_rate,
 )
@@ -97,14 +92,14 @@ def test_build_command_line_argument_parser_uses_clear_defaults():
     assert parsed_arguments.audio_column_name_to_load == "audio"
     assert parsed_arguments.text_column_name_to_load == "text"
     assert parsed_arguments.single_sample_number_to_test == 0
-    assert parsed_arguments.silence_timeout_seconds_before_cutting_chunk == DEFAULT_SILENCE_TIMEOUT_SECONDS
-    assert parsed_arguments.voice_detection_score_threshold == DEFAULT_VAD_SCORE_THRESHOLD
-    assert parsed_arguments.energy_fallback_threshold == DEFAULT_VAD_ENERGY_THRESHOLD
-    assert parsed_arguments.energy_fallback_ratio == DEFAULT_ENERGY_RATIO
-    assert parsed_arguments.overlap_seconds_between_chunks == DEFAULT_OVERLAP_SECONDS
+    assert parsed_arguments.silence_timeout_seconds_before_cutting_chunk == settings.silence_timeout_seconds
+    assert parsed_arguments.voice_detection_score_threshold == settings.vad_score_threshold
+    assert parsed_arguments.energy_fallback_threshold == settings.vad_energy_threshold
+    assert parsed_arguments.energy_fallback_ratio == settings.vad_energy_ratio
+    assert parsed_arguments.overlap_seconds_between_chunks == settings.overlap_seconds
     assert (
         parsed_arguments.minimum_chunk_age_before_silence_split_seconds
-        == DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS
+        == settings.minimum_chunk_age_before_silence_split_seconds
     )
     assert parsed_arguments.use_streaming_dataset_load is False
     assert parsed_arguments.output_json_file_path == DEFAULT_OUTPUT_JSON_FILE_PATH
@@ -673,7 +668,7 @@ def test_main_prints_progress_logs_and_final_result(monkeypatch, capsys):
     assert captured_run_request["vad_model_path"] == "/tmp/fake_silero.onnx"
     assert (
         captured_run_request["minimum_chunk_age_before_silence_split_seconds"]
-        == DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS
+        == settings.minimum_chunk_age_before_silence_split_seconds
     )
     assert captured_json_report["output_json_file_path"] == DEFAULT_OUTPUT_JSON_FILE_PATH
 

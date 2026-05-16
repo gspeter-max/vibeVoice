@@ -63,6 +63,15 @@ class VibeVoiceSettings(BaseSettings):
     streaming_telemetry_dir: Path = Path("logs/streaming_sessions")
     """Directory where telemetry JSON files are saved."""
 
+    # ── Streaming / VAD Constants ──────────────────────────────────────────
+    vad_score_threshold: float = 0.50
+    vad_energy_threshold: float = 0.05
+    vad_energy_ratio: float = 2.5
+    silence_timeout_seconds: float = 0.8
+    overlap_seconds: float = 3.5
+    minimum_chunk_age_before_silence_split_seconds: float = 8.0
+    semantic_overlapping_threshold: float = 0.70
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

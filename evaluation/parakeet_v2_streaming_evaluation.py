@@ -1,4 +1,5 @@
 import argparse
+from src.utils.settings import settings
 import io
 import json
 import os
@@ -7,12 +8,6 @@ from typing import Any
 from src import log 
 import numpy as np
 from src.streaming.streaming_shared_logic import (
-    DEFAULT_ENERGY_RATIO,
-    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
-    DEFAULT_OVERLAP_SECONDS,
-    DEFAULT_SILENCE_TIMEOUT_SECONDS,
-    DEFAULT_VAD_ENERGY_THRESHOLD,
-    DEFAULT_VAD_SCORE_THRESHOLD,
     analyze_duplicate_chunk_prefix,
     apply_last_chunk_overlap,
     normalize_text_for_word_error_rate,
@@ -371,7 +366,7 @@ def run_fake_microphone_stream_for_one_dataset_item(
     overlap_seconds: float,
     max_overlap_words: int,
     frame_samples: int = DEFAULT_FRAME_SAMPLES,
-    minimum_chunk_age_before_silence_split_seconds: float = DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+    minimum_chunk_age_before_silence_split_seconds: float = settings.minimum_chunk_age_before_silence_split_seconds,
 ) -> dict[str, Any]:
     from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
@@ -551,16 +546,16 @@ def build_command_line_argument_parser() -> argparse.ArgumentParser:
     command_line_argument_parser.add_argument(
         "--silence-timeout-seconds-before-cutting-chunk",
         type=float,
-        default=DEFAULT_SILENCE_TIMEOUT_SECONDS,
+        default=settings.silence_timeout_seconds,
     )
-    command_line_argument_parser.add_argument("--voice-detection-score-threshold", type=float, default=DEFAULT_VAD_SCORE_THRESHOLD)
-    command_line_argument_parser.add_argument("--energy-fallback-threshold", type=float, default=DEFAULT_VAD_ENERGY_THRESHOLD)
-    command_line_argument_parser.add_argument("--energy-fallback-ratio", type=float, default=DEFAULT_ENERGY_RATIO)
-    command_line_argument_parser.add_argument("--overlap-seconds-between-chunks", type=float, default=DEFAULT_OVERLAP_SECONDS)
+    command_line_argument_parser.add_argument("--voice-detection-score-threshold", type=float, default=settings.vad_score_threshold)
+    command_line_argument_parser.add_argument("--energy-fallback-threshold", type=float, default=settings.vad_energy_threshold)
+    command_line_argument_parser.add_argument("--energy-fallback-ratio", type=float, default=settings.vad_energy_ratio)
+    command_line_argument_parser.add_argument("--overlap-seconds-between-chunks", type=float, default=settings.overlap_seconds)
     command_line_argument_parser.add_argument(
         "--minimum-chunk-age-before-silence-split-seconds",
         type=float,
-        default=DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
+        default=settings.minimum_chunk_age_before_silence_split_seconds,
     )
     command_line_argument_parser.add_argument("--maximum-overlap-words-to-remove", type=int, default=DEFAULT_MAX_OVERLAP_WORDS)
     command_line_argument_parser.add_argument("--microphone-frame-sample-count", type=int, default=DEFAULT_FRAME_SAMPLES)

@@ -7,16 +7,7 @@ This file should have no dependencies on other ear_runtime modules.
 
 import os
 import pyaudio
-from src.utils.env_utils import get_float_from_environment
 from src.utils.settings import settings
-from src.streaming.streaming_shared_logic import (
-    DEFAULT_ENERGY_RATIO,
-    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
-    DEFAULT_OVERLAP_SECONDS,
-    DEFAULT_SILENCE_TIMEOUT_SECONDS,
-    DEFAULT_VAD_ENERGY_THRESHOLD,
-    DEFAULT_VAD_SCORE_THRESHOLD,
-)
 
 # ── Socket & Network ─────────────────────────────────────────────────────────
 SOCKET_PATH = "/tmp/parakeet.sock"
@@ -59,19 +50,16 @@ RECORDING_BUTTON_HOLD_THRESHOLD = 0.4
 VAD_MODEL_PATH = os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx")
 """File path to the Silero VAD ONNX model."""
 
-VAD_THRESHOLD = get_float_from_environment("VAD_THRESHOLD", DEFAULT_VAD_SCORE_THRESHOLD)
+VAD_THRESHOLD = settings.vad_score_threshold
 """Confidence threshold for VAD (0.0 to 1.0)."""
 
-VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = get_float_from_environment(
-    "VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT",
-    DEFAULT_SILENCE_TIMEOUT_SECONDS,
-)
+VOICE_ACTIVITY_DETECTION_SILENCE_DETECTION_THRESHOLD_TIMEOUT = settings.silence_timeout_seconds
 """Seconds of silence before splitting the audio chunk."""
 
-VAD_ENERGY_THRESHOLD = get_float_from_environment("VAD_ENERGY_THRESHOLD", DEFAULT_VAD_ENERGY_THRESHOLD)
+VAD_ENERGY_THRESHOLD = settings.vad_energy_threshold
 """Energy threshold for VAD to filter out low-volume noise."""
 
-VAD_ENERGY_RATIO = get_float_from_environment("VAD_ENERGY_RATIO", DEFAULT_ENERGY_RATIO)
+VAD_ENERGY_RATIO = settings.vad_energy_ratio
 """Ratio of energy to help distinguish speech from background hum."""
 
 VAD_STATUS_LOG_INTERVAL = 5.0
@@ -81,13 +69,10 @@ RECORDING_LEVEL_LOG_INTERVAL = 0.4
 """Interval in seconds for logging the visual volume meter in the terminal."""
 
 # ── Streaming Parameters ─────────────────────────────────────────────────────
-OVERLAP_SECONDS = get_float_from_environment("OVERLAP_SECONDS", DEFAULT_OVERLAP_SECONDS)
+OVERLAP_SECONDS = settings.overlap_seconds
 """Seconds of audio to overlap between consecutive chunks to maintain speech context."""
 
-MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = get_float_from_environment(
-    "MIN_CHUNK_SECONDS",
-    DEFAULT_MINIMUM_CHUNK_AGE_BEFORE_SILENCE_SPLIT_SECONDS,
-)
+MIN_CHUNK_SECONDS_REQ_FOR_SPLITING_DUE_TO_SILENCE_STREAMING = settings.minimum_chunk_age_before_silence_split_seconds
 """Minimum duration a chunk must have before it can be split by silence."""
 
 # ── Constants for UI/Terminal ────────────────────────────────────────────────
