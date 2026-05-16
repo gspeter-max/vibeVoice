@@ -1,7 +1,6 @@
 # src/streaming/nemotron.py
 import os
 import json
-import wave
 import ctypes
 import numpy as np
 import onnxruntime as ort
@@ -22,24 +21,15 @@ except Exception:
     HAS_HARDWARE_ACCELERATION = False
 
 def find_maximum_value_index(numbers_array):
-    """
-    Finds the position of the largest number in an array.
+    """ Finds the position of the largest number in an array."""
     
-    Args:
-        numbers_array (np.ndarray): The list of numbers to check.
-        
-    Returns:
-        int: The index position of the largest number.
-    """
     if not HAS_HARDWARE_ACCELERATION: 
         return np.argmax(numbers_array)
     
-    # Ensure the data is in the correct format for the hardware library
     contiguous_numbers = np.ascontiguousarray(numbers_array.flatten(), dtype=np.float32)
     maximum_value = ctypes.c_float()
     maximum_index = ctypes.c_ulong()
     
-    # Use the hardware library to find the maximum value and its index
     ACCELERATE_LIBRARY.vDSP_maxvi(
         contiguous_numbers.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), 
         1, 
@@ -63,7 +53,6 @@ class AudioSpectrogramConverter:
             filterbank_file_path (str): Path to the frequency map file.
         """
         self.settings = model_configuration['preprocessor']
-        # Create a mathematical window to look at small pieces of sound
         self.mathematical_window = get_window(
             self.settings['window'], 
             self.settings['win_length'], 
