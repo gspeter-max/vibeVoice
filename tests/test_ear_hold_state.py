@@ -238,7 +238,8 @@ def test_raw_stream_helpers_open_send_and_close_socket():
         def close(self):
             captured["closed"] = True
 
-    with patch("src.utils.socket_utils.socket.socket", return_value=FakeSocket()):
+    with patch("src.utils.socket_utils.socket.socket", return_value=FakeSocket()), \
+         patch("src.ipc.client.os.path.exists", return_value=True):
         socket_handle = open_raw_audio_stream_to_brain()
         assert socket_handle is not None
         assert send_raw_audio_stream_chunk(socket_handle, b"chunk-bytes") is True
