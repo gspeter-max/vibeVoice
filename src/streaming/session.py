@@ -1,12 +1,15 @@
+"""Chunk overlap and deduplication helpers for streaming transcription."""
+
 from __future__ import annotations
 
 from difflib import SequenceMatcher
 import re
+import time
 from dataclasses import dataclass
-from src import log
+
 import numpy as np
 
-
+from src import log
 from src.utils.settings import settings
 
 @dataclass(frozen=True)
@@ -29,16 +32,16 @@ def should_split_chunk_after_silence(
     silence_duration_seconds: float,
 ) -> ChunkSplitDecision:
     """
-    This function decides if it is time to stop the current piece of audio 
+    This function decides if it is time to stop the current piece of audio
     and start a new one.
     """
     chunk_age_seconds = max(0.0, now_seconds - chunk_started_at_seconds)
-    
+
     should_split_now = (
         chunk_age_seconds > minimum_chunk_age_before_silence_split_seconds
         and utterance_gate_should_finalize_now
     )
-    
+
     return ChunkSplitDecision(
         should_split_now=should_split_now,
         chunk_age_seconds=chunk_age_seconds,
@@ -49,7 +52,7 @@ def should_split_chunk_after_silence(
 @dataclass(frozen=True)
 class OverlapApplicationResult:
     """
-    This container holds the audio data after we have joined the 
+    This container holds the audio data after we have joined the
     previous chunk's end with the current chunk's beginning.
     """
     overlapped_audio_bytes: bytes
@@ -59,8 +62,7 @@ class OverlapApplicationResult:
 
 @dataclass(frozen=True)
 class ChunkDeduplicationResult:
-    """Hold the cleaned chunk text and the scores used to decide the trim.
-    """
+    """Hold the cleaned chunk text and the scores used to decide the trim."""
 
     cleaned_text: str
     overlap_word_count: int
@@ -101,13 +103,13 @@ def apply_last_chunk_overlap(
     stop_session: bool,
 ) -> OverlapApplicationResult:
     """
-    This function joins two pieces of audio together. 
-    
-    When we record in chunks, we keep a small bit from the end of the last chunk 
-    and put it at the start of the next chunk. This ensures we don't lose 
+    This function joins two pieces of audio together.
+
+    When we record in chunks, we keep a small bit from the end of the last chunk
+    and put it at the start of the next chunk. This ensures we don't lose
     any sound in the middle of a word.
-    
-    It returns the new combined audio and also saves a bit of the current 
+
+    It returns the new combined audio and also saves a bit of the current
     audio to be used for the next time this function is called.
     """
     # If the session is over, we don't need to overlap anything.
@@ -122,28 +124,28 @@ def apply_last_chunk_overlap(
     equalized_overlap = _equalize_energy(
         last_chunk_tail_bytes, current_chunk_audio_bytes
     )
- 
+
     # Join the equalized bit from last time to the start of the new audio.
     overlapped_audio_bytes = equalized_overlap + current_chunk_audio_bytes
-    
+
     # Save the end of the current audio to use for the NEXT chunk.
     # We skip 'silence_audio_byte_count' at the end to anchor overlap to actual speech.
     if overlap_audio_byte_count > 0:
         # STRATEGY: Find where the actual speech ended.
-        # Since the chunk was split after a silence timeout, the end of the 
-        # buffer is pure silence. We subtract 'silence_audio_byte_count' 
-        # to find the "speech tail," ensuring the overlap contains high-signal 
+        # Since the chunk was split after a silence timeout, the end of the
+        # buffer is pure silence. We subtract 'silence_audio_byte_count'
+        # to find the "speech tail," ensuring the overlap contains high-signal
         # audio for the transcription engine's deduplication algorithm.
-        
+
         speech_end = len(current_chunk_audio_bytes) - silence_audio_byte_count
         speech_start = max(0, speech_end - overlap_audio_byte_count)
-        
+
         next_chunk_tail_bytes = current_chunk_audio_bytes[speech_start:speech_end]
     else:
         next_chunk_tail_bytes = b""
 
     overlap_seconds_from_last_chunk = len(last_chunk_tail_bytes) / 2.0 / sample_rate
-    
+
     return OverlapApplicationResult(
         overlapped_audio_bytes=overlapped_audio_bytes,
         next_chunk_tail_bytes=next_chunk_tail_bytes,
@@ -162,11 +164,11 @@ def split_text_into_comparable_words(text: str) -> list[str]:
 def normalize_word_for_overlap_matching(original_word: str) -> str:
     """
     This function cleans a single word so it is easier to compare.
-    
+
     1. It makes all letters lowercase (small).
-    2. It removes marks like dots (.), commas (,), or marks (!) from the 
+    2. It removes marks like dots (.), commas (,), or marks (!) from the
        start and the end of the word.
-    
+
     Example: "Believed." becomes "believed"
     """
     lowered_word = original_word.lower()
@@ -181,12 +183,12 @@ def build_original_words_and_overlap_matching_words(
     This function takes a sentence and creates two lists of words:
     1. The 'original' words exactly as they were written (with dots and big letters).
     2. The 'matching' words that are cleaned up (small letters, no dots).
-    
-    We use the cleaned words to find matches, but we keep the original 
+
+    We use the cleaned words to find matches, but we keep the original
     words to show the final text to the user.
     """
     original_words = split_text_into_comparable_words(text)
-    
+
     # Create the cleaned list by running every word through the cleaning function.
     overlap_matching_words = [
         norm for w in original_words if (norm := normalize_word_for_overlap_matching(w))
@@ -200,19 +202,20 @@ def should_skip_overlap_trim_because_result_is_too_small(
     overlap_word_count: int,
 ) -> bool:
     """
-    This is a safety check. 
-    
-    If we delete too many words from the new text, we might end up with 
-    nothing left or just one tiny word. 
-    
-    If the system thinks the match is very long (3 or more words) but 
-    deleting them would leave the new text almost empty, we skip the 
+    This is a safety check.
+
+    If we delete too many words from the new text, we might end up with
+    nothing left or just one tiny word.
+
+    If the system thinks the match is very long (3 or more words) but
+    deleting them would leave the new text almost empty, we skip the
     deletion to avoid losing information.
     """
     return (
         len(trimmed_current_original_words) <= 1
         and overlap_word_count >= 3
-        and len(current_original_words) == overlap_word_count + len(trimmed_current_original_words)
+        and len(current_original_words)
+        == overlap_word_count + len(trimmed_current_original_words)
     )
 
 
@@ -227,10 +230,10 @@ def character_similarity(words_a: list[str], words_b: list[str]) -> float:
     """
     if not words_a or not words_b:
         return 0.0
-    
+
     str_a = " ".join(words_a)
     str_b = " ".join(words_b)
-    
+
     score = SequenceMatcher(None, str_a, str_b).ratio()
     log.debug(
         "[Dedup] char_similarity",
@@ -250,8 +253,8 @@ def token_overlap_score(words_a: list[str], words_b: list[str]) -> float:
     but is still clearly describing the same spoken phrase.
     """
     if not words_a or not words_b:
-        return 0.0 
-    
+        return 0.0
+
     set_a = set(words_a)
     set_b = set(words_b)
 
@@ -299,8 +302,12 @@ def analyze_duplicate_chunk_prefix(
     if not last_chunk_text or not current_chunk_text:
         return result
 
-    prev_original, prev_normalized = build_original_words_and_overlap_matching_words(last_chunk_text)
-    curr_original, curr_normalized = build_original_words_and_overlap_matching_words(current_chunk_text)
+    _prev_original, prev_normalized = build_original_words_and_overlap_matching_words(
+        last_chunk_text
+    )
+    curr_original, curr_normalized = build_original_words_and_overlap_matching_words(
+        current_chunk_text
+    )
 
     # The normalized list is built 1-to-1 from the original list,
     # so their lengths are always equal — no need to check both.
@@ -313,7 +320,7 @@ def analyze_duplicate_chunk_prefix(
     for overlap_word_count in range(largest_possible_overlap, 1, -1):
         prev_tail = prev_normalized[-overlap_word_count:]
         curr_head = curr_normalized[:overlap_word_count]
-        
+
         # Use individual scores for telemetry reporting.
         char_score = character_similarity(prev_tail, curr_head)
         token_score = token_overlap_score(prev_tail, curr_head)
@@ -324,7 +331,7 @@ def analyze_duplicate_chunk_prefix(
             skipped = should_skip_overlap_trim_because_result_is_too_small(
                 curr_original, trimmed, overlap_word_count
             )
-            
+
             # If we skip the trim, keep the full current text unchanged.
             # If we apply the trim, join only the words after the overlap.
             cleaned_text = current_chunk_text.strip() if skipped else " ".join(trimmed).strip()
@@ -348,8 +355,8 @@ def normalize_text_for_word_error_rate(text: str) -> str:
     1. Making everything lowercase.
     2. Removing all special marks (punctuation).
     3. Making sure there is only one space between words.
-    
-    This makes it easy to compare two sentences to see if the words 
+
+    This makes it easy to compare two sentences to see if the words
     are the same, even if the spelling or dots are different.
     """
     lowered_text = text.lower()
@@ -359,23 +366,28 @@ def normalize_text_for_word_error_rate(text: str) -> str:
     collapsed_spacing_text = re.sub(r"\s+", " ", punctuation_removed_text).strip()
     return collapsed_spacing_text
 
-
-# src/streaming/session.py
-import time
-
-
 class StreamingSession:
     """Remembers the audio state of the current recording session."""
-    def __init__(self, overlap_seconds: float = 1.0, sample_rate: int = 16000):
+
+    def __init__(
+        self,
+        overlap_seconds: float = 1.0,
+        sample_rate: int = settings.rate,
+    ):
         self._overlap_seconds = overlap_seconds
         self._sample_rate = sample_rate
         self._overlap_byte_count = int(self._sample_rate * 2 * self._overlap_seconds)
         self._last_chunk_tail_bytes = b""
         self._chunk_started_at = time.time()
 
-    def process_outgoing_audio_chunk(self, audio_bytes: bytes, stop_session: bool, silence_seconds: float) -> bytes:
+    def process_outgoing_audio_chunk(
+        self,
+        audio_bytes: bytes,
+        stop_session: bool,
+        silence_seconds: float,
+    ) -> bytes:
         """
-        Takes the new audio bytes, adds the previous audio bytes to the start, 
+        Takes the new audio bytes, adds the previous audio bytes to the start,
         and saves the end of this audio for the next time.
         """
         silence_byte_count = int(silence_seconds * self._sample_rate * 2)
@@ -385,11 +397,11 @@ class StreamingSession:
             overlap_audio_byte_count=self._overlap_byte_count,
             silence_audio_byte_count=silence_byte_count,
             sample_rate=self._sample_rate,
-            stop_session=stop_session
+            stop_session=stop_session,
         )
         self._last_chunk_tail_bytes = result.next_chunk_tail_bytes
         self._chunk_started_at = time.time()
-        
+
         return result.overlapped_audio_bytes
 
     def reset_audio_state(self):

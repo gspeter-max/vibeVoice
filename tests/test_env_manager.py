@@ -23,7 +23,7 @@ def test_check_and_ask_for_api_key_when_missing(mock_load_dotenv, mock_ask, mock
                 check_and_ask_for_api_key("Groq", "GROQ_API_KEY")
         
     mock_ask.assert_called_once()
-    m.assert_called_with(".env", "w")
+    m.assert_called_with(".env", "w", encoding="utf-8")
 
     file_handle = m.return_value.__enter__.return_value
     file_handle.writelines.assert_called()

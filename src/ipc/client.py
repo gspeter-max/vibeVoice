@@ -44,7 +44,7 @@ def send_message_to_brain(
             client_socket.sendall(message_bytes)
             client_socket.shutdown(socket.SHUT_WR)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -66,7 +66,7 @@ def open_raw_audio_stream_to_brain(
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         )
-    except Exception:
+    except OSError:
         return None
 
 
@@ -104,7 +104,7 @@ def send_raw_audio_stream_chunk(
     try:
         raw_stream_socket.sendall(chunk_bytes)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -137,12 +137,12 @@ def close_raw_audio_stream_to_brain(raw_stream_socket: socket.socket | None) -> 
 
     try:
         raw_stream_socket.shutdown(socket.SHUT_WR)
-    except Exception:
+    except OSError:
         pass
 
     try:
         raw_stream_socket.close()
-    except Exception:
+    except OSError:
         pass
 
 

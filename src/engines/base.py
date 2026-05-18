@@ -14,7 +14,6 @@ class TranscriptionEngine(ABC):
         Returns True if the model remembers previous audio chunks (like Nemotron).
         Returns False if the model treats every chunk as a brand new recording (like Parakeet).
         """
-        pass
 
     @abstractmethod
     def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
@@ -23,11 +22,9 @@ class TranscriptionEngine(ABC):
         If the model is stateful, this returns the FULL transcript so far.
         If the model is stateless, this returns ONLY the text for this specific chunk.
         """
-        pass
 
     def clear_internal_memory(self) -> None:
         """
         Tells a stateful model to forget everything and start fresh.
         Stateless models can just ignore this.
         """
-        pass

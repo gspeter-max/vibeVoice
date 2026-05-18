@@ -17,7 +17,7 @@ class ParakeetEngine(TranscriptionEngine):
     def __init__(self, model_name: str):
         self.model_name = model_name
         self._loaded_model = None
-        
+
         # Load the model from disk into memory when the class is created
         if legacy_backend:
             self._loaded_model = legacy_backend.load_speech_recognition_model_from_disk(self.model_name)
@@ -32,7 +32,7 @@ class ParakeetEngine(TranscriptionEngine):
         """
         if not legacy_backend or not self._loaded_model:
             return ""
-        
+
         text = legacy_backend.convert_audio_to_text(self._loaded_model, audio_samples)
         return text.strip()
 
@@ -41,4 +41,3 @@ class ParakeetEngine(TranscriptionEngine):
         Stateless models have no memory to clear.
         We do nothing, and that is perfectly fine.
         """
-        pass

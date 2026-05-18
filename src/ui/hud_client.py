@@ -6,7 +6,6 @@ the HUD about state changes and live microphone levels.
 
 from __future__ import annotations
 
-import socket
 import threading
 import time
 
@@ -39,7 +38,7 @@ def send_hud_command(
         hud_socket.sendall(command_text.encode())
         hud_socket.close()
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -108,8 +107,8 @@ def start_volume_sender_thread(
                 )
                 udp_socket.sendto(message.encode(), (host, volume_port))
                 packets_sent += 1
-            except Exception as error:
-                log.info(f"[Ear] ❌ Failed to send volume: {error}")
+            except OSError as error:
+                log.info("[Ear] Failed to send volume: %s", error)
             time.sleep(send_interval_seconds)
 
         udp_socket.close()

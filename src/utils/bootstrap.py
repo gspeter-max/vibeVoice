@@ -17,7 +17,7 @@ def fix_macos_library_paths():
     if not virtual_environment_folder.exists():
         # If .venv isn't in root, try to find it relative to this file
         virtual_environment_folder = Path(__file__).parent.parent.parent / ".venv"
-        
+
     if not virtual_environment_folder.exists():
         log.warning("Bootstrap: .venv folder not found. Skipping library path fix.")
         return
@@ -28,7 +28,7 @@ def fix_macos_library_paths():
         return
 
     file_to_patch = binary_code_files[0]
-    
+
     # 2. Define the path to the library folder that holds onnxruntime
     library_folder_path = virtual_environment_folder.absolute() / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages" / "onnxruntime" / "capi"
 
@@ -36,13 +36,13 @@ def fix_macos_library_paths():
         return
 
     log.info(f"Bootstrap: Verifying library paths for {file_to_patch.name}...")
-    
+
     # 3. Add the folder path to the file's internal search list using a Mac system tool
     try:
         # install_name_tool is a Mac tool that changes where a file looks for libraries
         subprocess.run([
-            "install_name_tool", 
-            "-add_rpath", str(library_folder_path), 
+            "install_name_tool",
+            "-add_rpath", str(library_folder_path),
             str(file_to_patch)
         ], check=True, capture_output=True)
         log.info(f"Bootstrap: ✅ Added library path: {library_folder_path}")

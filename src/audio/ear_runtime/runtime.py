@@ -13,6 +13,7 @@ import pyaudio
 from src import log
 from src.audio.ear_runtime.controller import Ear, TerminalMenu
 from src.audio.ear_runtime.devices import select_mic
+from src.audio.ear_runtime.recording import start_recording_state
 from src.input.hotkeys import InputTrigger
 from src.ipc.client import open_checked_raw_audio_stream_to_brain
 from src.ui.hud_client import start_hud_command_thread, start_volume_sender_thread
@@ -52,7 +53,7 @@ def start_ear():
             with ear._brain_sock_lock:
                 ear._brain_sock = raw_stream_socket
 
-        ear._start_recording_state(from_hold=from_hold)
+        start_recording_state(ear, from_hold=from_hold)
         ear._cmd_press_time = time.time()
         start_hud_command_thread("listen", socket_factory=socket.socket)
         start_volume_sender_thread(

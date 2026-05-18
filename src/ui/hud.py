@@ -1,14 +1,17 @@
+"""Heads-up display widget and server for Ear/Brain status updates."""
+
 import sys
 import math
-import time
-import platform
 import logging
+import platform
 import socket
 import threading
+import time
 
-from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtWidgets import QApplication, QWidget
+from src.utils.settings import settings
 
 # Global activation policy setup for macOS
 if platform.system() == "Darwin":
@@ -22,8 +25,6 @@ if platform.system() == "Darwin":
 # Constants for the indicator dimensions (Native Menu Bar size)
 INDICATOR_WIDTH = 100
 INDICATOR_HEIGHT = 26
-
-HUD_HOST, HUD_PORT = "127.0.0.1", 57234
 
 # State definitions
 STATE_HIDDEN = "HIDDEN"
@@ -50,13 +51,10 @@ class HudCommandBridge(QObject):
 
 
 class RoundedRectangularIndicatorWidget(QWidget):
-    """
-    A persistent, non-intrusive floating indicator that renders vertical bar waveforms.
-    It is designed to stay on top of all windows (including the Dock) without accepting input focus.
-    """
+    """Persistent floating indicator that renders animated vertical bars."""
     def __init__(self):
         super().__init__()
-        
+
         # 1. Fundamental Window Flags
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint |       # Always above other windows
@@ -65,19 +63,21 @@ class RoundedRectangularIndicatorWidget(QWidget):
             Qt.WindowDoesNotAcceptFocus |   # Keyboard ignores this window
             Qt.WindowTransparentForInput    # Mouse clicks go through to windows behind
         )
-        
+
         # 2. Attributes for persistence and non-activation
         self.setAttribute(Qt.WA_TranslucentBackground)  # Transparent corners
         self.setAttribute(Qt.WA_ShowWithoutActivating)  # Don't steal focus on show
-        
+
         if platform.system() == "Darwin":
-            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow) # Stay visible when app is background
-            
+            self.setAttribute(
+                Qt.WA_MacAlwaysShowToolWindow
+            )  # Stay visible when app is background
+
         self.setFixedSize(INDICATOR_WIDTH, INDICATOR_HEIGHT)
-        
+
         # Platform Specific Hardening
         self._apply_platform_specific_hardening()
-        
+
         # Internal rendering state
         self._interface_state = STATE_HIDDEN
         self._base_amplitude = 1.0
@@ -87,11 +87,9 @@ class RoundedRectangularIndicatorWidget(QWidget):
         self._smooth_amplitude = 0.0
         self._smooth_width = 44.0   # Idle width
         self._smooth_height = 20.0  # Idle height
-        self._smooth_spinner_opacity = 0.0 # Smooth fade in for loading spinner
-        self._smooth_bar_offset = 0.0 # Smooth left/right shift for bars
+        self._smooth_spinner_opacity = 0.0  # Smooth fade in for loading spinner
+        self._smooth_bar_offset = 0.0  # Smooth left/right shift for bars
         self._last_frame_time = time.time()
-
-
 
         # Time-based animation start (frame-rate independent)
         self._animation_start_time = time.time()
@@ -101,51 +99,56 @@ class RoundedRectangularIndicatorWidget(QWidget):
         self._background_color = QColor(0, 0, 0, 255)
 
     def _apply_platform_specific_hardening(self):
-        """Applies OS-level settings to ensure the indicator is non-intrusive and always on top."""
+        """Apply OS-level settings to keep the indicator non-intrusive."""
         sys_name = platform.system()
-        
+
         if sys_name == "Darwin":
             # macOS: Ensure the window follows the user into full-screen 'Spaces'
             # AND elevate the window level to stay above the Dock.
             try:
                 import objc
-                from AppKit import NSWindowCollectionBehaviorCanJoinAllSpaces, NSStatusWindowLevel
-                
+                from AppKit import (
+                    NSStatusWindowLevel,
+                    NSWindowCollectionBehaviorCanJoinAllSpaces,
+                )
+
                 # Get the underlying NSWindow for the widget
                 ptr = self.winId()
                 # Use pyobjc to set the collection behavior and level
                 # winId() on macOS provides the NSView pointer. We need the NSWindow.
                 ns_view = objc.objc_object(c_void_p=ptr)
                 ns_window = ns_view.window()
-                
+
                 if ns_window:
                     # Behavior: Join all spaces (full screen support)
                     ns_window.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces)
-                    
+
                     # Level: Elevate to Status Level (above Dock)
                     ns_window.setLevel_(NSStatusWindowLevel)
                 else:
-                    logging.debug("macOS hardening failed: Could not retrieve NSWindow from NSView.")
-                
-            except Exception as e:
-                logging.debug(f"macOS hardening failed: {e}")
-                
+                    logging.debug(
+                        "macOS hardening failed: Could not retrieve NSWindow from NSView."
+                    )
+
+            except (OSError, RuntimeError, AttributeError) as e:
+                logging.debug("macOS hardening failed: %s", e)
+
         elif sys_name == "Windows":
             # Windows: Set WS_EX_NOACTIVATE to prevent focus theft on click
             try:
                 import ctypes
-                
+
                 GWL_EXSTYLE = -20
                 WS_EX_NOACTIVATE = 0x08000000
-                
+
                 hwnd = self.winId()
                 get_window_long = ctypes.windll.user32.GetWindowLongW
                 set_window_long = ctypes.windll.user32.SetWindowLongW
-                
+
                 current_style = get_window_long(hwnd, GWL_EXSTYLE)
                 set_window_long(hwnd, GWL_EXSTYLE, current_style | WS_EX_NOACTIVATE)
-            except Exception as e:
-                logging.debug(f"Windows hardening failed: {e}")
+            except (OSError, AttributeError) as e:
+                logging.debug("Windows hardening failed: %s", e)
 
     def update_interface_state(self, state: str, amplitude: float = 1.0):
         """Updates the internal state and amplitude for the drawing logic."""
@@ -153,7 +156,7 @@ class RoundedRectangularIndicatorWidget(QWidget):
         self._base_amplitude = amplitude
         self.update()
 
-    def paintEvent(self, event):
+    def paintEvent(self, _event):
         """Renders the rounded rectangular background, outline, and vertical bars."""
         current_time = time.time()
         elapsed = current_time - self._animation_start_time
@@ -165,7 +168,7 @@ class RoundedRectangularIndicatorWidget(QWidget):
             target_w = 40.0
             target_h = 8.0  # Height when NOT recording (idle)
         elif self._interface_state in (STATE_THINKING, STATE_PROCESSING):
-            target_w = 88.0 # Swell to fit dots and spinner side-by-side
+            target_w = 88.0  # Swell to fit dots and spinner side-by-side
             target_h = 28.0
         else:
             target_w = 69.0
@@ -187,12 +190,28 @@ class RoundedRectangularIndicatorWidget(QWidget):
             self._smooth_width += (target_w - self._smooth_width) * lerp_factor_size
             self._smooth_height += (target_h - self._smooth_height) * lerp_factor_size
 
-            target_spinner = 1.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
-            spinner_fade_speed = 10.0 if target_spinner > self._smooth_spinner_opacity else 25.0
-            self._smooth_spinner_opacity += (target_spinner - self._smooth_spinner_opacity) * (1.0 - math.exp(-dt * spinner_fade_speed))
-            
-            target_bar_offset = -14.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
-            self._smooth_bar_offset += (target_bar_offset - self._smooth_bar_offset) * lerp_factor_size
+            target_spinner = (
+                1.0
+                if self._interface_state in (STATE_THINKING, STATE_PROCESSING)
+                else 0.0
+            )
+            spinner_fade_speed = (
+                10.0
+                if target_spinner > self._smooth_spinner_opacity
+                else 25.0
+            )
+            self._smooth_spinner_opacity += (
+                target_spinner - self._smooth_spinner_opacity
+            ) * (1.0 - math.exp(-dt * spinner_fade_speed))
+
+            target_bar_offset = (
+                -14.0
+                if self._interface_state in (STATE_THINKING, STATE_PROCESSING)
+                else 0.0
+            )
+            self._smooth_bar_offset += (
+                target_bar_offset - self._smooth_bar_offset
+            ) * lerp_factor_size
 
         # Center the drawn pill inside the fixed widget window
         pill_x = (self.width() - self._smooth_width) / 2.0
@@ -201,27 +220,33 @@ class RoundedRectangularIndicatorWidget(QWidget):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        
+
         # 1. Draw the Pill Background (Solid Black)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(self._background_color))
         radius = self._smooth_height / 2.0
         painter.drawRoundedRect(pill_rect, radius, radius)
-        
+
         # 2. Draw the "Slightly White" Outline
         outline_pen = QPen(self._border_color, 1)
         painter.setPen(outline_pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(pill_rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
-        
+
         # 3. Draw the Vertical Bars (Waveform)
         self._draw_vertical_bars(painter, elapsed, dt, pill_rect)
-        
+
         # 4. Draw the Circular Loading Spinner
         if self._smooth_spinner_opacity > 0.01:
             self._draw_loading_spinner(painter, elapsed, pill_rect)
-        
-    def _draw_vertical_bars(self, painter: QPainter, elapsed: float, dt: float, pill_rect):
+
+    def _draw_vertical_bars(
+        self,
+        painter: QPainter,
+        elapsed: float,
+        dt: float,
+        pill_rect,
+    ):
         """
         Draws vertical bars with organic, Wispr Flow-inspired animation.
 
@@ -235,23 +260,23 @@ class RoundedRectangularIndicatorWidget(QWidget):
         mid_y = pill_rect.center().y()
 
         # Bar layout — 11 centered bars, 3px wide with 2px gap
-        # Full pill-shaped rounding (radius = width/2) creates smooth capsules.  
+        # Full pill-shaped rounding (radius = width/2) creates smooth capsules.
         num_bars = 9
         bar_spacing = 5    # 3px bar + 2px gap
         bar_width = 3
         bar_rounding = bar_width / 2.0  # Full pill shape — perfectly round tips
         total_width = (num_bars - 1) * bar_spacing + bar_width
-        
+
         # Shift bars to the left when spinner appears
         start_x = pill_rect.center().x() - (total_width / 2.0) + self._smooth_bar_offset
 
         # Target amplitude based on current HUD state
         if self._interface_state == STATE_HIDDEN:
-            target_amp = 0.0    # 0 = bars fade out and disappear completely
+            target_amp = 0.0  # 0 = bars fade out and disappear completely
         elif self._interface_state == STATE_LISTENING:
-            target_amp = 14.0 * self._base_amplitude   # Taller, prominent waves
+            target_amp = 14.0 * self._base_amplitude  # Taller, prominent waves
         elif self._interface_state in (STATE_THINKING, STATE_PROCESSING):
-            target_amp = 0.0    # Fade out bars entirely so spinner can show
+            target_amp = 0.0  # Fade out bars entirely so spinner can show
         else:  # DONE
             target_amp = 2.0
 
@@ -276,8 +301,8 @@ class RoundedRectangularIndicatorWidget(QWidget):
             # Multi-frequency layered oscillation — two sin waves at different
             # speeds create smooth, organic movement across the bar group
             wave = (
-                0.60 * math.sin(elapsed * 2.0 + offset) +
-                0.40 * math.sin(elapsed * 3.4 + offset * 1.3)
+                0.60 * math.sin(elapsed * 2.0 + offset)
+                + 0.40 * math.sin(elapsed * 3.4 + offset * 1.3)
             )
 
             # Drastic bell curve — edges shrink by 85% to become tiny dots
@@ -306,51 +331,60 @@ class RoundedRectangularIndicatorWidget(QWidget):
             y = mid_y - (bar_h / 2)
 
             # drawRoundedRect with radius = bar_width/2 creates capsule/pill shape
-            painter.drawRoundedRect(x, y, bar_width, bar_h, bar_rounding, bar_rounding)
+            painter.drawRoundedRect(
+                x,
+                y,
+                bar_width,
+                bar_h,
+                bar_rounding,
+                bar_rounding,
+            )
 
     def _draw_loading_spinner(self, painter: QPainter, elapsed: float, pill_rect: QRectF):
         """Draws an iOS-style 12-tick activity indicator inside the pill."""
         center = pill_rect.center()
         # Shift the spinner to the right side of the pill
         center.setX(center.x() + 25.0)
-        
+
         painter.save()
         painter.translate(center)
-        
+
         num_ticks = 8
         inner_radius = 3.5
         outer_radius = 8.5
         tick_width = 2.2
-        
+
         # Slightly slower rotation for a premium feel
         current_tick = int((elapsed * 8.0) % num_ticks)
-        
+
         painter.setPen(Qt.NoPen)
-        
+
         for i in range(num_ticks):
             painter.save()
-            painter.rotate(i * 360/ num_ticks)  
-            
+            painter.rotate(i * 360 / num_ticks)
+
             distance = (current_tick - i) % num_ticks
             # distance 0 -> alpha = max
             # distance 7 -> alpha = min
             base_alpha = max(40, 255 - int(distance * (215.0 / num_ticks)))
             alpha = int(base_alpha * self._smooth_spinner_opacity)
-            
+
             painter.setBrush(QBrush(QColor(255, 255, 255, alpha)))
-            
-            tick_rect = QRectF(-tick_width / 2.0, -outer_radius, tick_width, outer_radius - inner_radius)
+
+            tick_rect = QRectF(
+                -tick_width / 2.0,
+                -outer_radius,
+                tick_width,
+                outer_radius - inner_radius,
+            )
             painter.drawRoundedRect(tick_rect, tick_width / 2.0, tick_width / 2.0)
-            
+
             painter.restore()
-            
+
         painter.restore()
 
 class OscillatingInterfaceController:
-    """
-    Manages the lifecycle, positioning, and state transitions of the indicator widget.
-    Handles adaptive frame rate — 60 FPS when active, 10 FPS when idle to save CPU.
-    """
+    """Manage widget lifecycle, positioning, and state transitions."""
     def __init__(self):
         self.widget = RoundedRectangularIndicatorWidget()
 
@@ -371,7 +405,7 @@ class OscillatingInterfaceController:
 
         geo = screen.geometry()
         x = geo.x() + (geo.width() - INDICATOR_WIDTH) // 2
-        y = geo.y() + geo.height() - INDICATOR_HEIGHT - 10 
+        y = geo.y() + geo.height() - INDICATOR_HEIGHT - 10
 
         self.widget.move(x, y)
 
@@ -392,7 +426,8 @@ class OscillatingInterfaceController:
             self.widget.update_interface_state(STATE_LISTENING, amplitude)
             self._set_animation_speed(16)  # 60 FPS for smooth waveform
         elif cmd in ["think", "process"]:
-            self.widget.update_interface_state(STATE_THINKING if cmd == "think" else STATE_PROCESSING)
+            state = STATE_THINKING if cmd == "think" else STATE_PROCESSING
+            self.widget.update_interface_state(state)
             self._set_animation_speed(16)  # 60 FPS for smooth waveform
         elif cmd == "done":
             self.widget.update_interface_state(STATE_DONE)
@@ -430,13 +465,13 @@ class HudServer(threading.Thread):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind((HUD_HOST, HUD_PORT))
-            except Exception as e:
-                print(f"HUD Server bind error: {e}")
+                s.bind((settings.hud_host, settings.hud_port))
+            except OSError as e:
+                logging.error("HUD Server bind error: %s", e)
                 return
             s.listen()
             while True:
-                conn, addr = s.accept()
+                conn, _addr = s.accept()
                 with conn:
                     data = conn.recv(1024)
                     if not data:

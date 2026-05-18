@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", int, float)
 
 def _get_parsed_value_from_environment(
-    environment_variable_name: str, 
-    fallback_value: T, 
+    environment_variable_name: str,
+    fallback_value: T,
     parser_function: Callable[[str], T],
     type_label: str
 ) -> T:
@@ -31,19 +31,19 @@ def _get_parsed_value_from_environment(
     """
     # Retrieve the value and remove any accidental leading or trailing whitespace.
     raw_environment_value = os.environ.get(environment_variable_name, "").strip()
-    
+
     # If the value is missing or just whitespace, use the provided fallback.
     if not raw_environment_value:
         return fallback_value
-        
+
     try:
         # Attempt to convert the cleaned string value using the provided parser function.
         return parser_function(raw_environment_value)
     except ValueError:
         # If parsing fails, log a clear warning and return the safe fallback.
         logger.warning(
-            f"Configuration Error: '{environment_variable_name}' has an invalid {type_label} "
-            f"value: '{raw_environment_value}'. Falling back to default: {fallback_value}."
+            "Configuration Error: '%s' has an invalid %s value: '%s'. Falling back to default: %s.",
+            environment_variable_name, type_label, raw_environment_value, fallback_value,
         )
         return fallback_value
 
@@ -60,9 +60,9 @@ def get_integer_from_environment(environment_variable_name: str, fallback_value:
     3. If it fails or is missing, you get the fallback value instead.
     """
     return _get_parsed_value_from_environment(
-        environment_variable_name, 
-        fallback_value, 
-        int, 
+        environment_variable_name,
+        fallback_value,
+        int,
         "integer"
     )
 
@@ -80,8 +80,8 @@ def get_float_from_environment(environment_variable_name: str, fallback_value: f
     4. If it fails or is missing, you get the fallback value instead.
     """
     return _get_parsed_value_from_environment(
-        environment_variable_name, 
-        fallback_value, 
-        float, 
+        environment_variable_name,
+        fallback_value,
+        float,
         "decimal"
     )

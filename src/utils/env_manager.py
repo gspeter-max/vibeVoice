@@ -1,7 +1,7 @@
 # src/utils/env_manager.py
 """
 This file helps manage our secret API keys.
-It can check if a key exists, ask the user for a new one, 
+It can check if a key exists, ask the user for a new one,
 and save it to the .env file automatically.
 """
 import os
@@ -26,9 +26,9 @@ def save_to_env(key: str, value: str) -> None:
     """
     env_path = ".env"
     lines = []
-    
+
     if os.path.exists(env_path):
-        with open(env_path, "r") as f:
+        with open(env_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
     # Normalize value and build the line
@@ -49,9 +49,9 @@ def save_to_env(key: str, value: str) -> None:
             updated_lines.append("\n")
         updated_lines.append(new_line)
 
-    with open(env_path, "w") as f:
+    with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(updated_lines)
-    
+
     # Update current process environment
     os.environ[key] = value.strip()
 

@@ -59,23 +59,29 @@ class StreamingSessionTelemetryRecorder:
             "recordings": [],
         }
 
-    def save_chunk_audio(self, recording_index: int, chunk_index: int, pcm_bytes: bytes, sample_rate: int = 16000) -> str | None:
+    def save_chunk_audio(
+        self,
+        recording_index: int,
+        chunk_index: int,
+        pcm_bytes: bytes,
+        sample_rate: int = settings.rate,
+    ) -> str | None:
         """
         Saves raw PCM16 bytes to a standard WAV file in the session's audio directory.
         Returns the relative path to the saved audio file.
         """
         if not pcm_bytes:
             return None
-            
+
         filename = f"rec{recording_index}_chunk{chunk_index}.wav"
         file_path = self._audio_dir / filename
-        
+
         with wave.open(str(file_path), "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2) # 16-bit
             wf.setframerate(sample_rate)
             wf.writeframes(pcm_bytes)
-            
+
         return f"{self._audio_dir.name}/{filename}"
 
     def _session_file_path(self) -> Path:
@@ -119,9 +125,10 @@ class StreamingSessionTelemetryRecorder:
     ) -> None:
         """Updates summary statistics for a specific chunk."""
         chunk = self._ensure_chunk(recording_index, chunk_index)
-        # Convert all fields to simple primitives to avoid JSON serialization errors (e.g. MagicMock in tests)
+        # Convert all fields to simple primitives to avoid JSON serialization
+        # errors such as MagicMock instances in tests.
         safe_fields = {
-            k: v if isinstance(v, (str, int, float, bool, type(None))) else str(v)
+            k: v if isinstance(v, (str, int, float, bool, type(None), dict)) else str(v)
             for k, v in fields.items()
         }
         chunk["summary"].update(safe_fields)
@@ -292,14 +299,9 @@ def _handle_session_telemetry_event(session_id: str, payload: dict) -> None:
         if key not in {"type", "chunk_index", "recording_index"}
     }
 
-    if event_type == "chunk_sent_to_brain":
-        _update_chunk_telemetry_summary(
-            session_id, recording_index, int(chunk_index), fields
-        )
-        return
-
-    if event_type == "silence_threshold_hit":
-        _update_chunk_telemetry_summary(
-            session_id, recording_index, int(chunk_index), fields
-        )
+    if event_type in ("chunk_sent_to_brain", "silence_threshold_hit"):
+        if chunk_index is not None:
+            _update_chunk_telemetry_summary(
+                session_id, recording_index, int(chunk_index), fields
+            )
         return

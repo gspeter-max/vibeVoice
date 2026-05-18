@@ -4,22 +4,23 @@ Provides a modern, reactive interface for configuring providers, microphones, an
 """
 
 import os
+from typing import List, Optional, Tuple
+
 import pyaudio
-from typing import Optional, List, Tuple
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, Button, Label, Input, Switch, Select
-from textual.screen import ModalScreen
 from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Footer, Header, Input, Label, Select, Static, Switch
 
 # Import existing logic
 from src.text_refiner.llm_router import PROVIDERS
+from src.utils.settings import settings
 from src.utils.env_manager import save_to_env
-from src.audio.ear_runtime.controller import get_active_models
 
 class ApiKeyModal(ModalScreen[Optional[str]]):
     """A modal dialog to enter an API key."""
-    
+
     DEFAULT_CSS = """
     ApiKeyModal {
         align: center middle;
@@ -56,7 +57,7 @@ class ApiKeyModal(ModalScreen[Optional[str]]):
         with Vertical(id="dialog"):
             yield Label(f"Enter API Key for [bold]{self.provider_name}[/bold]")
             yield Input(
-                value=self.current_key, 
+                value=self.current_key,
                 placeholder=f"Paste {self.env_var} here...",
                 password=True,
                 id="key_input"
@@ -66,6 +67,7 @@ class ApiKeyModal(ModalScreen[Optional[str]]):
                 yield Button("Cancel", variant="error", id="cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Close the modal and optionally persist the entered API key."""
         if event.button.id == "save":
             self.dismiss(self.query_one("#key_input").value)
         else:
@@ -73,7 +75,7 @@ class ApiKeyModal(ModalScreen[Optional[str]]):
 
 class WizardApp(App):
     """The main Bento Grid application for VibeVoice setup."""
-    
+
     TITLE = "VibeVoice Setup Wizard"
     BINDINGS = [
         Binding("q", "quit", "Quit", show=True),
@@ -171,7 +173,7 @@ class WizardApp(App):
         raw_provider_index = int(os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0"))
         self.selected_provider_index = min(raw_provider_index, len(PROVIDERS) - 1)
         self.api_keys = {
-            p["env_var"]: os.environ.get(p["env_var"], "") 
+            p["env_var"]: os.environ.get(p["env_var"], "")
             for p in PROVIDERS
         }
 
@@ -179,16 +181,18 @@ class WizardApp(App):
         self.pyaudio_instance = pyaudio.PyAudio()
         self.microphones = self._get_microphones()
         self.selected_mic_index = os.environ.get("VIBEVOICE_MIC_INDEX")
-        
+
         valid_indices = [idx for name, idx in self.microphones]
         if self.selected_mic_index not in valid_indices:
             try:
-                self.selected_mic_index = str(self.pyaudio_instance.get_default_input_device_info()["index"])
+                self.selected_mic_index = str(
+                    self.pyaudio_instance.get_default_input_device_info()["index"]
+                )
                 if self.selected_mic_index not in valid_indices:
                     self.selected_mic_index = valid_indices[0] if valid_indices else "0"
-            except:
+            except (IndexError, ValueError, OSError):
                 self.selected_mic_index = valid_indices[0] if valid_indices else "0"
-                
+
         if not self.microphones:
             self.microphones.append(("No Microphone Found", "0"))
 
@@ -215,7 +219,7 @@ class WizardApp(App):
                 for i, p in enumerate(PROVIDERS):
                     variant = "primary" if i == self.selected_provider_index else "default"
                     yield Button(p["name"], id=f"prov_{i}", variant=variant, classes="provider-btn")
-                
+
                 yield Static("", id="key-status")
                 yield Button("Update API Key", id="update-key-btn")
 
@@ -229,13 +233,16 @@ class WizardApp(App):
             # CELL 3: Software (Modes & Models)
             with Vertical(id="software-cell", classes="bento-cell"):
                 yield Label("3. SOFTWARE", classes="cell-title")
-                
+
                 yield Label("Transcription Model:")
-                stt_models = [(m, m) for m in get_active_models()]
+                stt_models = [(model, model) for model in settings.active_stt_models]
                 yield Select(stt_models, value=self.stt_model, id="model-select")
 
                 yield Label("Recording Mode:")
-                modes = [("Silence Streaming (Pro)", "silence_streaming"), ("No Streaming (Basic)", "no_streaming")]
+                modes = [
+                    ("Silence Streaming (Pro)", "silence_streaming"),
+                    ("No Streaming (Basic)", "no_streaming"),
+                ]
                 yield Select(modes, value=self.recording_mode, id="mode-select")
 
                 with Horizontal():
@@ -253,12 +260,13 @@ class WizardApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        """Refresh the screen once the wizard has mounted."""
         self.update_ui()
 
     def update_ui(self) -> None:
         """Refresh the UI based on current state."""
         provider = PROVIDERS[self.selected_provider_index]
-        
+
         # 1. Update Provider Key Status
         has_key = bool(self.api_keys.get(provider["env_var"]))
         status_text = "[green]● Key Ready[/green]" if has_key else "[red]○ Key Missing[/red]"
@@ -283,27 +291,29 @@ class WizardApp(App):
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle provider selection, API-key updates, and launch requests."""
         button_id = event.button.id
-        
+
         if button_id.startswith("prov_"):
             self.selected_provider_index = int(button_id.split("_")[1])
             self.update_ui()
-            
+
         elif button_id == "update-key-btn":
             provider = PROVIDERS[self.selected_provider_index]
             self.push_screen(
                 ApiKeyModal(
-                    provider["name"], 
-                    provider["env_var"], 
-                    self.api_keys.get(provider["env_var"], "")
+                    provider["name"],
+                    provider["env_var"],
+                    self.api_keys.get(provider["env_var"], ""),
                 ),
-                self.handle_key_save
+                self.handle_key_save,
             )
-            
+
         elif button_id == "launch-btn":
             self.save_and_exit()
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        """Persist in-memory UI state when a select widget changes."""
         if event.select.id == "mic-select":
             self.selected_mic_index = str(event.value)
         elif event.select.id == "model-select":
@@ -313,10 +323,12 @@ class WizardApp(App):
         self.update_ui()
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Update the telemetry toggle state."""
         if event.switch.id == "telemetry-switch":
             self.telemetry_enabled = event.value
 
     def handle_key_save(self, key: Optional[str]) -> None:
+        """Store an API key returned by the modal dialog."""
         if key is not None:
             provider = PROVIDERS[self.selected_provider_index]
             env_var = provider["env_var"]
@@ -330,13 +342,14 @@ class WizardApp(App):
         self.pyaudio_instance.terminate()
 
     def save_and_exit(self) -> None:
+        """Write the current wizard state to `.env` and close the app."""
         # Save all states to .env
         save_to_env("VIBEVOICE_PROVIDER_INDEX", str(self.selected_provider_index))
         save_to_env("VIBEVOICE_MIC_INDEX", self.selected_mic_index)
         save_to_env("RECORDING_MODE", self.recording_mode)
         save_to_env("STT_MODEL", self.stt_model)
         save_to_env("STREAMING_TELEMETRY_ENABLED", "1" if self.telemetry_enabled else "0")
-        
+
         self.exit()
 
 if __name__ == "__main__":

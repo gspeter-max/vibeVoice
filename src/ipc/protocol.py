@@ -72,7 +72,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
             full_text = raw_bytes.decode("utf-8").strip()
             _, model_name = full_text.split(":", 1)
             return {"command_type": "switch_model", "model_name": model_name}
-        except Exception:
+        except ValueError:
             return {"command_type": "error", "reason": "bad_switch_model_format"}
 
     if raw_bytes.startswith(b"CMD_SESSION_COMMIT:"):
@@ -86,7 +86,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
                     "recording_index": int(parts[2]),
                 }
             return {"command_type": "error", "reason": "bad_session_commit_format"}
-        except Exception:
+        except ValueError:
             return {"command_type": "error", "reason": "bad_session_commit_format"}
 
     if raw_bytes.startswith(b"CMD_SESSION_EVENT:") and b"\n\n" in raw_bytes:
@@ -102,7 +102,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
                     "payload": json.loads(payload_bytes.decode("utf-8")),
                 }
             return {"command_type": "error", "reason": "bad_session_event_format"}
-        except Exception:
+        except ValueError:
             return {"command_type": "error", "reason": "bad_session_event_format"}
 
     if raw_bytes.startswith(b"CMD_AUDIO_CHUNK:"):
@@ -121,7 +121,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
                     "payload_bytes": audio_data,
                 }
             return {"command_type": "error", "reason": "bad_audio_chunk_format"}
-        except Exception:
+        except ValueError:
             return {"command_type": "error", "reason": "bad_audio_chunk_format"}
 
     if not raw_bytes:

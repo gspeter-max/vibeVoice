@@ -6,8 +6,6 @@ constructing the full microphone runtime.
 """
 
 from __future__ import annotations
-import math
-import struct
 import numpy as np
 from src import log
 
@@ -19,13 +17,11 @@ def get_rms(audio_block_bytes: bytes) -> float:
     range, and returns the RMS value as one stable loudness number.
     """
 
-    sample_count = len(audio_block_bytes) // 2 # 16-bit audio sample is 2 bytes, so we divide by 2 to get the number of samples
-    pcm_samples = struct.unpack(f"{sample_count}h", audio_block_bytes[: sample_count * 2])
-    if not pcm_samples:
+    if not audio_block_bytes:
         return 0.0
 
-    sum_of_squares = sum((sample / 32768.0) ** 2 for sample in pcm_samples)
-    return math.sqrt(sum_of_squares / len(pcm_samples))
+    samples = np.frombuffer(audio_block_bytes, dtype=np.int16).astype(np.float32)
+    return float(np.sqrt(np.mean((samples / 32768.0) ** 2)))
 
 
 def boost_audio_chunk(audio_chunk_bytes: bytes, gain_multiplier: float) -> bytes:
@@ -84,29 +80,6 @@ def analyze_frequency_bands(
             }
 
         return {"bass": 0.33, "mid": 0.33, "treble": 0.34}
-    except Exception as error:
-        log.info(f"[Ear] ⚠️ Frequency analysis failed: {error}")
+    except (OSError, ValueError, RuntimeError) as error:
+        log.info("[Ear] Frequency analysis failed: %s", error)
         return {"bass": 0.33, "mid": 0.33, "treble": 0.34}
-
-
-def get_active_models() -> list[str]:
-    """
-    Dynamically returns the list of available transcription models.
-    Nemotron is specifically designed for streaming audio, so we only
-    expose it if the user has explicitly selected the 'silence_streaming' mode.
-    This prevents users from selecting an incompatible model in standard mode.
-    """
-    models = [
-        "fast-conformer-ctc-en-24500",
-        "moonshine-base",
-        "parakeet-tdt-0.6b-v2",
-        "parakeet-tdt-0.6b-v3",
-    ]
-
-    # Only append Nemotron if we are in streaming mode
-    from src.audio.ear_runtime.config import RECORDING_MODE
-    if RECORDING_MODE == "silence_streaming":
-        models.append("nemotron-streaming-0.6b")
-
-    return models
-

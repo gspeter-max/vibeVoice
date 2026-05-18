@@ -48,9 +48,6 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
             self._brain_sock_lock = threading.Lock()
             captured["ear"] = self
 
-        def _start_recording_state(self, from_hold):
-            captured["started_from_hold"] = from_hold
-
         def _stop_and_send(self, stop_session):
             captured["stopped_with"] = stop_session
 
@@ -92,6 +89,11 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
     monkeypatch.setattr(runtime_module.sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(runtime_module, "start_hud_command_thread", Mock())
     monkeypatch.setattr(runtime_module, "start_volume_sender_thread", Mock())
+    monkeypatch.setattr(
+        runtime_module,
+        "start_recording_state",
+        lambda ear, *, from_hold: captured.setdefault("started_from_hold", from_hold),
+    )
     monkeypatch.delenv("VIBEVOICE_MIC_INDEX", raising=False)
 
     runtime_module.start_ear()
@@ -116,9 +118,6 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
             self._brain_sock = None
             self._brain_sock_lock = threading.Lock()
             captured["ear"] = self
-
-        def _start_recording_state(self, from_hold):
-            captured["started_from_hold"] = from_hold
 
         def _stop_and_send(self, stop_session):
             captured["stopped_with"] = stop_session
@@ -161,6 +160,11 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
     monkeypatch.setattr(runtime_module, "open_checked_raw_audio_stream_to_brain", Mock(return_value=opened_socket))
     monkeypatch.setattr(runtime_module, "start_hud_command_thread", Mock())
     monkeypatch.setattr(runtime_module, "start_volume_sender_thread", Mock())
+    monkeypatch.setattr(
+        runtime_module,
+        "start_recording_state",
+        lambda ear, *, from_hold: captured.setdefault("started_from_hold", from_hold),
+    )
     monkeypatch.delenv("VIBEVOICE_MIC_INDEX", raising=False)
 
     runtime_module.start_ear()

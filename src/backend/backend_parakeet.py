@@ -8,14 +8,17 @@ Runs significantly faster than Whisper on CPU.
 from __future__ import annotations
 
 import os
+
 import numpy as np
+
 from src import log
 from src.utils.env_utils import get_integer_from_environment
+from src.utils.settings import settings
 
 try:
     import sherpa_onnx
     _SHERPA_ONNX_IMPORT_ERROR = None
-except Exception as exc:  # pragma: no cover - depends on platform wheels
+except (ImportError, OSError) as exc:  # pragma: no cover - depends on platform wheels
     sherpa_onnx = None  # type: ignore[assignment]
     _SHERPA_ONNX_IMPORT_ERROR = exc
 
@@ -24,13 +27,7 @@ CURRENT_MODEL_NAME = "nemo-parakeet-tdt-0.6b-v3"
 
 
 def get_model_folder_path_and_download_link(model_name_to_check: str) -> tuple[str, str]:
-    """
-    This function takes the name of the speech recognition model and gives you two things:
-    1. The folder path on your computer where the model should be saved.
-    2. The internet link to download the model if you do not have it.
-    
-    It removes the "nemo-" text from the name to make the folder name match what is on the internet.
-    """
+    """Return the local model folder and the download URL for one model name."""
     clean_model_name = model_name_to_check.replace("nemo-", "")
     is_moonshine_model = "moonshine" in clean_model_name
 
@@ -42,18 +39,22 @@ def get_model_folder_path_and_download_link(model_name_to_check: str) -> tuple[s
 
     base_cache_folder_path = os.path.expanduser("~/.cache/parakeet-flow/models")
     full_model_folder_path = os.path.join(base_cache_folder_path, folder_name_on_computer)
-    
+
     internet_download_link = (
-        f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{folder_name_on_computer}.tar.bz2"
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+        f"{folder_name_on_computer}.tar.bz2"
     )
 
     return full_model_folder_path, internet_download_link
 
 
-def download_model_file_and_unzip_it(internet_download_link: str, destination_folder_path: str):
+def download_model_file_and_unzip_it(
+    internet_download_link: str,
+    destination_folder_path: str,
+):
     """
     This function downloads the compressed model file from the internet and unzips it into a folder.
-    
+
     Steps:
     1. Find the file name from the internet link.
     2. Make the folder on your computer if it does not exist.
@@ -87,19 +88,10 @@ def download_model_file_and_unzip_it(internet_download_link: str, destination_fo
             os.remove(full_path_to_compressed_file)
 
 
-def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa_onnx.OfflineRecognizer:
-    """
-    This function loads the speech recognition model from your computer into memory so it can be used to convert audio to text.
-    
-    Steps:
-    1. Check if the sherpa_onnx library is installed.
-    2. Get the exact model name.
-    3. Get the folder path and download link for the model.
-    4. If the model is not on your computer, download and unzip it.
-    5. Find out how many CPU threads to use for speed.
-    6. Load the model into memory based on what type of model it is (Moonshine, CTC, or Transducer).
-    7. Return the loaded model.
-    """
+def load_speech_recognition_model_from_disk(
+    requested_model_name=None,
+) -> sherpa_onnx.OfflineRecognizer:
+    """Load the requested sherpa-onnx model into memory."""
     global CURRENT_MODEL_NAME
 
     # Step 1: Check if the sherpa_onnx library is installed
@@ -111,9 +103,11 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
 
     # Step 2: Get the exact model name
     target_model_name = requested_model_name or CURRENT_MODEL_NAME
-    
+
     # Step 3: Get the folder path and download link for the model
-    model_folder_path, internet_download_link = get_model_folder_path_and_download_link(target_model_name)
+    model_folder_path, internet_download_link = (
+        get_model_folder_path_and_download_link(target_model_name)
+    )
     CURRENT_MODEL_NAME = target_model_name.replace("nemo-", "")
 
     # Step 4: If the model is not on your computer, download and unzip it
@@ -148,7 +142,7 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
             model=f"{model_folder_path}/model.int8.onnx",
             tokens=f"{model_folder_path}/tokens.txt",
             num_threads=number_of_cpu_threads_to_use,
-            sample_rate=16000,
+            sample_rate=settings.rate,
             feature_dim=80,
             debug=False,
         )
@@ -160,7 +154,7 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
             joiner=f"{model_folder_path}/joiner.int8.onnx",
             tokens=f"{model_folder_path}/tokens.txt",
             num_threads=number_of_cpu_threads_to_use,
-            sample_rate=16000,
+            sample_rate=settings.rate,
             feature_dim=80,
             decoding_method="greedy_search",
             model_type="nemo_transducer",  # CRITICAL for Parakeet-TDT
@@ -168,20 +162,18 @@ def load_speech_recognition_model_from_disk(requested_model_name=None) -> sherpa
         )
 
     log.info("[sherpa-onnx] ✅ Model loaded.")
-    
+
     # Step 7: Return the loaded model
     return loaded_speech_recognizer
 
-def convert_audio_to_text(loaded_speech_recognizer_model: sherpa_onnx.OfflineRecognizer, audio_data_array: np.ndarray) -> str:
-    """
-    This function takes the audio data and uses the loaded model to figure out what words were spoken.
-    It returns the spoken words as a text string.
-    
-    Input audio must be a float32 numpy array (16kHz, mono, normalized -1 to 1).
-    """
+def convert_audio_to_text(
+    loaded_speech_recognizer_model: sherpa_onnx.OfflineRecognizer,
+    audio_data_array: np.ndarray,
+) -> str:
+    """Run one audio array through the loaded recognizer and return text."""
     audio_stream = loaded_speech_recognizer_model.create_stream()
-    audio_stream.accept_waveform(16000, audio_data_array)
+    audio_stream.accept_waveform(settings.rate, audio_data_array)
     loaded_speech_recognizer_model.decode_stream(audio_stream)
-    
+
     final_text_string = audio_stream.result.text.strip()
     return final_text_string

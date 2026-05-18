@@ -32,9 +32,9 @@ if __name__ == "__main__":
     try:
         run_wizard()
     except KeyboardInterrupt:
-        # Textual handles keyboard interrupt gracefully, 
+        # Textual handles keyboard interrupt gracefully,
         # but we keep this for extra safety.
         sys.exit(1)
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         print(f"Error starting wizard: {e}")
         sys.exit(1)

@@ -43,8 +43,8 @@ def load_start_sound() -> None:
                 _start_sound.setVolume(1.0)
             except ImportError:
                 log.info("[Ear] PySide6.QtMultimedia not available for sound effects")
-    except Exception as error:
-        log.info(f"[Ear] Failed to load start sound: {error}")
+    except (OSError, RuntimeError) as error:
+        log.info("[Ear] Failed to load start sound: %s", error)
 
 
 def play_start_sound() -> None:
@@ -60,8 +60,8 @@ def play_start_sound() -> None:
             _start_sound.play()
         else:
             _start_sound.play()
-    except Exception as error:
-        log.info(f"[Ear] Failed to play start sound: {error}")
+    except (RuntimeError, AttributeError) as error:
+        log.info("[Ear] Failed to play start sound: %s", error)
 
 
 def enable_macos_voice_isolation() -> None:
@@ -82,5 +82,5 @@ def enable_macos_voice_isolation() -> None:
                 log.info(f"[Ear] Voice processing not enabled: {error}")
         else:
             log.info("[Ear] inputNode does not support setVoiceProcessingEnabled_error_")
-    except Exception as error:
-        log.info(f"[Ear] Voice isolation init failed: {error}")
+    except RuntimeError as error:
+        log.info("[Ear] Voice isolation init failed: %s", error)

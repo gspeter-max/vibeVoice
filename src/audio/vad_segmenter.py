@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from src.utils.settings import settings
+
 
 class SileroVAD:
     """
@@ -44,12 +46,23 @@ class SileroVAD:
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(model_path, options, providers=["CPUExecutionProvider"])
+        self.session = ort.InferenceSession(
+            model_path,
+            options,
+            providers=["CPUExecutionProvider"],
+        )
 
-        state_input = next((inp for inp in self.session.get_inputs() if inp.name == "state"), None)
+        state_input = next(
+            (inp for inp in self.session.get_inputs() if inp.name == "state"),
+            None,
+        )
         if state_input:
             self._version = 5
-            state_shape = [dim if isinstance(dim, int) else 1 for dim in state_input.shape] if state_input.shape else [2, 1, 128]
+            state_shape = (
+                [dim if isinstance(dim, int) else 1 for dim in state_input.shape]
+                if state_input.shape
+                else [2, 1, 128]
+            )
             self._state = np.zeros(state_shape, dtype=np.float32)
             # 64-sample rolling context window required by Silero V5 ONNX streaming.
             # Without it the model sees a cold start every frame and returns ~0.001.
@@ -75,7 +88,7 @@ class SileroVAD:
             self._h = np.zeros_like(self._h)
             self._c = np.zeros_like(self._c)
 
-    def is_speech(self, audio_samples: np.ndarray, sample_rate: int = 16000) -> float:
+    def is_speech(self, audio_samples: np.ndarray, sample_rate: int = settings.rate) -> float:
         """
         Analyzes a single frame of audio and returns a speech probability score.
         It first normalizes the input frame to exactly 512 samples, padding or
@@ -135,10 +148,10 @@ class SileroUtteranceGate:
         self,
         vad_engine,
         *,
-        sample_rate: int = 16000,
+        sample_rate: int = settings.rate,
         frame_samples: int = 512,
         voice_threshold: float = 0.5,
-        silence_timeout_s: float = 0.4,
+        silence_timeout_s: float = settings.silence_timeout_seconds,
         min_utterance_bytes: int = 8000,
         energy_threshold: float = 0.03,
         energy_ratio: float = 2.5,
@@ -220,9 +233,9 @@ class SileroUtteranceGate:
         return self._speech_started
 
     def push(
-            self, 
-            audio_chunk: bytes, 
-            now: float, 
+            self,
+            audio_chunk: bytes,
+            now: float,
             analysis_chunk : bytes | None = None
         ) -> bool:
         """
@@ -236,13 +249,18 @@ class SileroUtteranceGate:
         if not audio_chunk:
             return False
         self._raw_analysis_buffer.extend(audio_chunk)
-        self._analysis_buffer.extend(analysis_chunk if analysis_chunk is not None else audio_chunk)
+        self._analysis_buffer.extend(
+            analysis_chunk if analysis_chunk is not None else audio_chunk
+        )
         # Keep the full utterance audio so it can be flushed later.
         self._buffer.extend(audio_chunk)
 
         frame_bytes = self.frame_samples * 2
         speech_detected = False
-        while len(self._analysis_buffer) >= frame_bytes and len(self._raw_analysis_buffer) >= frame_bytes:
+        while (
+            len(self._analysis_buffer) >= frame_bytes
+            and len(self._raw_analysis_buffer) >= frame_bytes
+        ):
             # Read one analysis frame and remove it from the queue.
             frame_bytes_data = bytes(self._analysis_buffer[:frame_bytes])
             raw_frame_bytes = bytes(self._raw_analysis_buffer[:frame_bytes])
@@ -250,11 +268,21 @@ class SileroUtteranceGate:
             del self._raw_analysis_buffer[:frame_bytes]
 
             # Convert PCM16 bytes into normalized float audio for the model.
-            audio = np.frombuffer(frame_bytes_data, dtype=np.int16).astype(np.float32) / 32768.0
+            audio = (
+                np.frombuffer(frame_bytes_data, dtype=np.int16).astype(np.float32)
+                / 32768.0
+            )
             raw_audio_for_energy_detection = (
                 np.frombuffer(raw_frame_bytes, dtype=np.int16).astype(np.float32) / 32768.0
             )
-            score = 1.0 if self.vad_engine is None else self.vad_engine.is_speech(audio, sample_rate=self.sample_rate)
+            score = (
+                1.0
+                if self.vad_engine is None
+                else self.vad_engine.is_speech(
+                    audio,
+                    sample_rate=self.sample_rate,
+                )
+            )
             frame_rms = float(np.sqrt(np.mean(raw_audio_for_energy_detection ** 2)))
             self._last_energy = frame_rms
             self._last_score = float(score)
@@ -262,7 +290,10 @@ class SileroUtteranceGate:
                 self._max_score = float(score)
 
             # Build an energy threshold that can adapt to room noise.
-            dynamic_threshold = max(self.energy_threshold, self._noise_floor * self.energy_ratio)
+            dynamic_threshold = max(
+                self.energy_threshold,
+                self._noise_floor * self.energy_ratio,
+            )
             self._last_dynamic_threshold = dynamic_threshold
             speech_by_energy = frame_rms >= dynamic_threshold
 
@@ -273,7 +304,11 @@ class SileroUtteranceGate:
                 self._last_voice_time = now
             else:
                 # Frames that are not speech help us slowly learn background noise.
-                self._noise_floor = frame_rms if self._noise_floor == 0.0 else (0.95 * self._noise_floor) + (0.05 * frame_rms)
+                self._noise_floor = (
+                    frame_rms
+                    if self._noise_floor == 0.0
+                    else (0.95 * self._noise_floor) + (0.05 * frame_rms)
+                )
 
         return speech_detected
 

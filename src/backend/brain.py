@@ -5,25 +5,44 @@ Receives chunk and commit commands via Unix socket, decodes chunks as they arriv
 and pastes the stitched final text after session commit.
 """
 
+import gc
 import os
-import sys
-import socket
-import time
-import threading
-import subprocess
 import json
-
+import platform
+import socket
+import subprocess
+import sys
+import threading
+import time
 
 import numpy as np
-from src.text_refiner.llm_router import refine_text_with_fallbacks, set_primary_provider, PROVIDERS
-from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
-from src.utils.bootstrap import fix_macos_library_paths
-from src import log
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-import platform
+from src import log
+from src.backend.data_record.telemetry import (
+    StreamingSessionTelemetryRecorder,
+    _handle_session_telemetry_event,
+    _telemetry_recorder_for_session,
+    _telemetry_seed,
+    _update_chunk_telemetry_summary,
+    _update_session_telemetry_summary,
+)
+from src.backend.state import (
+    SessionState,
+    backend_info,
+    backend_lock,
+    session_store,
+    session_store_lock,
+)
+from src.text_refiner.llm_router import (
+    PROVIDERS,
+    refine_text_with_fallbacks,
+    set_primary_provider,
+)
+from src.utils.bootstrap import fix_macos_library_paths
+from src.utils.settings import settings
 
 _finish_sound = None
 
@@ -31,15 +50,20 @@ def _load_finish_sound():
     global _finish_sound
     try:
         from pathlib import Path
-        sound_path = str(Path(__file__).parent.parent.parent / "sound_effect" / "finished.mp3")
-        
+        sound_path = str(
+            Path(__file__).parent.parent.parent / "sound_effect" / "finished.mp3"
+        )
+
         if platform.system() == "Darwin":
             try:
                 from AppKit import NSSound
-                _finish_sound = NSSound.alloc().initWithContentsOfFile_byReference_(sound_path, True)
+                _finish_sound = NSSound.alloc().initWithContentsOfFile_byReference_(
+                    sound_path,
+                    True,
+                )
             except ImportError:
                 pass
-        
+
         # Cross-platform fallback using PySide6 if AppKit fails or on Linux/Windows
         if _finish_sound is None:
             try:
@@ -50,15 +74,16 @@ def _load_finish_sound():
                 _finish_sound.setVolume(1.0)
             except ImportError:
                 log.info("[Brain] PySide6.QtMultimedia not available for sound effects")
-    except Exception as e:
-        log.info(f"[Brain] Failed to load finish sound: {e}")
+    except (OSError, RuntimeError) as e:
+        log.info("[Brain] Failed to load finish sound: %s", e)
 
 _load_finish_sound()
 
 def _play_finish_sound():
+    """Play the session-finished sound effect when available."""
     if not _finish_sound:
         return
-        
+
     try:
         if platform.system() == "Darwin" and hasattr(_finish_sound, "isPlaying"):
             if _finish_sound.isPlaying():
@@ -67,54 +92,33 @@ def _play_finish_sound():
         else:
             # PySide6 QSoundEffect path
             _finish_sound.play()
-    except Exception as e:
-        log.warning(f"[Brain] ⚠️  Failed to play finished sound: {e}")
-
-from src.backend.state import (
-    backend_info, backend_lock,
-    session_store, session_store_lock,
-    SessionState
-)
-
-from src.backend.data_record.telemetry import (
-    _telemetry_seed,
-    _telemetry_recorder_for_session,
-    _update_chunk_telemetry_summary,
-    _update_session_telemetry_summary,
-    _handle_session_telemetry_event,
-)
-
-NO_STREAMING_MODE = "no_streaming"
+    except RuntimeError as e:
+        log.warning("[Brain] Failed to play finished sound: %s", e)
 
 try:
     from pynput.keyboard import Controller
 except ImportError:  # pragma: no cover
 
     class Controller:  # type: ignore[override]
+        """Fallback keyboard controller used when pynput is unavailable."""
+
         def type(self, _text):
+            """Match pynput's controller API without doing any work."""
             return None
 
 
-# Constants — read from central settings so they can be overridden via .env
-from src.utils.settings import settings
 keyboard = Controller()
-
-def _is_no_streaming_mode() -> bool:
-    return settings.recording_mode == NO_STREAMING_MODE
-
-
-
 
 def load_transcription_engine(model_name="parakeet-tdt-0.6b-v3"):
     """
     Loads the requested AI model into memory wrapped in our clean TranscriptionEngine interface.
     """
     log.info(f"[Brain] Loading engine: {model_name}")
-    
+
     if "nemotron" in model_name.lower():
         from src.engines.nemotron import NemotronEngine
         return NemotronEngine()
-        
+
     from src.engines.parakeet import ParakeetEngine
     return ParakeetEngine(model_name)
 
@@ -128,9 +132,12 @@ def send_hud(cmd: str):
     feedback on whether the AI is currently listening or transcribing audio.
     """
     try:
-        with socket.create_connection((settings.hud_host, settings.hud_port), timeout=0.2) as s:
+        with socket.create_connection(
+            (settings.hud_host, settings.hud_port),
+            timeout=0.2,
+        ) as s:
             s.sendall(cmd.encode())
-    except Exception:
+    except OSError:
         pass
 
 
@@ -170,10 +177,14 @@ def _get_or_create_session(session_id: str) -> SessionState:
         return session
 
 
-def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_timing: float, refiner_timing: float):
-    """
-    Displays a formatted summary of the completed session in the terminal.
-    """
+def _show_summary_table(
+    session_id: str,
+    raw_text: str,
+    cleaned_text: str,
+    stt_timing: float,
+    refiner_timing: float,
+):
+    """Display a formatted summary of the completed session."""
     # Clear the previous meter line from Ear
     sys.stdout.write("\r\033[K")
     sys.stdout.flush()
@@ -186,7 +197,13 @@ def _show_summary_table(session_id: str, raw_text: str, cleaned_text: str, stt_t
     table.add_row("Raw Text", f"[dim white]{raw_text}[/dim white]")
     table.add_row("Refined", f"[bold white]{cleaned_text}[/bold white]")
     llm_timing_str = f"{refiner_timing:.2f}s" if refiner_timing > 0 else "bypassed"
-    table.add_row("Timing", f"STT: {stt_timing:.2f}s | LLM: {llm_timing_str} | Total: {(stt_timing + refiner_timing):.2f}s")
+    table.add_row(
+        "Timing",
+        (
+            f"STT: {stt_timing:.2f}s | LLM: {llm_timing_str} | "
+            f"Total: {(stt_timing + refiner_timing):.2f}s"
+        ),
+    )
     table.add_row("Stats", f"Before: {len(raw_text)} chars | After: {len(cleaned_text)} chars")
 
     Console().print("\n", table, "\n")
@@ -216,16 +233,15 @@ def _finalize_recording_if_ready(session_id: str, rec_idx: int) -> None:
         text = " ".join(parts).strip()
         rec.finalized = True
 
-    session_id[:8]
     if text:
         stt_time = rec.stt_time
-        
+
         send_hud("process")
 
         t_refine_start = time.perf_counter()
         cleaned_text = refine_text_with_fallbacks(text)
         refine_time = time.perf_counter() - t_refine_start
-        
+
         _update_session_telemetry_summary(
             session_id,
             {
@@ -272,7 +288,7 @@ def handle_streaming_audio_chunk(
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.received_count += 1
-        
+
         if seq == 0 and rec.received_count == 1:
             log.info("[Brain] 🎙️  Recording started...")
 
@@ -293,14 +309,14 @@ def handle_streaming_audio_chunk(
                 log.info("[Brain] ⚠️  No engine loaded — skipping chunk")
             else:
                 t_start = time.perf_counter()
-                
+
                 # 1. Transcribe blindly using the Rulebook
                 text = engine.transcribe_chunk(audio)
                 elapsed = time.perf_counter() - t_start
-                
+
                 with session.lock:
                     rec = session.get_or_create_recording(rec_idx)
-                    
+
                     # 2. Check Rulebook to see how to handle the output
                     if engine.is_stateful():
                         # For cumulative engines, we store the full text in part 0
@@ -313,14 +329,12 @@ def handle_streaming_audio_chunk(
                         dedup_analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
 
                         rec.transcript_parts[seq] = dedup_analysis.cleaned_text
-                        
+
                     rec.stt_time += elapsed
                     session.stt_time += elapsed
-                        
-        except Exception as e:
-            log.info(f"[Brain] ❌ Chunk decode error: {e}")
-            import traceback
-            traceback.print_exc()
+
+        except (OSError, RuntimeError, ValueError) as e:
+            log.info("[Brain] Chunk decode error: %s", e, exc_info=True)
 
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
@@ -342,12 +356,22 @@ def handle_streaming_audio_chunk(
             "raw_text": text,
             "cleaned_text_after_dedup": dedup_analysis.cleaned_text if dedup_analysis else text,
             "dedup_stats": {
-                "overlap_word_count": dedup_analysis.overlap_word_count if dedup_analysis else 0,
+                "overlap_word_count": (
+                    dedup_analysis.overlap_word_count if dedup_analysis else 0
+                ),
                 "trim_applied": dedup_analysis.trim_applied if dedup_analysis else False,
-                "combined_score": round(dedup_analysis.combined_score, 4) if dedup_analysis else 0.0,
+                "combined_score": (
+                    round(dedup_analysis.combined_score, 4)
+                    if dedup_analysis
+                    else 0.0
+                ),
                 "char_score": round(dedup_analysis.char_score, 4) if dedup_analysis else 0.0,
                 "token_score": round(dedup_analysis.token_score, 4) if dedup_analysis else 0.0,
-                "skipped_too_small": dedup_analysis.skipped_because_result_too_small if dedup_analysis else False,
+                "skipped_too_small": (
+                    dedup_analysis.skipped_because_result_too_small
+                    if dedup_analysis
+                    else False
+                ),
             },
         },
     )
@@ -358,7 +382,11 @@ def handle_streaming_audio_chunk(
                 r.received_count for r in session.recordings.values()
             ),
             "total_decode_seconds": round(session.stt_time, 2),
-            "flags": {"dedup_trim_applied": dedup_analysis.trim_applied if dedup_analysis else False},
+            "flags": {
+                "dedup_trim_applied": (
+                    dedup_analysis.trim_applied if dedup_analysis else False
+                )
+            },
         },
     )
 
@@ -373,7 +401,7 @@ def _mark_session_closed(session_id: str, rec_idx: int) -> None:
     with session.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.closed = True
-        
+
     _finalize_recording_if_ready(session_id, rec_idx)
 
 
@@ -402,8 +430,8 @@ def _handle_session_event(blob: bytes) -> None:
             kind=payload.get("type", "session_event"),
         )
         _handle_session_telemetry_event(session_id, payload)
-    except Exception as e:
-        log.warning("⚠️  Bad session event command", error=str(e))
+    except (KeyError, ValueError, TypeError) as e:
+        log.warning("Bad session event command", error=str(e))
 
 
 def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
@@ -437,13 +465,13 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
             log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
-    except Exception as e:
-        log.info(f"[Brain] ❌ Audio decode error: {e}")
+    except (OSError, RuntimeError, ValueError) as e:
+        log.info("[Brain] Audio decode error: %s", e)
         send_hud("hide")
         return
 
     stt_time = time.perf_counter() - t_connect
-    
+
     t_refine_start = time.perf_counter()
     cleaned_text = refine_text_with_fallbacks(final_text)
     refine_time = time.perf_counter() - t_refine_start
@@ -452,11 +480,11 @@ def _transcribe_raw_connection_audio(blob: bytes, t_connect: float) -> None:
     log.info(
         f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"'
     )
-    
+
     paste_instantly(cleaned_text + " ")
     # We do not use telemetry for the non-streaming path currently, but we can show the table.
     _show_summary_table("one-shot", final_text, cleaned_text, stt_time, refine_time)
-    
+
     send_hud("done")
 
 
@@ -467,7 +495,7 @@ def paste_instantly(text: str):
     On other platforms or if fast-paste fails, it falls back to simulating keystrokes.
     """
     pasted_successfully = False
-    
+
     if platform.system() == "Darwin":
         try:
             # Save old clipboard
@@ -476,8 +504,8 @@ def paste_instantly(text: str):
             )
 
             # Copy new text
-            proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-            proc.communicate(input=text.encode("utf-8"))
+            with subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE) as proc:
+                proc.communicate(input=text.encode("utf-8"))
 
             # Paste via AppleScript
             subprocess.run(
@@ -492,13 +520,13 @@ def paste_instantly(text: str):
             # Restore clipboard
             time.sleep(0.05)
             if old:
-                proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-                proc.communicate(input=old.encode("utf-8"))
-            
+                with subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE) as proc:
+                    proc.communicate(input=old.encode("utf-8"))
+
             pasted_successfully = True
 
-        except Exception as e:
-            log.info(f"[Brain] ⚠️  macOS Fast-paste failed: {e}")
+        except (subprocess.SubprocessError, OSError) as e:
+            log.info("[Brain] macOS Fast-paste failed: %s", e)
 
     if not pasted_successfully:
         log.info("[Brain] ⌨️  Pasting via simulated typing...")
@@ -547,8 +575,8 @@ def handle_connection(conn):
                 raw_audio.extend(data)
             except socket.timeout:
                 continue
-    except Exception as e:
-        log.info(f"[Brain] ⚠️  Recv error: {e}")
+    except OSError as e:
+        log.info("[Brain] Recv error: %s", e)
     finally:
         conn.close()
 
@@ -582,18 +610,16 @@ def _handle_switch_model(blob: bytes):
         new_model = blob.decode("utf-8").strip().split(":", 1)[1]
         log.info("🔄 Switching model", model=new_model)
         with backend_lock:
-            import gc
-
             backend_info["engine"] = None # first unload the model to free memory
             gc.collect()
             backend_info["engine"] = load_transcription_engine(new_model)
-            
+
             with session_store_lock:
                 session_store.clear()
-                
+
             log.info("✅ Model switched", model=new_model)
-    except Exception as e:
-        log.error("❌ Switching failed", error=str(e))
+    except (KeyError, ValueError, RuntimeError) as e:
+        log.error("Switching failed", error=str(e))
 
 
 def _handle_session_commit(blob: bytes):
@@ -609,8 +635,8 @@ def _handle_session_commit(blob: bytes):
             "✅ Session commit received", session=session_id[:8], recording=rec_idx
         )
         _mark_session_closed(session_id, rec_idx)
-    except Exception:
-        log.warning("⚠️  Bad commit command")
+    except (KeyError, ValueError, TypeError):
+        log.warning("Bad commit command")
 
 
 def _handle_chunk_command(blob: bytes):
@@ -632,8 +658,8 @@ def _handle_chunk_command(blob: bytes):
             session=session_id[:8],
         )
         handle_streaming_audio_chunk(session_id, int(rec_idx_str), int(seq_text), audio_bytes)
-    except Exception as e:
-        log.warning("⚠️  Bad chunk header", error=str(e))
+    except (ValueError, TypeError) as e:
+        log.warning("Bad chunk header", error=str(e))
 
 
 def start_server():
@@ -651,8 +677,8 @@ def start_server():
     log.info(f"[Brain] Warming up model: {settings.stt_model}...")
     try:
         backend_info["engine"].transcribe_chunk(np.zeros(8000, dtype=np.float32))
-    except Exception as e:
-        log.error(f"[Brain] ❌ Warm-up failed {e}")
+    except (RuntimeError, OSError) as e:
+        log.error("[Brain] Warm-up failed %s", e)
         sys.exit(1)
     log.info("[Brain] Warm-up done ✓")
 
@@ -684,20 +710,20 @@ def start_server():
                             "total_decode_seconds": round(session_state.stt_time, 2),
                         },
                     )
-        except Exception as e:
-            log.warning(f"⚠️ Failed to write shutdown telemetry: {e}")
+        except (OSError, ValueError, TypeError) as e:
+            log.warning("Failed to write shutdown telemetry: %s", e)
     finally:
         server.close()
         if os.path.exists(settings.socket_path):
             os.remove(settings.socket_path)
-            
+
         # Close the LLM router connection pool safely
         try:
             from src.text_refiner.llm_router import global_http_client
             global_http_client.close()
             log.info("[Brain] 🌐 LLM Router connection pool closed")
-        except Exception as e:
-            log.warning(f"⚠️ Failed to close LLM router client: {e}")
+        except (ImportError, AttributeError) as e:
+            log.warning("Failed to close LLM router client: %s", e)
 
 
 if __name__ == "__main__":

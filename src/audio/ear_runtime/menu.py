@@ -33,7 +33,7 @@ def send_switch_command(model_name, ear_instance=None):
         log.info("\n❌ Failed to send switch command\n")
 
 
-def run_self_test(sample_rate: int = 16000):
+def run_self_test(sample_rate: int = settings.rate):
     """Send one second of synthetic audio to Brain to test the input path."""
 
     log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
@@ -79,13 +79,6 @@ def run_self_test(sample_rate: int = 16000):
             log.info("   Brain might be loading model. Check this terminal for Brain output.\n")
 
 
-def _get_active_models_for_menu() -> list[str]:
-    """Load the current active-model list lazily to avoid circular imports."""
-
-    from .controller import get_active_models
-    return get_active_models()
-
-
 class TerminalMenu(threading.Thread):
     """Background terminal input loop for model switching and self-test actions."""
 
@@ -107,7 +100,7 @@ class TerminalMenu(threading.Thread):
                     pressed_key = sys.stdin.read(1)
                     if pressed_key in "12345":
                         choice_index = int(pressed_key) - 1
-                        active_models = _get_active_models_for_menu()
+                        active_models = settings.active_stt_models
                         if choice_index < len(active_models):
                             send_switch_command(
                                 active_models[choice_index],

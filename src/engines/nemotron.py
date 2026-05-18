@@ -25,7 +25,7 @@ class NemotronEngine(TranscriptionEngine):
         """
         if not self._engine:
             return ""
-        
+
         text = self._engine.add_audio_chunk_and_get_text(audio_samples)
         return text.strip()
 

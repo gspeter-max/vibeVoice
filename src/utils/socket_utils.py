@@ -31,13 +31,13 @@ def create_and_connect_unix_socket(
 
     # 1. Create the socket with Unix address family and stream type
     unix_socket = socket_factory(socket.AF_UNIX, socket.SOCK_STREAM)
-    
+
     # 2. Set the connection timeout
     unix_socket.settimeout(timeout_seconds)
-    
+
     # 3. Connect to the specified path
     unix_socket.connect(socket_path)
-    
+
     return unix_socket
 
 
@@ -63,13 +63,13 @@ def create_and_connect_tcp_socket(
 
     # 1. Create the socket with IPv4 address family and stream type
     tcp_socket = socket_factory(socket.AF_INET, socket.SOCK_STREAM)
-    
+
     # 2. Set the connection timeout
     tcp_socket.settimeout(timeout_seconds)
-    
+
     # 3. Connect to the host and port
     tcp_socket.connect((host, port))
-    
+
     return tcp_socket
 
 
@@ -89,5 +89,5 @@ def create_udp_socket(
 
     # 1. Create the socket with IPv4 address family and datagram type
     udp_socket = socket_factory(socket.AF_INET, socket.SOCK_DGRAM)
-    
+
     return udp_socket

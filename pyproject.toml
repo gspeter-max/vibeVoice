@@ -54,3 +54,8 @@ packages = ["."]
 
 [tool.pytest.ini_options]
 pythonpath = "src"
+
+[dependency-groups]
+dev = [
+    "pylint>=4.0.5",
+]

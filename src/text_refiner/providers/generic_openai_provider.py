@@ -27,15 +27,16 @@ def call_openai_compatible_api(
 
     Raises:
         httpx.HTTPError: If the internet connection fails or the server returns an error.
+        ValueError: If the API response has an unexpected structure.
     """
-    
+
     # 1. Setup the login headers
     #    We use the standard Bearer token authentication used by OpenAI-compatible APIs.
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    
+
     # 2. Create the message package (JSON body)
     #    We follow the OpenAI Chat Completions schema.
     message_package = {
@@ -47,18 +48,21 @@ def call_openai_compatible_api(
         "temperature": 0.2,
         "max_tokens": 512,
     }
-    
+
     # 3. Send the package to the provider and wait for the reply
     #    The router provides a shared global_http_client with a 4s timeout.
     response = client.post(url, headers=headers, json=message_package)
-    
+
     # 4. Check if the request was successful
     #    If not, this will raise an httpx.HTTPStatusError which the router will catch.
     response.raise_for_status()
-    
+
     # 5. Extract the cleaned text from the JSON response
     #    The response follows the standard OpenAI structure: choices[0].message.content
     reply_data = response.json()
-    cleaned_text = reply_data["choices"][0]["message"]["content"]
-    
+    try:
+        cleaned_text = reply_data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError) as e:
+        raise ValueError(f"Unexpected API response structure: {e}") from e
+
     return cleaned_text
