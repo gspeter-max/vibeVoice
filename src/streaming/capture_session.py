@@ -61,6 +61,26 @@ class CaptureSession:
         self.current_recording_index += 1
         self.current_chunk_sequence_number = 0
 
+    def mark_recording_stopped(self) -> None:
+        """Reset final-stop state that belongs to the capture session itself."""
+
+        self.chunk_started_at_seconds = 0.0
+        self.clear_overlap_tail()
+
+    def mark_nonfinal_chunk_sent(self, now_seconds: float | None = None) -> None:
+        """Store the start time for the next chunk after a non-final send."""
+
+        if now_seconds is None:
+            now_seconds = time.time()
+        self.chunk_started_at_seconds = now_seconds
+
+    def current_chunk_age_seconds(self, now_seconds: float | None = None) -> float:
+        """Return the age of the active chunk using the session-owned start time."""
+
+        if now_seconds is None:
+            now_seconds = time.time()
+        return max(0.0, now_seconds - self.chunk_started_at_seconds)
+
     def clear_overlap_tail(self) -> None:
         """Forget any stored overlap bytes, usually after the final stop."""
 

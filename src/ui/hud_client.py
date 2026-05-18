@@ -11,19 +11,14 @@ import threading
 import time
 
 from src import log
+from src.utils.settings import settings
 from src.utils.socket_utils import create_and_connect_tcp_socket, create_udp_socket
-
-
-HUD_HOST = "127.0.0.1"
-HUD_PORT = 57234
-VOLUME_PORT = 57235
-
 
 def send_hud_command(
     command_text: str,
     *,
-    host: str = HUD_HOST,
-    port: int = HUD_PORT,
+    host: str = settings.hud_host,
+    port: int = settings.hud_port,
     timeout_seconds: float = 0.2,
     socket_factory=None,
 ) -> bool:
@@ -48,11 +43,41 @@ def send_hud_command(
         return False
 
 
+def start_hud_command_thread(
+    command_text: str,
+    *,
+    host: str = settings.hud_host,
+    port: int = settings.hud_port,
+    timeout_seconds: float = 0.2,
+    socket_factory=None,
+):
+    """Start one daemon thread that sends a single HUD command.
+
+    Ear triggers these fire-and-forget HUD state changes from multiple places.
+    Keeping the thread launch here avoids repeating the same small threading
+    boilerplate in the runtime controller.
+    """
+
+    sender_thread = threading.Thread(
+        target=send_hud_command,
+        kwargs={
+            "command_text": command_text,
+            "host": host,
+            "port": port,
+            "timeout_seconds": timeout_seconds,
+            "socket_factory": socket_factory,
+        },
+        daemon=True,
+    )
+    sender_thread.start()
+    return sender_thread
+
+
 def start_volume_sender_thread(
     ear_state,
     *,
-    host: str = HUD_HOST,
-    volume_port: int = VOLUME_PORT,
+    host: str = settings.hud_host,
+    volume_port: int = settings.vol_port,
     socket_factory=None,
     send_interval_seconds: float = 0.04,
 ):

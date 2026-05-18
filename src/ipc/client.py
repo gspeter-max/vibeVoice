@@ -7,6 +7,7 @@ them or manage a long-lived raw-audio stream.
 
 from __future__ import annotations
 
+import os
 import socket
 from typing import Callable
 
@@ -69,6 +70,28 @@ def open_raw_audio_stream_to_brain(
         return None
 
 
+def open_checked_raw_audio_stream_to_brain(
+    timeout_seconds: float = 5.0,
+    socket_path: str = SOCKET_PATH,
+    socket_factory: Callable[..., socket.socket] | None = None,
+) -> socket.socket | None:
+    """Open the raw-audio stream only when the Brain socket path exists.
+
+    The Ear controller should not repeat file-existence checks or socket-open
+    rules. This helper centralizes that transport policy and returns `None`
+    for both a missing socket path and a failed connection attempt.
+    """
+
+    if not os.path.exists(socket_path):
+        return None
+
+    return open_raw_audio_stream_to_brain(
+        timeout_seconds=timeout_seconds,
+        socket_path=socket_path,
+        socket_factory=socket_factory,
+    )
+
+
 def send_raw_audio_stream_chunk(
     raw_stream_socket: socket.socket | None,
     chunk_bytes: bytes,
@@ -83,6 +106,27 @@ def send_raw_audio_stream_chunk(
         return True
     except Exception:
         return False
+
+
+def send_raw_audio_stream_chunk_or_close(
+    raw_stream_socket: socket.socket | None,
+    chunk_bytes: bytes,
+) -> socket.socket | None:
+    """Send one raw chunk and close the stream on failure.
+
+    Returning the surviving socket keeps the controller logic literal:
+    callers can store the returned handle directly, and `None` means the
+    stream is gone and must not be reused.
+    """
+
+    if raw_stream_socket is None:
+        return None
+
+    if send_raw_audio_stream_chunk(raw_stream_socket, chunk_bytes):
+        return raw_stream_socket
+
+    close_raw_audio_stream_to_brain(raw_stream_socket)
+    return None
 
 
 def close_raw_audio_stream_to_brain(raw_stream_socket: socket.socket | None) -> None:
@@ -100,3 +144,16 @@ def close_raw_audio_stream_to_brain(raw_stream_socket: socket.socket | None) -> 
         raw_stream_socket.close()
     except Exception:
         pass
+
+
+def close_raw_audio_stream_and_forget(
+    raw_stream_socket: socket.socket | None,
+) -> None:
+    """Close one raw stream socket and discard it.
+
+    The return type is intentionally `None` so callers can write
+    `raw_stream_socket = close_raw_audio_stream_and_forget(raw_stream_socket)`
+    if they want an explicit forget step.
+    """
+
+    close_raw_audio_stream_to_brain(raw_stream_socket)

@@ -6,8 +6,7 @@ import src.audio.ear_runtime.controller as ear
 @pytest.fixture
 def mock_ear():
     with patch('src.audio.ear_runtime.controller.SileroVAD'), patch('src.audio.ear_runtime.controller.pyaudio.PyAudio'):
-        e = ear.Ear()
-        return e
+        yield ear.Ear()
 
 def test_ear_tracks_current_model(mock_ear):
     """Verify that Ear tracks the current model."""
@@ -19,7 +18,7 @@ def test_ear_forces_1_12s_heartbeat_for_nemotron(mock_split, mock_ear):
     """Verify that Ear bypasses silence split and uses 1.12s heartbeat for Nemotron."""
     mock_ear.current_model = "nemotron-streaming-0.6b"
     mock_ear.is_recording = True
-    mock_ear._chunk_started_at = time.time() - 1.2 # Started 1.2s ago
+    mock_ear._capture_session.chunk_started_at_seconds = time.time() - 1.2
     
     # Mock split to NOT trigger
     mock_split.return_value.should_split_now = False
@@ -36,7 +35,7 @@ def test_ear_keeps_standard_logic_for_other_models(mock_split, mock_ear):
     """Verify that Ear uses standard silence logic for non-nemotron models."""
     mock_ear.current_model = "parakeet-tdt-0.6b-v3"
     mock_ear.is_recording = True
-    mock_ear._chunk_started_at = time.time() - 1.2
+    mock_ear._capture_session.chunk_started_at_seconds = time.time() - 1.2
     
     # Mock split to NOT trigger
     mock_split.return_value.should_split_now = False

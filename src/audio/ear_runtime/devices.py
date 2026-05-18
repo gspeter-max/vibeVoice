@@ -2,7 +2,42 @@
 
 from __future__ import annotations
 
+import os
+
 from src import log
+
+
+def default_input_device_index(pyaudio_instance) -> int:
+    """Return the active system default microphone index.
+
+    The Ear runtime resolves the microphone choice once during startup.
+    Keeping the default-device lookup here prevents controller.py from
+    re-owning low-level input-device logic.
+    """
+
+    return pyaudio_instance.get_default_input_device_info().get("index")
+
+
+def resolve_input_device_index(pyaudio_instance, input_device_index) -> int:
+    """Resolve the microphone index from explicit input, env var, or default.
+
+    Resolution order stays intentionally simple and literal:
+    1. An explicit constructor argument wins.
+    2. `VIBEVOICE_MIC_INDEX` is used when it contains a valid integer.
+    3. The active system default input device is used as the fallback.
+    """
+
+    if input_device_index is not None:
+        return input_device_index
+
+    environment_microphone_index = os.environ.get("VIBEVOICE_MIC_INDEX")
+    if environment_microphone_index is not None:
+        try:
+            return int(environment_microphone_index)
+        except ValueError:
+            pass
+
+    return default_input_device_index(pyaudio_instance)
 
 
 def select_mic(pyaudio_instance):

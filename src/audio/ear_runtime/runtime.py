@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 import termios
-import threading
 import time
 
 import pyaudio
 
 from src import log
-from src.audio.ear_runtime.controller import Ear, select_mic, TerminalMenu, BACKEND
+from src.audio.ear_runtime.controller import Ear, TerminalMenu
+from src.audio.ear_runtime.devices import select_mic
 from src.input.hotkeys import InputTrigger
+from src.ipc.client import open_checked_raw_audio_stream_to_brain
+from src.ui.hud_client import start_hud_command_thread, start_volume_sender_thread
+from src.utils.settings import settings
 
 def start_ear():
     """Start the Ear runtime using the controller class."""
@@ -37,14 +41,25 @@ def start_ear():
     menu.start()
 
     def _start_recording_wrapper(from_hold: bool):
-        if ear._is_no_streaming_mode():
-            if not ear._open_brain_stream():
+        if settings.is_no_streaming_mode:
+            raw_stream_socket = open_checked_raw_audio_stream_to_brain(
+                timeout_seconds=5.0,
+                socket_path=settings.socket_path,
+                socket_factory=socket.socket,
+            )
+            if raw_stream_socket is None:
                 return
+            with ear._brain_sock_lock:
+                ear._brain_sock = raw_stream_socket
 
         ear._start_recording_state(from_hold=from_hold)
         ear._cmd_press_time = time.time()
-        threading.Thread(target=ear._send_hud, args=("listen",), daemon=True).start()
-        ear._start_volume_sender()
+        start_hud_command_thread("listen", socket_factory=socket.socket)
+        start_volume_sender_thread(
+            ear,
+            volume_port=settings.vol_port,
+            socket_factory=socket.socket,
+        )
 
     def _stop_recording_wrapper(stop_session: bool):
         ear._stop_and_send(stop_session=stop_session)
@@ -66,7 +81,8 @@ def start_ear():
 
     backend_label = {
         "parakeet": "Parakeet TDT v3",
-    }.get(BACKEND, BACKEND)
+        "nemotron": "Nemotron",
+    }.get(settings.backend, settings.backend)
 
     log.info("─" * 60)
     log.info(f"🎙️  VIBEVOICE PRO | {backend_label} | {ear.active_mic_name}")
@@ -90,4 +106,3 @@ def start_ear():
 
 if __name__ == "__main__":
     start_ear()
-    
