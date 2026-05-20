@@ -27,7 +27,6 @@ from src.audio.ear_runtime.system_audio import (
 from src.audio.ear_runtime.recording import (
     close_mic_stream,
     flush_current_chunk,
-    open_mic_stream,
     process_audio_callback,
     record_loop_tick,
     start_recording_state,
@@ -166,7 +165,6 @@ class Ear:
 
         # ★ ALWAYS LISTENING MODE: Open stream once at startup
         self.stream = None
-        open_mic_stream(self)
         log.info(f"[Ear] Mic selected: {self.active_mic_name} ✓")
 
     def _audio_callback(self, in_data, frame_count, time_info, status):

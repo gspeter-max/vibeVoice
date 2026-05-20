@@ -23,9 +23,9 @@ class FakePyAudio:
 @pytest.fixture(autouse=True)
 def patch_open_mic_stream(monkeypatch):
     """Patch `open_mic_stream` to avoid actual audio setup."""
-    def dummy_open_stream(_self):
+    def dummy_open_stream(*args, **kwargs):
         pass
-    monkeypatch.setattr("src.audio.ear_runtime.controller.open_mic_stream", dummy_open_stream)
+    monkeypatch.setattr("src.audio.ear_runtime.recording.open_mic_stream", dummy_open_stream)
 
 
 @pytest.fixture(autouse=True)

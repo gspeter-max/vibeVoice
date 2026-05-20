@@ -213,6 +213,7 @@ def flush_current_chunk(ear, *, stop_session: bool) -> bool:
     if stop_session:
         ear._capture_session.mark_recording_stopped()
         commit_recording_session(ear)
+        close_mic_stream(ear)
     else:
         ear._capture_session.mark_nonfinal_chunk_sent()
     return sent
@@ -242,6 +243,7 @@ def stop_no_streaming(ear) -> None:
         args=(raw_stream_socket,),
         daemon=True,
     ).start()
+    close_mic_stream(ear)
 
 
 def open_mic_stream(ear) -> None:
@@ -285,6 +287,7 @@ def start_recording_state(ear, *, from_hold: bool) -> None:
 
     del from_hold
     play_start_sound()
+    open_mic_stream(ear)
 
     with ear._lock:
         ear.is_recording = True
