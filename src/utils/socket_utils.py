@@ -10,11 +10,10 @@ from __future__ import annotations
 import socket
 from typing import Callable
 
-
 def create_socket(
     family: int,
     socket_type: int,
-    address: Any = None,
+    address: str | tuple[str, int] | None = None,
     timeout_seconds: float | None = None,
     socket_factory: Callable[..., socket.socket] | None = None,
 ) -> socket.socket:

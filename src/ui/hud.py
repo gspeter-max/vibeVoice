@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from src.utils.settings import settings
 
 # Global activation policy setup for macOS
+_HAS_APPKIT = False
 if platform.system() == "Darwin":
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
@@ -22,9 +23,19 @@ if platform.system() == "Darwin":
     except ImportError:
         pass
 
+    try:
+        import objc
+        from AppKit import (
+            NSStatusWindowLevel,
+            NSWindowCollectionBehaviorCanJoinAllSpaces,
+        )
+        _HAS_APPKIT = True
+    except ImportError:
+        pass
+
 # Constants for the indicator dimensions (Native Menu Bar size)
-INDICATOR_WIDTH = 100
-INDICATOR_HEIGHT = 26
+INDICATOR_WIDTH = settings.hud_indicator_width
+INDICATOR_HEIGHT = settings.hud_indicator_height
 
 # State definitions
 STATE_HIDDEN = "HIDDEN"
@@ -102,16 +113,10 @@ class RoundedRectangularIndicatorWidget(QWidget):
         """Apply OS-level settings to keep the indicator non-intrusive."""
         sys_name = platform.system()
 
-        if sys_name == "Darwin":
+        if sys_name == "Darwin" and _HAS_APPKIT:
             # macOS: Ensure the window follows the user into full-screen 'Spaces'
             # AND elevate the window level to stay above the Dock.
             try:
-                import objc
-                from AppKit import (
-                    NSStatusWindowLevel,
-                    NSWindowCollectionBehaviorCanJoinAllSpaces,
-                )
-
                 # Get the underlying NSWindow for the widget
                 ptr = self.winId()
                 # Use pyobjc to set the collection behavior and level

@@ -109,6 +109,8 @@ class VibeVoiceSettings(BaseSettings):
     ansi_reset: str = "\033[0m"
     right_cmd_vk: int = 54
     nemotron_model: str = "nemotron-streaming-0.6b"
+    hud_indicator_width: int = 100
+    hud_indicator_height: int = 26
 
     model_config = SettingsConfigDict(
         env_file=".env",
