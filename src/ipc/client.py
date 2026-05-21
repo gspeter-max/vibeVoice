@@ -10,8 +10,8 @@ from __future__ import annotations
 import os
 import socket
 from typing import Callable
-
-from src.utils.socket_utils import create_and_connect_unix_socket
+from src import log
+from src.utils.socket_utils import create_socket
 
 
 SOCKET_PATH = "/tmp/parakeet.sock"
@@ -36,15 +36,18 @@ def send_message_to_brain(
 
     try:
         # Use our shared utility to create and connect the socket
-        with create_and_connect_unix_socket(
-            socket_path=socket_path,
+        with create_socket(
+            family=socket.AF_UNIX,
+            socket_type=socket.SOCK_STREAM,
+            address=socket_path,
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         ) as client_socket:
             client_socket.sendall(message_bytes)
             client_socket.shutdown(socket.SHUT_WR)
         return True
-    except OSError:
+    except Exception as e :
+        log.error(f"Error sending message to brain: |{e}|")
         return False
 
 
@@ -61,12 +64,15 @@ def open_raw_audio_stream_to_brain(
 
     try:
         # Use our shared utility to create and connect the socket
-        return create_and_connect_unix_socket(
-            socket_path=socket_path,
+        return create_socket(
+            family=socket.AF_UNIX,
+            socket_type=socket.SOCK_STREAM,
+            address=socket_path,
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         )
-    except OSError:
+    except Exception as e:
+        log.error(f"Error opening raw audio stream to brain: |{e}|")
         return None
 
 

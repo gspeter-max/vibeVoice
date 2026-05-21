@@ -421,7 +421,7 @@ def test_silence_boundary_splits_chunk_while_recording_continues():
     ear._capture_session.current_session_id = "session123"
 
     with patch("src.audio.ear_runtime.recording.send_audio_chunk_to_brain", return_value=True) as mock_send, \
-         patch("src.audio.ear_runtime.recording.commit_recording_session") as mock_commit:
+         patch("src.audio.ear_runtime.recording.commit_session_recording_stoped") as mock_commit:
         ear._record_loop_tick()
 
     mock_send.assert_called_once()
@@ -517,7 +517,7 @@ def test_flush_current_chunk_does_not_prepend_overlap_on_final_stop():
     with patch.object(ear._utterance_gate, "silence_elapsed", return_value=0.0), \
          patch.object(ear._utterance_gate, "flush", return_value=b"\x03\x00\x04\x00"), \
          patch("src.audio.ear_runtime.recording.send_audio_chunk_to_brain", return_value=True) as mock_send, \
-         patch("src.audio.ear_runtime.recording.commit_recording_session", return_value=True), \
+         patch("src.audio.ear_runtime.recording.commit_session_recording_stoped", return_value=True), \
          patch("src.audio.ear_runtime.recording.start_hud_command_thread"):
         flush_current_chunk(ear, stop_session=True)
 
@@ -614,7 +614,7 @@ def test_flush_current_chunk_sends_commit_even_if_last_chunk_empty():
     gate.flush.return_value = b""
     ear._utterance_gate = gate
 
-    with patch("src.audio.ear_runtime.recording.commit_recording_session", return_value=True) as mock_commit:
+    with patch("src.audio.ear_runtime.recording.commit_session_recording_stoped", return_value=True) as mock_commit:
         sent = flush_current_chunk(ear, stop_session=True)
 
     assert sent is False
@@ -670,7 +670,7 @@ def test_audio_chunk_send_uses_session_header_and_sequence():
 
 def test_session_event_send_uses_json_payload_and_session_header():
     """Test that Ear formats telemetry events with session id and JSON payload."""
-    from src.audio.ear_runtime.recording import send_session_event_to_brain
+    from src.audio.ear_runtime.recording import send_session_event_to_telemetry_brain
 
     ear = Ear(pyaudio_lib=FakePyAudio())
     ear._telemetry_enabled = True
@@ -704,7 +704,7 @@ def test_session_event_send_uses_json_payload_and_session_header():
             return None
 
     with patch("src.audio.ear_runtime.recording.socket.socket", return_value=FakeSocket()):
-        sent = send_session_event_to_brain(
+        sent = send_session_event_to_telemetry_brain(
             ear,
             "chunk_sent_to_brain",
             {"chunk_index": 7, "audio_bytes": 42},

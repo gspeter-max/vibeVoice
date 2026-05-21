@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import os
 import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import time
 import socket
+from src.utils.socket_utils import create_socket
 import signal
 import subprocess
 
@@ -226,9 +228,12 @@ def check_if_hud_display_program_is_ready_to_receive_data(timeout_seconds: int =
             return False
 
         try:
-            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_socket.settimeout(1)
-            test_socket.connect(("127.0.0.1", port))
+            test_socket = create_socket(
+                family=socket.AF_INET,
+                socket_type=socket.SOCK_STREAM,
+                address=("127.0.0.1", port),
+                timeout_seconds=1.0
+            )
             test_socket.close()
             print(f"[Check] ✅ HUD TCP port {port} is open.")
             return True
@@ -249,9 +254,12 @@ def send_fake_audio_to_brain_and_see_if_it_survives() -> bool:
     socket_path = "/tmp/parakeet.sock"
     print("[Ping] Pinging Brain socket...")
     try:
-        client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client_socket.settimeout(5)
-        client_socket.connect(socket_path)
+        client_socket = create_socket(
+            family=socket.AF_UNIX,
+            socket_type=socket.SOCK_STREAM,
+            address=socket_path,
+            timeout_seconds=5.0
+        )
         
         # Send 1 second of dummy 16-bit PCM silence
         dummy_data = b"\x00" * 32000 
@@ -279,9 +287,12 @@ def send_fake_command_to_hud_and_see_if_it_survives() -> bool:
     port = 57234
     print("[Ping] Pinging HUD TCP port...")
     try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.settimeout(5)
-        client_socket.connect(("127.0.0.1", port))
+        client_socket = create_socket(
+            family=socket.AF_INET,
+            socket_type=socket.SOCK_STREAM,
+            address=("127.0.0.1", port),
+            timeout_seconds=5.0
+        )
         client_socket.sendall(b"listen\n")
         client_socket.close()
         

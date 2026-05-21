@@ -6,12 +6,13 @@ the HUD about state changes and live microphone levels.
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
 
 from src import log
 from src.utils.settings import settings
-from src.utils.socket_utils import create_and_connect_tcp_socket, create_udp_socket
+from src.utils.socket_utils import create_socket
 
 def send_hud_command(
     command_text: str,
@@ -29,9 +30,10 @@ def send_hud_command(
 
     try:
         # Use our shared utility to create and connect the TCP socket
-        hud_socket = create_and_connect_tcp_socket(
-            host=host,
-            port=port,
+        hud_socket = create_socket(
+            family=socket.AF_INET,
+            socket_type=socket.SOCK_STREAM,
+            address=(host, port),
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         )
@@ -88,7 +90,11 @@ def start_volume_sender_thread(
     """
 
     # Use our shared utility to create the UDP socket
-    udp_socket = create_udp_socket(socket_factory=socket_factory)
+    udp_socket = create_socket(
+        family=socket.AF_INET,
+        socket_type=socket.SOCK_DGRAM,
+        socket_factory=socket_factory
+    )
 
     def _sender():
         packets_sent = 0

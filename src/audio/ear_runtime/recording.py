@@ -40,19 +40,19 @@ def begin_recording_session(ear) -> None:
     """Start one controller-managed recording session."""
 
     ear._capture_session.begin_recording(time.time())
-    send_session_event_to_brain(
+    send_session_event_to_telemetry_brain(
         ear,
         "session_started",
         {"recording_mode": settings.recording_mode},
     )
 
 
-def send_session_event_to_brain(
+def send_session_event_to_telemetry_brain(
     ear,
     event_type: str,
     fields: dict | None = None,
 ) -> bool:
-    """Send one Ear session event over the Brain socket."""
+    """Send one Ear session event over the Telemetry Brain socket."""
 
     if not ear._telemetry_enabled or not ear._capture_session.current_session_id:
         return False
@@ -72,7 +72,7 @@ def send_session_event_to_brain(
         socket_factory=socket.socket,
     )
     if not sent:
-        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}'")
+        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
     return sent
 
 
@@ -98,7 +98,7 @@ def send_audio_chunk_to_brain(ear, utterance_bytes: bytes) -> bool:
         socket_factory=socket.socket,
     )
     if sent:
-        send_session_event_to_brain(
+        send_session_event_to_telemetry_brain(
             ear,
             "chunk_sent_to_brain",
             {
@@ -112,8 +112,8 @@ def send_audio_chunk_to_brain(ear, utterance_bytes: bytes) -> bool:
     return False
 
 
-def commit_recording_session(ear) -> bool:
-    """Send the final commit signal for the current recording."""
+def commit_session_recording_stoped(ear) -> bool:
+    """Send the final commit signal for the current session recording stop."""
 
     if not ear._capture_session.current_session_id:
         return False
@@ -130,14 +130,14 @@ def commit_recording_session(ear) -> bool:
     )
     if sent:
         log.info(
-            "✅ Session committed",
+            "✅ Session recording stop committed",
             session=ear._capture_session.current_session_id[:8],
             recording=ear._capture_session.current_recording_index,
         )
         ear._capture_session.mark_recording_committed()
         return True
 
-    log.error("❌ Failed to commit session")
+    log.error("❌ Failed to commit session recording stop")
     return False
 
 
@@ -170,7 +170,7 @@ def flush_current_chunk(ear, *, stop_session: bool) -> bool:
         if stop_session:
             ear._capture_session.mark_recording_stopped()
             log.info("[Ear] 🔇 No speech captured; stopping recording")
-            commit_recording_session(ear)
+            commit_session_recording_stoped(ear)
         return False
 
     boosted_utterance_bytes = boost_audio_chunk(utterance_bytes, ear.gain_multiplier)
@@ -197,7 +197,7 @@ def flush_current_chunk(ear, *, stop_session: bool) -> bool:
 
     sent = send_audio_chunk_to_brain(ear, overlapped_utterance_bytes)
     if sent:
-        send_session_event_to_brain(
+        send_session_event_to_telemetry_brain(
             ear,
             "silence_threshold_hit" if not stop_session else "session_stopped",
             {
@@ -212,7 +212,7 @@ def flush_current_chunk(ear, *, stop_session: bool) -> bool:
 
     if stop_session:
         ear._capture_session.mark_recording_stopped()
-        commit_recording_session(ear)
+        commit_session_recording_stoped(ear)
         close_mic_stream(ear)
     else:
         ear._capture_session.mark_nonfinal_chunk_sent()
