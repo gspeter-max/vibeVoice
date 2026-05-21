@@ -22,11 +22,11 @@ from src.audio.ear_runtime.analysis import (
 )
 from src.audio.ear_runtime.system_audio import play_start_sound
 from src.ipc.client import (
-    close_raw_audio_stream_and_forget,
+    close_raw_audio_stream_to_brain,
     send_message_to_brain,
     send_raw_audio_stream_chunk_or_close,
 )
-from src.ipc.protocol import (
+from src.ipc.protocol_message_formats import (
     format_audio_chunk_message,
     format_session_commit_message,
     format_session_event_message,
@@ -239,7 +239,7 @@ def stop_no_streaming(ear) -> None:
         raw_stream_socket = ear._brain_sock
         ear._brain_sock = None
     threading.Thread(
-        target=close_raw_audio_stream_and_forget,
+        target=close_raw_audio_stream_to_brain,
         args=(raw_stream_socket,),
         daemon=True,
     ).start()

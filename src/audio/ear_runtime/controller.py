@@ -32,7 +32,7 @@ from src.audio.ear_runtime.recording import (
     start_recording_state,
     stop_no_streaming,
 )
-from src.ipc.client import close_raw_audio_stream_and_forget, open_checked_raw_audio_stream_to_brain
+from src.ipc.client import close_raw_audio_stream_to_brain, open_checked_raw_audio_stream_to_brain
 from src.streaming.capture_session import CaptureSession
 from src.ui.hud_client import start_hud_command_thread, start_volume_sender_thread
 from src.utils.settings import settings
@@ -285,6 +285,6 @@ class Ear:
         with self._brain_sock_lock:
             raw_stream_socket = self._brain_sock
             self._brain_sock = None
-        close_raw_audio_stream_and_forget(raw_stream_socket)
+        close_raw_audio_stream_to_brain(raw_stream_socket)
         close_mic_stream(self)
         self.pyaudio_library_for_capturing_audio.terminate()

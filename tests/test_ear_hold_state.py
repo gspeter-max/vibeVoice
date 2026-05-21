@@ -211,12 +211,11 @@ def test_hud_client_volume_sender_stops_after_recording_ends():
 
 def test_raw_stream_helpers_open_send_and_close_socket():
     from src.ipc.client import (
-        close_raw_audio_stream_and_forget,
+        close_raw_audio_stream_to_brain,
         open_checked_raw_audio_stream_to_brain,
         open_raw_audio_stream_to_brain,
         send_raw_audio_stream_chunk_or_close,
         send_raw_audio_stream_chunk,
-        close_raw_audio_stream_to_brain,
     )
 
     captured = {"connected": False, "payloads": [], "shutdown_called": False, "closed": False}
@@ -247,7 +246,7 @@ def test_raw_stream_helpers_open_send_and_close_socket():
         checked_socket_handle = open_checked_raw_audio_stream_to_brain()
         assert checked_socket_handle is not None
         assert send_raw_audio_stream_chunk_or_close(checked_socket_handle, b"chunk-two") is checked_socket_handle
-        close_raw_audio_stream_and_forget(checked_socket_handle)
+        close_raw_audio_stream_to_brain(checked_socket_handle)
 
     assert captured["connected"] is True
     assert captured["payloads"] == [b"chunk-bytes", b"chunk-two"]

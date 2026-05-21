@@ -152,14 +152,3 @@ def close_raw_audio_stream_to_brain(raw_stream_socket: socket.socket | None) -> 
         pass
 
 
-def close_raw_audio_stream_and_forget(
-    raw_stream_socket: socket.socket | None,
-) -> None:
-    """Close one raw stream socket and discard it.
-
-    The return type is intentionally `None` so callers can write
-    `raw_stream_socket = close_raw_audio_stream_and_forget(raw_stream_socket)`
-    if they want an explicit forget step.
-    """
-
-    close_raw_audio_stream_to_brain(raw_stream_socket)

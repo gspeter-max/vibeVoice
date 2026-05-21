@@ -14,7 +14,7 @@ import numpy as np
 
 from src import log
 from src.ipc.client import send_message_to_brain
-from src.ipc.protocol import format_switch_model_message
+from src.ipc.protocol_message_formats import format_switch_model_message
 from src.utils.settings import settings
 
 
