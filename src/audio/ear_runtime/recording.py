@@ -68,7 +68,6 @@ def send_session_event_to_telemetry_brain(
     sent = send_message_to_brain(
         message_bytes,
         timeout_seconds=5.0,
-        socket_path=settings.socket_path,
         socket_factory=socket.socket,
     )
     if not sent:
@@ -94,7 +93,6 @@ def send_audio_chunk_to_brain(ear, utterance_bytes: bytes) -> bool:
     sent = send_message_to_brain(
         message_bytes,
         timeout_seconds=5.0,
-        socket_path=settings.socket_path,
         socket_factory=socket.socket,
     )
     if sent:
@@ -125,7 +123,6 @@ def commit_session_recording_stoped(ear) -> bool:
     sent = send_message_to_brain(
         message_bytes,
         timeout_seconds=5.0,
-        socket_path=settings.socket_path,
         socket_factory=socket.socket,
     )
     if sent:

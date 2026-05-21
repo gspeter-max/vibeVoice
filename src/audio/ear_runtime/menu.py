@@ -27,7 +27,6 @@ def send_switch_command(model_name, ear_instance=None):
 
     sent = send_message_to_brain(
         format_switch_model_message(model_name),
-        socket_path=settings.socket_path,
     )
     if not sent:
         log.info("\n❌ Failed to send switch command\n")
@@ -64,7 +63,7 @@ def run_self_test(sample_rate: int = settings.rate):
             log.info("   Is Brain running? Check this terminal for Brain output.\n")
             return
 
-        if send_message_to_brain(audio_data, socket_path=settings.socket_path):
+        if send_message_to_brain(audio_data):
             log.info("\r✅ Self-test audio sent to Brain\n")
             return
 

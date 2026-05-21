@@ -212,8 +212,12 @@ def test_terminal_menu_run_uses_audio_ear_switch_command_seam(monkeypatch):
 
 
 def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
+    from unittest.mock import MagicMock
+    import src.ipc.client as ipc_client
+
     checked_paths = []
-    sent = {}
+    used_address = []
+    mock_socket = MagicMock()
 
     monkeypatch.setattr(menu_module.settings, "socket_path", "/tmp/custom-parakeet.sock")
 
@@ -222,14 +226,15 @@ def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
         lambda path: checked_paths.append(path) or path == "/tmp/custom-parakeet.sock",
     )
     monkeypatch.setattr(
-        "src.audio.ear_runtime.menu.send_message_to_brain",
-        lambda payload, **kwargs: sent.setdefault("socket_path", kwargs.get("socket_path")) or True,
+        ipc_client,
+        "create_socket",
+        lambda *args, **kwargs: used_address.append(kwargs.get("address")) or mock_socket,
     )
 
     run_self_test()
 
     assert checked_paths == ["/tmp/custom-parakeet.sock"]
-    assert sent["socket_path"] == "/tmp/custom-parakeet.sock"
+    assert used_address == ["/tmp/custom-parakeet.sock"]
 
 def test_nemotron_in_models_when_silence_streaming(monkeypatch):
     """

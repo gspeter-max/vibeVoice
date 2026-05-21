@@ -11,16 +11,13 @@ import os
 import socket
 from typing import Callable
 from src import log
+from src.utils.settings import settings
 from src.utils.socket_utils import create_socket
-
-
-SOCKET_PATH = "/tmp/parakeet.sock"
 
 
 def send_message_to_brain(
     message_bytes: bytes,
     timeout_seconds: float = 5.0,
-    socket_path: str = SOCKET_PATH,
     socket_factory: Callable[..., socket.socket] | None = None,
 ) -> bool:
     """Send one complete message over a short-lived Unix socket connection.
@@ -39,7 +36,7 @@ def send_message_to_brain(
         with create_socket(
             family=socket.AF_UNIX,
             socket_type=socket.SOCK_STREAM,
-            address=socket_path,
+            address=settings.socket_path,
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         ) as client_socket:
@@ -53,7 +50,6 @@ def send_message_to_brain(
 
 def open_raw_audio_stream_to_brain(
     timeout_seconds: float = 5.0,
-    socket_path: str = SOCKET_PATH,
     socket_factory: Callable[..., socket.socket] | None = None,
 ) -> socket.socket | None:
     """Open the long-lived raw-audio stream used by no-streaming mode.
@@ -67,7 +63,7 @@ def open_raw_audio_stream_to_brain(
         return create_socket(
             family=socket.AF_UNIX,
             socket_type=socket.SOCK_STREAM,
-            address=socket_path,
+            address=settings.socket_path,
             timeout_seconds=timeout_seconds,
             socket_factory=socket_factory
         )
@@ -78,7 +74,6 @@ def open_raw_audio_stream_to_brain(
 
 def open_checked_raw_audio_stream_to_brain(
     timeout_seconds: float = 5.0,
-    socket_path: str = SOCKET_PATH,
     socket_factory: Callable[..., socket.socket] | None = None,
 ) -> socket.socket | None:
     """Open the raw-audio stream only when the Brain socket path exists.
@@ -88,12 +83,11 @@ def open_checked_raw_audio_stream_to_brain(
     for both a missing socket path and a failed connection attempt.
     """
 
-    if not os.path.exists(socket_path):
+    if not os.path.exists(settings.socket_path):
         return None
 
     return open_raw_audio_stream_to_brain(
         timeout_seconds=timeout_seconds,
-        socket_path=socket_path,
         socket_factory=socket_factory,
     )
 

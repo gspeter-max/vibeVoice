@@ -45,7 +45,6 @@ def start_ear():
         if settings.is_no_streaming_mode:
             raw_stream_socket = open_checked_raw_audio_stream_to_brain(
                 timeout_seconds=5.0,
-                socket_path=settings.socket_path,
                 socket_factory=socket.socket,
             )
             if raw_stream_socket is None:

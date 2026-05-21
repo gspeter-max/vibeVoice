@@ -199,7 +199,6 @@ class Ear:
             log.debug("[Ear] About to open brain stream")
             raw_stream_socket = open_checked_raw_audio_stream_to_brain(
                 timeout_seconds=5.0,
-                socket_path=settings.socket_path,
                 socket_factory=socket.socket,
             )
             if raw_stream_socket is None:
