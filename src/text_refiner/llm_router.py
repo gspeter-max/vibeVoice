@@ -13,8 +13,7 @@ from src import log
 from src.utils.env_manager import check_and_ask_for_api_key
 
 # 1. Configuration for our Providers
-# Fallback order: Groq → Cerebras.
-# If Groq fails, we rotate to Cerebras automatically.
+# Fallback order: Groq → Cerebras → OpenGateway.
 PROVIDERS = [
     {
         "name": "Groq",
@@ -31,6 +30,15 @@ PROVIDERS = [
         "model": "llama3.1-8b",
         "description": "Fast Backup",
         "feature": "Llama 3.1 8B on Cerebras hardware"
+    },
+    {
+        "name": "OpenGateway",
+        "env_var": "OPENGATEWAY_API_KEY",
+        "url": "https://opengateway.gitlawb.com/v1/chat/completions",
+        "model": "mimo-v2.5-pro",
+        "description": "MiMo v2.5 Pro",
+        "feature": "Advanced reasoning via OpenGateway",
+        "timeout": 15.0,
     },
 ]
 
@@ -97,7 +105,8 @@ def refine_text_with_fallbacks(raw_text: str) -> str:
             api_key=api_key,
             url=provider["url"],
             model=provider["model"],
-            raw_text=raw_text
+            raw_text=raw_text,
+            timeout=provider.get("timeout", 4.0),
         )
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ValueError) as error:
         # 4. If it fails (timeout, network, or key), we rotate to the next provider

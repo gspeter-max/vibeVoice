@@ -48,18 +48,19 @@ def test_router_rotates_on_failure(mock_env_get, mock_call_api, mock_check_key):
 @patch("src.text_refiner.llm_router.call_openai_compatible_api")
 @patch("src.text_refiner.llm_router.os.environ.get")
 def test_router_full_rotation(mock_env_get, mock_call_api, mock_check_key):
-    """Test that it loops back to Groq (index 0) after both providers fail."""
+    """Test that it loops back to Groq (index 0) after all providers fail."""
     import src.text_refiner.llm_router as router
     router.current_provider_index = 0
     mock_env_get.return_value = "fake-key"
 
     mock_call_api.side_effect = make_mock_http_error()
 
-    # Fail both providers once each to complete a full rotation back to index 0
-    router.refine_text_with_fallbacks("1")  # Groq fails → index moves to 1 (Cerebras)
-    router.refine_text_with_fallbacks("2")  # Cerebras fails → index wraps to 0 (Groq)
+    # Fail all providers once each to complete a full rotation back to index 0
+    router.refine_text_with_fallbacks("1")  # Groq fails → index 1 (Cerebras)
+    router.refine_text_with_fallbacks("2")  # Cerebras fails → index 2 (OpenGateway)
+    router.refine_text_with_fallbacks("3")  # OpenGateway fails → index 0 (Groq)
 
-    # Should be back at 0 (Groq) after a full rotation through both providers
+    # Should be back at 0 (Groq) after a full rotation through all providers
     assert router.current_provider_index == 0
 
 def test_router_empty_input_returns_empty():

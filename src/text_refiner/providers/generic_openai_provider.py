@@ -10,7 +10,8 @@ def call_openai_compatible_api(
     api_key: str,
     url: str,
     model: str,
-    raw_text: str
+    raw_text: str,
+    timeout: float = 4.0,
 ) -> str:
     """
     Send raw text to an OpenAI-compatible API to fix grammar and spelling.
@@ -32,9 +33,11 @@ def call_openai_compatible_api(
 
     # 1. Setup the login headers
     #    We use the standard Bearer token authentication used by OpenAI-compatible APIs.
+    #    Accept-Encoding: identity prevents servers from sending malformed gzip.
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept-Encoding": "identity",
     }
 
     # 2. Create the message package (JSON body)
@@ -50,8 +53,8 @@ def call_openai_compatible_api(
     }
 
     # 3. Send the package to the provider and wait for the reply
-    #    The router provides a shared global_http_client with a 4s timeout.
-    response = client.post(url, headers=headers, json=message_package)
+    #    Per-request timeout overrides the client default (needed for slower providers).
+    response = client.post(url, headers=headers, json=message_package, timeout=timeout)
 
     # 4. Check if the request was successful
     #    If not, this will raise an httpx.HTTPStatusError which the router will catch.

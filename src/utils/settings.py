@@ -28,10 +28,11 @@ class VibeVoiceSettings(BaseSettings):
     # ── API Keys ───────────────────────────────────────────────────────────
     groq_api_key: str = ""
     cerebras_api_key: str = ""
+    opengateway_api_key: str = ""
 
     # ── Provider & Model ───────────────────────────────────────────────────
     vibevoice_provider_index: int = 0
-    """Index into the PROVIDERS list in llm_router.py (0=Groq, 1=Cerebras)."""
+    """Index into the PROVIDERS list in llm_router.py (0=Groq, 1=Cerebras, 2=OpenGateway)."""
 
 
     # ── Speech Models ─────────────────────────────────────────────────────
