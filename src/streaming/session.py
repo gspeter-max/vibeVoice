@@ -41,13 +41,24 @@ def should_split(
     gate_finalize: bool,
     silence_len: float,
 ) -> SplitDecision:
-    """Determines if the active audio chunk should be split based on age and silence.
+    """Determine if the active audio chunk should be split.
 
-    Steps:
-    1. Calculate the active chunk's age by subtracting the start time from the current time.
-    2. Check if the chunk's age exceeds the minimum allowed age before a silence split.
-    3. Trigger a split if the age threshold is met and the utterance gate requests finalization.
-    4. Return the split decision containing the decision state, chunk age, and silence duration.
+    Calculate the elapsed age of the current audio chunk and determine if it
+    exceeds the configured threshold. A split is triggered if both the minimum
+    age is reached and the utterance gate finalization is active.
+
+    Args:
+        start_time: The timestamp in seconds when the current chunk was started.
+        now: The current epoch timestamp in seconds.
+        min_age: The minimum allowed chunk duration in seconds before a split
+            can be triggered by silence.
+        gate_finalize: A boolean flag indicating whether the utterance gate
+            has finalized and expects a boundary split.
+        silence_len: The duration of the detected silence in seconds.
+
+    Returns:
+        SplitDecision: A container holding the split decision boolean,
+            calculated chunk age, and silence duration.
     """
     age: float = max(0.0, now - start_time)
 
@@ -139,17 +150,28 @@ def apply_overlap(
     rate: int,
     stop: bool,
 ) -> OverlapResult:
-    """Prepends the previous chunk's tail to the current chunk and extracts the new tail.
+    """Prepend the previous chunk tail to the current audio and extract the next tail.
 
-    Steps:
-    1. If the session has stopped, return the current audio as is with no overlap or new tail.
-    2. Adjust the volume/energy of the previous tail to match the current chunk's energy.
-    3. Prepend the volume-matched tail to the start of the current chunk audio.
-    4. Determine the new tail for the next chunk from the end of the current audio:
-       - Exclude silence bytes at the end of the chunk to avoid capturing silent tails.
-       - Extract up to overlap_bytes from the speech segment.
-    5. Calculate the duration of the prepended overlap in seconds using sample rate.
-    6. Return the combined audio, the new tail bytes, and the overlap duration.
+    Join the end of the previous chunk with the beginning of the new chunk.
+    Adjust the RMS energy of the overlap tail to prevent volume jumps.
+    Extract actual speech tail bytes to save for the next chunk's overlap,
+    excluding silence bytes.
+
+    Args:
+        audio: Raw PCM audio bytes for the current chunk.
+        tail: Raw PCM tail bytes from the previous chunk.
+        overlap_bytes: The target number of bytes to overlap between chunks.
+        silence_bytes: The number of trailing silent bytes to ignore when
+            extracting the next overlap tail.
+        rate: The audio sample rate in Hz.
+        stop: If True, indicates the session is ending, and no overlap or
+            tail bytes should be processed.
+
+    Returns:
+        OverlapResult: A container holding:
+            - audio (bytes): Combined audio bytes containing the equalized tail.
+            - tail (bytes): Audio bytes extracted from the speech tail for the next chunk.
+            - overlap_len (float): The length of the overlap in seconds.
     """
     if stop:
         return OverlapResult(
@@ -318,22 +340,27 @@ def dedup_prefix(
     *,
     max_words: int = 15,
 ) -> DedupResult:
-    """Detects and trims overlapping duplicate words at the start of curr_text.
+    """Detect and trim duplicate overlapping words from the start of the current text.
 
-    Steps:
-    1. Initialize the default result with the stripped current text and zero overlap scores.
-    2. If either string is empty, return the default result.
-    3. Split and normalize both the last text and current text.
-    4. Determine the maximum possible overlap length up to max_words.
-    5. Iterate backwards from the largest possible overlap down to 2 words:
-       - Extract the tail words of the last text and head words of the current text.
-       - Calculate character similarity and token similarity between the segments.
-       - Compute a weighted combined similarity score: 60% character similarity + 40% token similarity.
-       - If combined score is >= the semantic overlapping threshold from settings:
-         - Trim the overlapping words from the original current text.
-         - Check if the trim should be skipped because the remaining text is too short.
-         - Return the deduplication result with the appropriate trimmed text.
-    6. Return the default result if no significant overlap is found.
+    Compare the ending of the previous chunk's transcription against the beginning
+    of the current chunk's transcription. Use a combination of character sequence matching
+    and token similarity to find duplicates caused by audio overlap.
+
+    Args:
+        last_text: The finalized transcription text of the previous chunk.
+        curr_text: The raw transcription text of the current chunk.
+        max_words: The maximum number of words to look back and compare for overlap.
+
+    Returns:
+        DedupResult: A container holding:
+            - text (str): The cleaned text after applying the duplicate trim.
+            - overlap_words (int): The count of overlapping words detected.
+            - char_score (float): Character sequence similarity score.
+            - token_score (float): Token set overlap similarity score.
+            - combined_score (float): The weighted combination of character and token scores.
+            - trimmed (bool): Whether the trim was successfully applied.
+            - skipped (bool): Whether the trim was skipped because the remaining text
+                would be too short.
     """
     result: DedupResult = DedupResult(
         text=curr_text.strip(),
