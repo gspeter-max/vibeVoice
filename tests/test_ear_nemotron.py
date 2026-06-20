@@ -13,7 +13,7 @@ def test_ear_tracks_current_model(mock_ear):
     mock_ear.current_model = "nemotron-streaming-0.6b"
     assert "nemotron" in mock_ear.current_model
 
-@patch('src.audio.ear_runtime.recording.should_split_chunk_after_silence')
+@patch('src.audio.ear_runtime.recording.should_split')
 def test_ear_forces_1_12s_heartbeat_for_nemotron(mock_split, mock_ear):
     """Verify that Ear bypasses silence split and uses 1.12s heartbeat for Nemotron."""
     mock_ear.current_model = "nemotron-streaming-0.6b"
@@ -21,7 +21,7 @@ def test_ear_forces_1_12s_heartbeat_for_nemotron(mock_split, mock_ear):
     mock_ear._capture_session.chunk_started_at_seconds = time.time() - 1.2
     
     # Mock split to NOT trigger
-    mock_split.return_value.should_split_now = False
+    mock_split.return_value.should_split = False
     mock_ear._stop_and_send = MagicMock()
     
     # Run loop tick
@@ -30,7 +30,7 @@ def test_ear_forces_1_12s_heartbeat_for_nemotron(mock_split, mock_ear):
     # Should have called _stop_and_send because 1.2 > 1.12
     mock_ear._stop_and_send.assert_called_with(stop_session=False)
 
-@patch('src.audio.ear_runtime.recording.should_split_chunk_after_silence')
+@patch('src.audio.ear_runtime.recording.should_split')
 def test_ear_keeps_standard_logic_for_other_models(mock_split, mock_ear):
     """Verify that Ear uses standard silence logic for non-nemotron models."""
     mock_ear.current_model = "parakeet-tdt-0.6b-v3"
@@ -38,7 +38,7 @@ def test_ear_keeps_standard_logic_for_other_models(mock_split, mock_ear):
     mock_ear._capture_session.chunk_started_at_seconds = time.time() - 1.2
     
     # Mock split to NOT trigger
-    mock_split.return_value.should_split_now = False
+    mock_split.return_value.should_split = False
     mock_ear._stop_and_send = MagicMock()
     
     # Run loop tick

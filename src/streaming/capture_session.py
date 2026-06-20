@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from src.streaming.session import apply_last_chunk_overlap
+from src.streaming.session import apply_overlap
 
 
 @dataclass
@@ -99,13 +99,13 @@ class CaptureSession:
         for non-final chunks and clear overlap state on the final stop.
         """
 
-        overlap_result = apply_last_chunk_overlap(
-            current_chunk_audio_bytes=audio_chunk_for_brain,
-            last_chunk_tail_bytes=self.last_chunk_tail_bytes,
-            overlap_audio_byte_count=self.overlap_audio_byte_count,
-            silence_audio_byte_count=int(silence_seconds * self.sample_rate * 2),
-            sample_rate=self.sample_rate,
-            stop_session=stop_session,
+        overlap_result = apply_overlap(
+            audio=audio_chunk_for_brain,
+            tail=self.last_chunk_tail_bytes,
+            overlap_bytes=self.overlap_audio_byte_count,
+            silence_bytes=int(silence_seconds * self.sample_rate * 2),
+            rate=self.sample_rate,
+            stop=stop_session,
         )
-        self.last_chunk_tail_bytes = overlap_result.next_chunk_tail_bytes
-        return overlap_result.overlapped_audio_bytes
+        self.last_chunk_tail_bytes = overlap_result.tail
+        return overlap_result.audio

@@ -325,10 +325,10 @@ def handle_streaming_audio_chunk(
                         # Stateless backends transcribe chunks independently
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
                         # Deduplicate the new chunk against the last chunk text
-                        from src.streaming.session import analyze_duplicate_chunk_prefix
-                        dedup_analysis = analyze_duplicate_chunk_prefix(last_chunk_text, text)
+                        from src.streaming.session import dedup_prefix
+                        dedup_analysis = dedup_prefix(last_chunk_text, text)
 
-                        rec.transcript_parts[seq] = dedup_analysis.cleaned_text
+                        rec.transcript_parts[seq] = dedup_analysis.text
 
                     rec.stt_time += elapsed
                     session.stt_time += elapsed
@@ -354,12 +354,12 @@ def handle_streaming_audio_chunk(
             "decode_seconds": round(elapsed, 2),
             "last_chunk_text": last_chunk_text,
             "raw_text": text,
-            "cleaned_text_after_dedup": dedup_analysis.cleaned_text if dedup_analysis else text,
+            "cleaned_text_after_dedup": dedup_analysis.text if dedup_analysis else text,
             "dedup_stats": {
                 "overlap_word_count": (
-                    dedup_analysis.overlap_word_count if dedup_analysis else 0
+                    dedup_analysis.overlap_words if dedup_analysis else 0
                 ),
-                "trim_applied": dedup_analysis.trim_applied if dedup_analysis else False,
+                "trim_applied": dedup_analysis.trimmed if dedup_analysis else False,
                 "combined_score": (
                     round(dedup_analysis.combined_score, 4)
                     if dedup_analysis
@@ -368,7 +368,7 @@ def handle_streaming_audio_chunk(
                 "char_score": round(dedup_analysis.char_score, 4) if dedup_analysis else 0.0,
                 "token_score": round(dedup_analysis.token_score, 4) if dedup_analysis else 0.0,
                 "skipped_too_small": (
-                    dedup_analysis.skipped_because_result_too_small
+                    dedup_analysis.skipped
                     if dedup_analysis
                     else False
                 ),
@@ -384,7 +384,7 @@ def handle_streaming_audio_chunk(
             "total_decode_seconds": round(session.stt_time, 2),
             "flags": {
                 "dedup_trim_applied": (
-                    dedup_analysis.trim_applied if dedup_analysis else False
+                    dedup_analysis.trimmed if dedup_analysis else False
                 )
             },
         },

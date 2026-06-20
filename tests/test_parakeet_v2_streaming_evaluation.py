@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 from src.utils.settings import settings
 from src.streaming.session import (
-    analyze_duplicate_chunk_prefix,
-    normalize_text_for_word_error_rate,
+    dedup_prefix,
+    norm_text,
 )
 
 from evaluation.parakeet_v2_streaming_evaluation import (
@@ -52,7 +52,7 @@ def test_add_last_chunk_overlap_to_current_chunk_audio():
 
 def test_analyze_duplicate_chunk_prefix_removes_repeated_words_from_current_chunk():
     """
-    Verify that analyze_duplicate_chunk_prefix removes overlapping words
+    Verify that dedup_prefix removes overlapping words
     from the start of the new chunk when they match the end of the last chunk.
 
     This is the single source of truth for dedup — no wrapper needed.
@@ -62,14 +62,14 @@ def test_analyze_duplicate_chunk_prefix_removes_repeated_words_from_current_chun
       current chunk starts with: "things are happening fine and doing H3 grid"
       Result should be:        "and doing H3 grid"
     """
-    result = analyze_duplicate_chunk_prefix(
-        last_chunk_text="things are happening fine",
-        current_chunk_text="things are happening fine and doing H3 grid",
-        max_overlap_words=8,
+    result = dedup_prefix(
+        last_text="things are happening fine",
+        curr_text="things are happening fine and doing H3 grid",
+        max_words=8,
     )
 
-    assert result.cleaned_text == "and doing H3 grid"
-    assert result.trim_applied is True
+    assert result.text == "and doing H3 grid"
+    assert result.trimmed is True
 
 
 def test_calculate_word_error_rate_for_final_streaming_text():
@@ -575,8 +575,8 @@ def test_save_streaming_evaluation_run_to_json_file(tmp_path):
 
 
 def test_calculate_word_error_rate_uses_normalized_text():
-    normalized_reference_text = normalize_text_for_word_error_rate("HELLO, WORLD!")
-    normalized_final_streaming_text = normalize_text_for_word_error_rate("hello world")
+    normalized_reference_text = norm_text("HELLO, WORLD!")
+    normalized_final_streaming_text = norm_text("hello world")
 
     assert calculate_word_error_rate_for_final_streaming_text(
         reference_text=normalized_reference_text,

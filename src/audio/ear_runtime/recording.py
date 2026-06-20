@@ -31,7 +31,7 @@ from src.ipc.protocol_message_formats import (
     format_session_commit_message,
     format_session_event_message,
 )
-from src.streaming.session import should_split_chunk_after_silence
+from src.streaming.session import should_split
 from src.ui.hud_client import start_hud_command_thread
 from src.utils.settings import settings
 
@@ -404,14 +404,14 @@ def record_loop_tick(ear, input_trigger=None) -> None:
         if ear._utterance_gate.has_speech_started()
         else ear._utterance_gate.finalize_elapsed(now_seconds)
     )
-    split_decision = should_split_chunk_after_silence(
-        chunk_started_at_seconds=ear._capture_session.chunk_started_at_seconds,
-        now_seconds=now_seconds,
-        minimum_chunk_age_before_silence_split_seconds=(
+    split_decision = should_split(
+        start_time=ear._capture_session.chunk_started_at_seconds,
+        now=now_seconds,
+        min_age=(
             settings.minimum_chunk_age_before_silence_split_seconds
         ),
-        utterance_gate_should_finalize_now=ear._utterance_gate.should_finalize(now_seconds),
-        silence_duration_seconds=silence_elapsed_seconds,
+        gate_finalize=ear._utterance_gate.should_finalize(now_seconds),
+        silence_len=silence_elapsed_seconds,
     )
-    if split_decision.should_split_now:
+    if split_decision.should_split:
         ear._stop_and_send(stop_session=False)
