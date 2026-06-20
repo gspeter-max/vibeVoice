@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 import os
 import pathlib
@@ -406,26 +406,20 @@ def norm_text(text: str) -> str:
     return collapsed_spacing_text
 
 
+@dataclass
 class StreamingSession:
     """Tracks the audio overlap state and timing across a streaming session."""
 
-    _overlap_secs: float
-    _rate: int
-    _overlap_bytes: int
-    _tail: bytes
-    _start_time: float
+    overlap_secs: float = 1.0
+    rate: int = field(default_factory=lambda: settings.rate)
+    overlap_bytes: int = field(init=False)
+    tail: bytes = field(init=False, default=b"")
+    start_time: float = field(init=False)
 
-    def __init__(
-        self,
-        overlap_secs: float = 1.0,
-        rate: int = settings.rate,
-    ):
-        """Initializes a streaming session with configured overlap duration and sample rate."""
-        self._overlap_secs = overlap_secs
-        self._rate = rate
-        self._overlap_bytes = int(self._rate * 2 * self._overlap_secs)
-        self._tail = b""
-        self._start_time = time.time()
+    def __post_init__(self) -> None:
+        """Initializes non-constructor fields."""
+        self.overlap_bytes = int(self.rate * 2 * self.overlap_secs)
+        self.start_time = time.time()
 
     def process_chunk(
         self,
@@ -442,20 +436,20 @@ class StreamingSession:
         4. Reset the chunk start timer to the current time.
         5. Return the overlapped audio bytes.
         """
-        silence_bytes: int = int(silence_secs * self._rate * 2)
+        silence_bytes: int = int(silence_secs * self.rate * 2)
         result: OverlapResult = apply_overlap(
             audio=audio,
-            tail=self._tail,
-            overlap_bytes=self._overlap_bytes,
+            tail=self.tail,
+            overlap_bytes=self.overlap_bytes,
             silence_bytes=silence_bytes,
-            rate=self._rate,
+            rate=self.rate,
             stop=stop,
         )
-        self._tail = result.tail
-        self._start_time = time.time()
+        self.tail = result.tail
+        self.start_time = time.time()
         return result.audio
 
     def reset(self) -> None:
         """Resets the streaming session's audio tail and start timer."""
-        self._tail = b""
-        self._start_time = time.time()
+        self.tail = b""
+        self.start_time = time.time()
