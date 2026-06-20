@@ -10,14 +10,7 @@ from pynput import keyboard, mouse
 
 
 def _is_rcmd(key: Any) -> bool:
-    """Check if the pressed key matches Right Command.
-
-    Args:
-        key: The key object received from pynput listener.
-
-    Returns:
-        True if the key matches right command, False otherwise.
-    """
+    """Check if the pressed key matches Right Command."""
     return (
         key == keyboard.Key.cmd_r
         or getattr(key, "name", None) == "cmd_r"
@@ -119,9 +112,7 @@ class InputTrigger:
                     self._kb_listener.start()
 
             if self._mouse_listener is None:
-                self._mouse_listener = mouse.Listener(
-                    on_click=self._mouse_click
-                )
+                self._mouse_listener = mouse.Listener(on_click=self._mouse_click)
                 if hasattr(self._mouse_listener, "start"):
                     self._mouse_listener.start()
 
@@ -255,10 +246,7 @@ class InputTrigger:
             True if recording was triggered, False otherwise.
         """
         with self._lock:
-            if (
-                self.is_mouse_held
-                and not self._rec_mouse_hold
-            ):
+            if self.is_mouse_held and not self._rec_mouse_hold:
                 if time.time() - self._mouse_start >= 1.0:
                     self._rec_mouse_hold = True
                     self._on_start(from_hold=True)

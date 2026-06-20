@@ -74,7 +74,7 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
             captured["on_stop_recording"] = on_stop_recording
             captured["on_toggle_recording"] = on_toggle_recording
 
-        def start_listening(self):
+        def start(self):
             return None
 
     class FakePyAudioInstance:
@@ -143,7 +143,7 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
         def __init__(self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs):
             captured["on_start_recording"] = on_start_recording
 
-        def start_listening(self):
+        def start(self):
             return None
 
     class FakePyAudioInstance:

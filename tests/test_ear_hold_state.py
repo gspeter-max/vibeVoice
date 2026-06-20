@@ -275,7 +275,7 @@ def test_send_raw_audio_stream_chunk_or_close_returns_none_after_send_failure():
 
 def test_record_loop_tick_delegates_mouse_hold_to_input_trigger():
     """
-    _record_loop_tick must call input_trigger.check_mouse_hold_threshold() on
+    _record_loop_tick must call input_trigger.check_mouse_hold() on
     every tick when an InputTrigger is provided. This is how the 1-second
     right-mouse-button hold-to-record activates — InputTrigger owns all mouse
     state; Ear just polls it each cycle.
@@ -283,11 +283,11 @@ def test_record_loop_tick_delegates_mouse_hold_to_input_trigger():
     ear = Ear(pyaudio_lib=FakePyAudio())
 
     mock_trigger = Mock()
-    mock_trigger.check_mouse_hold_threshold.return_value = False
+    mock_trigger.check_mouse_hold.return_value = False
 
     ear._record_loop_tick(input_trigger=mock_trigger)
 
-    mock_trigger.check_mouse_hold_threshold.assert_called_once()
+    mock_trigger.check_mouse_hold.assert_called_once()
 
 
 def test_record_loop_tick_does_not_error_without_input_trigger():
@@ -317,12 +317,12 @@ def test_mouse_release_finalizes_immediately_when_recording():
     )
 
     with patch('src.input.hotkeys.time.time', return_value=0.0):
-        trigger._handle_mouse_click(0, 0, right_button, pressed=True)
+        trigger._mouse_click(0, 0, right_button, pressed=True)
 
     with patch('src.input.hotkeys.time.time', return_value=1.1):
-        trigger.check_mouse_hold_threshold()  # starts recording
+        trigger.check_mouse_hold()  # starts recording
 
-    trigger._handle_mouse_click(0, 0, right_button, pressed=False)
+    trigger._mouse_click(0, 0, right_button, pressed=False)
     mock_stop.assert_called_once_with(stop_session=True)
 
 
@@ -332,7 +332,7 @@ def test_key_release_finalizes_immediately_when_recording():
     ear.is_recording = True
     ear._cmd_press_time = time.time() - 1.0
 
-    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_rcmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -345,7 +345,7 @@ def test_quick_cmd_tap_enters_toggle_mode_without_stopping():
     ear.is_recording = True
     ear._cmd_press_time = time.time()
 
-    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_rcmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -359,7 +359,7 @@ def test_second_cmd_press_stops_recording_when_toggle_active():
     ear.is_recording = True
     ear._toggle_active = True
 
-    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_rcmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_press(object())
 
@@ -373,7 +373,7 @@ def test_key_release_does_nothing_when_toggle_already_active():
     ear.is_recording = True
     ear._toggle_active = True
 
-    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_rcmd", return_value=True), \
          patch.object(ear, "_stop_and_send") as mock_stop:
         ear.on_release(object())
 
@@ -562,7 +562,7 @@ def test_on_press_opens_brain_stream_in_no_streaming_mode(monkeypatch):
     ear = Ear(pyaudio_lib=FakePyAudio())
     opened_socket = object()
 
-    with patch("src.audio.ear_runtime.controller._is_right_cmd", return_value=True), \
+    with patch("src.audio.ear_runtime.controller._is_rcmd", return_value=True), \
          patch("src.audio.ear_runtime.controller.open_checked_raw_audio_stream_to_brain", return_value=opened_socket) as mock_open, \
          patch("src.audio.ear_runtime.controller.start_volume_sender_thread") as mock_start_volume_sender, \
          patch("src.audio.ear_runtime.controller.start_hud_command_thread") as mock_start_hud_thread:
@@ -739,7 +739,7 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
 
         def record_loop(self, input_trigger=None):
             # record_loop now accepts input_trigger and would call
-            # input_trigger.check_mouse_hold_threshold() on each tick.
+            # input_trigger.check_mouse_hold() on each tick.
             raise KeyboardInterrupt
 
         def cleanup(self):
@@ -767,7 +767,7 @@ def test_start_ear_wires_input_trigger_callbacks_without_using_direct_ear_handle
             captured["on_stop_recording"] = on_stop_recording
             captured["on_toggle_recording"] = on_toggle_recording
 
-        def start_listening(self):
+        def start(self):
             captured["input_trigger_started"] = True
 
     class FakePyAudioInstance:

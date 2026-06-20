@@ -4,14 +4,14 @@ from src.input.hotkeys import InputTrigger, _is_rcmd
 
 def test_is_right_cmd_detects_various_formats():
     """
-    Verifies that the _is_right_cmd function correctly identifies 
+    Verifies that the _is_rcmd function correctly identifies 
     different ways pynput represents the Right Command key.
     """
     class MockKey:
         name = 'cmd_r'
     
-    assert _is_right_cmd(MockKey()) is True
-    assert _is_right_cmd("wrong_key") is False
+    assert _is_rcmd(MockKey()) is True
+    assert _is_rcmd("wrong_key") is False
 
 def test_input_trigger_handles_double_tap_toggle():
     """
@@ -31,20 +31,20 @@ def test_input_trigger_handles_double_tap_toggle():
         name = 'cmd_r'
         
     # First Tap: Press at 1.0, Release at 1.1
-    trigger._handle_key_press(MockKey(), current_time=1.0)
+    trigger._key_press(MockKey(), current_time=1.0)
     # Timer should be started but not fired.
-    assert trigger._delayed_start_timer is not None
+    assert trigger._timer is not None
     mock_start.assert_not_called()
     
-    trigger._handle_key_release(MockKey(), current_time=1.1)
+    trigger._key_release(MockKey(), current_time=1.1)
     # Timer should be cancelled.
-    assert trigger._delayed_start_timer is None
+    assert trigger._timer is None
     mock_toggle.assert_not_called()
     
     # Second Tap: Press at 1.2 (difference from last release is 0.1s <= 0.3s)
-    trigger._handle_key_press(MockKey(), current_time=1.2)
+    trigger._key_press(MockKey(), current_time=1.2)
     mock_toggle.assert_called_once()
-    assert trigger._is_toggle_mode_active is True
+    assert trigger._toggle_active is True
 
 def test_input_trigger_handles_long_hold_stop():
     """
@@ -65,18 +65,18 @@ def test_input_trigger_handles_long_hold_stop():
         name = 'cmd_r'
         
     # Simulate press
-    trigger._handle_key_press(MockKey(), current_time=1.0)
+    trigger._key_press(MockKey(), current_time=1.0)
     
     # Manually fire the timer to simulate 0.3s passing
-    trigger._trigger_hold_recording()
+    trigger._trigger_hold()
     
     mock_start.assert_called_once_with(from_hold=True)
-    assert trigger._is_recording_due_to_hold is True
+    assert trigger._rec_hold is True
     
     # Simulate slow release
-    trigger._handle_key_release(MockKey(), current_time=2.0)
+    trigger._key_release(MockKey(), current_time=2.0)
     mock_stop.assert_called_once_with(stop_session=True)
-    assert trigger._is_recording_due_to_hold is False
+    assert trigger._rec_hold is False
 
 def test_input_trigger_ignores_auto_repeat():
     """
@@ -95,15 +95,15 @@ def test_input_trigger_ignores_auto_repeat():
         name = 'cmd_r'
         
     # 1. First Press
-    trigger._handle_key_press(MockKey(), current_time=1.0)
-    assert trigger._delayed_start_timer is not None
-    first_timer = trigger._delayed_start_timer
+    trigger._key_press(MockKey(), current_time=1.0)
+    assert trigger._timer is not None
+    first_timer = trigger._timer
     
     # 2. Noise from OS (Auto-repeat events)
-    trigger._handle_key_press(MockKey(), current_time=1.2)
+    trigger._key_press(MockKey(), current_time=1.2)
     
     # The timer should NOT have changed (ignored repeat)
-    assert trigger._delayed_start_timer is first_timer
+    assert trigger._timer is first_timer
 
 def test_input_trigger_toggle_off_behavior():
     """
@@ -120,12 +120,12 @@ def test_input_trigger_toggle_off_behavior():
         name = 'cmd_r'
         
     # Manually enter toggle mode
-    trigger._is_toggle_mode_active = True
+    trigger._toggle_active = True
     
     # Step 2: Press again to stop
-    trigger._handle_key_press(MockKey(), current_time=2.0)
+    trigger._key_press(MockKey(), current_time=2.0)
     mock_stop.assert_called_once_with(stop_session=True)
-    assert trigger._is_toggle_mode_active is False
+    assert trigger._toggle_active is False
 
 def test_input_trigger_mouse_hold_logic():
     """
@@ -145,17 +145,17 @@ def test_input_trigger_mouse_hold_logic():
     )
     
     with patch('src.input.hotkeys.time.time', return_value=10.0):
-        trigger._handle_mouse_click(0, 0, right_button, pressed=True)
+        trigger._mouse_click(0, 0, right_button, pressed=True)
         
     with patch('src.input.hotkeys.time.time', return_value=10.5):
-        assert trigger.check_mouse_hold_threshold() is False
+        assert trigger.check_mouse_hold() is False
         mock_start.assert_not_called()
         
     with patch('src.input.hotkeys.time.time', return_value=11.1):
-        assert trigger.check_mouse_hold_threshold() is True
+        assert trigger.check_mouse_hold() is True
         mock_start.assert_called_once_with(from_hold=True)
         
-    trigger._handle_mouse_click(0, 0, right_button, pressed=False)
+    trigger._mouse_click(0, 0, right_button, pressed=False)
     mock_stop.assert_called_once_with(stop_session=True)
 
 def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkeypatch):
@@ -172,8 +172,8 @@ def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkey
     monkeypatch.setattr("src.input.hotkeys.keyboard.Listener", lambda *args, **kwargs: None, raising=False)
     monkeypatch.setattr("src.input.hotkeys.mouse.Listener", lambda *args, **kwargs: None, raising=False)
 
-    trigger.start_listening()
-    trigger.stop_listening()
+    trigger.start()
+    trigger.stop()
 
 
 def test_new_short_names_exist():
