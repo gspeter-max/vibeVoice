@@ -1,6 +1,6 @@
 # tests/test_input_hotkeys.py
 from unittest.mock import MagicMock, patch
-from src.input.hotkeys import InputTrigger, _is_right_cmd
+from src.input.hotkeys import InputTrigger, _is_rcmd
 
 def test_is_right_cmd_detects_various_formats():
     """
@@ -174,3 +174,11 @@ def test_input_trigger_start_listening_tolerates_missing_listener_methods(monkey
 
     trigger.start_listening()
     trigger.stop_listening()
+
+
+def test_new_short_names_exist():
+    from src.input.hotkeys import _is_rcmd, InputTrigger
+    assert _is_rcmd is not None
+    trigger = InputTrigger(None, None, None)
+    assert hasattr(trigger, "start")
+    assert hasattr(trigger, "check_mouse_hold")

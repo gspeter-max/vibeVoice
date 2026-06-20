@@ -1,15 +1,23 @@
 """Keyboard and mouse shortcut helpers for starting and stopping recording."""
 
+from __future__ import annotations
 import time
 import threading
-from typing import Callable
+from typing import Callable, Any, Optional
 
 from src.utils.settings import settings
 from pynput import keyboard, mouse
 
 
-def _is_right_cmd(key) -> bool:
-    """Return whether a keyboard event matches the Right Command hotkey."""
+def _is_rcmd(key: Any) -> bool:
+    """Check if the pressed key matches Right Command.
+
+    Args:
+        key: The key object received from pynput listener.
+
+    Returns:
+        True if the key matches right command, False otherwise.
+    """
     return (
         key == keyboard.Key.cmd_r
         or getattr(key, "name", None) == "cmd_r"
@@ -18,15 +26,43 @@ def _is_right_cmd(key) -> bool:
 
 
 class InputTrigger:
-    """
-    The 'Brain' for handling keyboard and mouse shortcuts.
+    """Handles keyboard and mouse inputs for speech recording control.
 
-    Features:
-    - Smart filtering: Ignores noisy "auto-repeat" signals from the OS.
-    - Thread Safety: Uses a Lock to prevent crashes when multi-tasking.
-    - Delayed Start: Waits 0.3s before triggering Push-to-Talk to prevent accidental flashes.
-    - Double Tap Toggle: Tapping twice quickly locks the recording on.
+    Attributes:
+        _on_start: Wrapper function called to start recording.
+        _on_stop: Wrapper function called to stop recording.
+        _on_toggle: Wrapper function called to toggle recording mode.
+        _lock: Threading lock for thread-safe state mutations.
+        _cmd_held: True if the right command key is currently held.
+        _toggle_active: True if toggle mode is active.
+        _last_release: Timestamp of the last right command release.
+        _double_tap: Time threshold in seconds for detecting double taps.
+        _hold_seconds: Time threshold in seconds to trigger hold recording.
+        _timer: Timer thread to delay hold recording trigger.
+        _rec_hold: True if recording was triggered by holding right command.
+        _mouse_start: Timestamp when right mouse button was pressed.
+        is_mouse_held: True if right mouse button is held down.
+        _rec_mouse_hold: True if recording was triggered by holding right mouse button.
+        _kb_listener: pynput Keyboard listener thread instance.
+        _mouse_listener: pynput Mouse listener thread instance.
     """
+
+    _on_start: Callable[[bool], None]
+    _on_stop: Callable[[bool], None]
+    _on_toggle: Callable[[], None]
+    _lock: threading.Lock
+    _cmd_held: bool
+    _toggle_active: bool
+    _last_release: float
+    _double_tap: float
+    _hold_seconds: float
+    _timer: Optional[threading.Timer]
+    _rec_hold: bool
+    _mouse_start: float
+    is_mouse_held: bool
+    _rec_mouse_hold: bool
+    _kb_listener: Optional[keyboard.Listener]
+    _mouse_listener: Optional[mouse.Listener]
 
     def __init__(
         self,
@@ -34,168 +70,197 @@ class InputTrigger:
         on_stop_recording: Callable[[bool], None],
         on_toggle_recording: Callable[[], None],
         hold_threshold_seconds: float = settings.recording_button_hold_threshold,
-    ):
+    ) -> None:
+        """Initialize the input trigger with callbacks and timing thresholds.
+
+        Args:
+            on_start_recording: Callback to initiate recording.
+            on_stop_recording: Callback to terminate recording.
+            on_toggle_recording: Callback to toggle recording state.
+            hold_threshold_seconds: Duration before trigger counts as hold.
+        """
         # Functions to call
-        self._on_start_recording = on_start_recording
-        self._on_stop_recording = on_stop_recording
-        self._on_toggle_recording = on_toggle_recording
+        self._on_start = on_start_recording
+        self._on_stop = on_stop_recording
+        self._on_toggle = on_toggle_recording
 
         # Security & State
-        self._state_lock = threading.Lock()
+        self._lock = threading.Lock()
 
         # Keyboard tracking
-        self._is_cmd_key_currently_held = False  # Guards against OS auto-repeat noise
-        self._is_toggle_mode_active = False
+        self._cmd_held = False  # Guards against OS auto-repeat noise
+        self._toggle_active = False
 
         # Double-tap and delayed hold tracking
-        self._last_cmd_release_time = 0.0
-        self._double_tap_threshold = 0.3
-        self._hold_threshold_seconds = hold_threshold_seconds
-        self._delayed_start_timer: threading.Timer | None = None
-        self._is_recording_due_to_hold = False
+        self._last_release = 0.0
+        self._double_tap = 0.3
+        self._hold_seconds = hold_threshold_seconds
+        self._timer = None
+        self._rec_hold = False
 
         # Mouse tracking
-        self._mouse_press_start_time = 0.0
-        self.is_mouse_button_held_down = False
-        self._is_recording_due_to_mouse_hold = False
+        self._mouse_start = 0.0
+        self.is_mouse_held = False
+        self._rec_mouse_hold = False
 
         # Placeholders for listener threads
-        self._keyboard_listener_thread = None
-        self._mouse_listener_thread = None
+        self._kb_listener = None
+        self._mouse_listener = None
 
-    def start_listening(self):
+    def start(self) -> None:
         """Spins up the background threads to start watching for inputs."""
-        with self._state_lock:
-            if self._keyboard_listener_thread is None:
-                self._keyboard_listener_thread = keyboard.Listener(
-                    on_press=lambda k: self._handle_key_press(k, time.time()),
-                    on_release=lambda k: self._handle_key_release(k, time.time()),
+        with self._lock:
+            if self._kb_listener is None:
+                self._kb_listener = keyboard.Listener(
+                    on_press=lambda k: self._key_press(k, time.time()),
+                    on_release=lambda k: self._key_release(k, time.time()),
                 )
-                if hasattr(self._keyboard_listener_thread, "start"):
-                    self._keyboard_listener_thread.start()
+                if hasattr(self._kb_listener, "start"):
+                    self._kb_listener.start()
 
-            if self._mouse_listener_thread is None:
-                self._mouse_listener_thread = mouse.Listener(
-                    on_click=self._handle_mouse_click
+            if self._mouse_listener is None:
+                self._mouse_listener = mouse.Listener(
+                    on_click=self._mouse_click
                 )
-                if hasattr(self._mouse_listener_thread, "start"):
-                    self._mouse_listener_thread.start()
+                if hasattr(self._mouse_listener, "start"):
+                    self._mouse_listener.start()
 
-    def stop_listening(self):
+    def stop(self) -> None:
         """Shuts down the background listeners and timers."""
-        with self._state_lock:
-            if self._keyboard_listener_thread:
-                if hasattr(self._keyboard_listener_thread, "stop"):
-                    self._keyboard_listener_thread.stop()
-                self._keyboard_listener_thread = None
-            if self._mouse_listener_thread:
-                if hasattr(self._mouse_listener_thread, "stop"):
-                    self._mouse_listener_thread.stop()
-                self._mouse_listener_thread = None
-            if self._delayed_start_timer:
-                self._delayed_start_timer.cancel()
-                self._delayed_start_timer = None
+        with self._lock:
+            if self._kb_listener:
+                if hasattr(self._kb_listener, "stop"):
+                    self._kb_listener.stop()
+                self._kb_listener = None
+            if self._mouse_listener:
+                if hasattr(self._mouse_listener, "stop"):
+                    self._mouse_listener.stop()
+                self._mouse_listener = None
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
 
-    def _trigger_hold_recording(self):
+    def _trigger_hold(self) -> None:
         """Called by the background timer 0.3s after the user presses the key."""
-        with self._state_lock:
+        with self._lock:
             # If the user is STILL physically holding the key, and we aren't in toggle mode...
-            if self._is_cmd_key_currently_held and not self._is_toggle_mode_active:
-                self._is_recording_due_to_hold = True
-                self._on_start_recording(from_hold=True)
+            if self._cmd_held and not self._toggle_active:
+                self._rec_hold = True
+                self._on_start(from_hold=True)
 
-    def _handle_key_press(self, key, current_time: float):
-        """Processes a 'Key Down' event from the OS."""
-        if not _is_right_cmd(key):
+    def _key_press(self, key: Any, current_time: float) -> None:
+        """Processes a 'Key Down' event from the OS.
+
+        Args:
+            key: Keyboard key object.
+            current_time: Release event timestamp.
+        """
+        if not _is_rcmd(key):
             return
 
-        with self._state_lock:
+        with self._lock:
             # Guard against the "Holding down" repeat signals from the OS
-            if self._is_cmd_key_currently_held:
+            if self._cmd_held:
                 return
 
-            self._is_cmd_key_currently_held = True
+            self._cmd_held = True
 
             # If we are already recording in Toggle Mode, a single tap turns it off.
-            if self._is_toggle_mode_active:
-                self._is_toggle_mode_active = False
-                self._on_stop_recording(stop_session=True)
+            if self._toggle_active:
+                self._toggle_active = False
+                self._on_stop(stop_session=True)
                 return
 
             # Check how long it has been since we last let go of the key
-            time_since_last_release = current_time - self._last_cmd_release_time
+            time_since_last_release = current_time - self._last_release
 
-            if time_since_last_release <= self._double_tap_threshold:
+            if time_since_last_release <= self._double_tap:
                 # It's a double tap!
-                if self._delayed_start_timer:
-                    self._delayed_start_timer.cancel()
-                    self._delayed_start_timer = None
+                if self._timer:
+                    self._timer.cancel()
+                    self._timer = None
 
-                self._is_toggle_mode_active = True
-                self._on_toggle_recording()
+                self._toggle_active = True
+                self._on_toggle()
             else:
                 # It's the first press. Do NOT start recording yet.
                 # Start a 0.3s timer. If they hold it that long, it's a push-to-talk.
-                if self._delayed_start_timer:
-                    self._delayed_start_timer.cancel()
+                if self._timer:
+                    self._timer.cancel()
 
                 # Start hold-to-talk only after the configured hold threshold.
-                self._delayed_start_timer = threading.Timer(
-                    self._hold_threshold_seconds,
-                    self._trigger_hold_recording,
+                self._timer = threading.Timer(
+                    self._hold_seconds,
+                    self._trigger_hold,
                 )
-                self._delayed_start_timer.start()
+                self._timer.start()
 
-    def _handle_key_release(self, key, current_time: float):
-        """Processes a 'Key Up' event from the OS."""
-        if not _is_right_cmd(key):
+    def _key_release(self, key: Any, current_time: float) -> None:
+        """Processes a 'Key Up' event from the OS.
+
+        Args:
+            key: Keyboard key object.
+            current_time: Release event timestamp.
+        """
+        if not _is_rcmd(key):
             return
 
-        with self._state_lock:
-            self._is_cmd_key_currently_held = False
-            self._last_cmd_release_time = current_time
+        with self._lock:
+            self._cmd_held = False
+            self._last_release = current_time
 
             # They let go! Cancel the delayed timer so it doesn't fire.
             # If it was just a quick tap (like CMD+C), nothing will have recorded.
-            if self._delayed_start_timer:
-                self._delayed_start_timer.cancel()
-                self._delayed_start_timer = None
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
 
             # If we are in toggle mode, releasing the key means nothing. Just keep recording.
-            if self._is_toggle_mode_active:
+            if self._toggle_active:
                 return
 
             # If the delayed timer fired and we WERE recording from a hold, stop it now.
-            if self._is_recording_due_to_hold:
-                self._is_recording_due_to_hold = False
-                self._on_stop_recording(stop_session=True)
+            if self._rec_hold:
+                self._rec_hold = False
+                self._on_stop(stop_session=True)
 
-    def _handle_mouse_click(self, x, y, button, pressed):
-        """Processes mouse clicks (Down or Up)."""
+    def _mouse_click(self, x: int, y: int, button: Any, pressed: bool) -> None:
+        """Processes mouse clicks (Down or Up).
+
+        Args:
+            x: Cursor x coordinate.
+            y: Cursor y coordinate.
+            button: Clicked mouse button.
+            pressed: True if pressed, False if released.
+        """
         if button != getattr(mouse.Button, "right", None):
             return
 
-        with self._state_lock:
+        with self._lock:
             if pressed:
                 # Button Pushed
-                self._mouse_press_start_time = time.time()
-                self.is_mouse_button_held_down = True
+                self._mouse_start = time.time()
+                self.is_mouse_held = True
             else:
                 # Button Let Go
-                self.is_mouse_button_held_down = False
-                if self._is_recording_due_to_mouse_hold:
-                    self._on_stop_recording(stop_session=True)
-                    self._is_recording_due_to_mouse_hold = False
+                self.is_mouse_held = False
+                if self._rec_mouse_hold:
+                    self._on_stop(stop_session=True)
+                    self._rec_mouse_hold = False
 
-    def check_mouse_hold_threshold(self) -> bool:
-        """A 'Polling' function to check if the mouse has been held long enough."""
-        with self._state_lock:
+    def check_mouse_hold(self) -> bool:
+        """A 'Polling' function to check if the mouse has been held long enough.
+
+        Returns:
+            True if recording was triggered, False otherwise.
+        """
+        with self._lock:
             if (
-                self.is_mouse_button_held_down
-                and not self._is_recording_due_to_mouse_hold
+                self.is_mouse_held
+                and not self._rec_mouse_hold
             ):
-                if time.time() - self._mouse_press_start_time >= 1.0:
-                    self._is_recording_due_to_mouse_hold = True
-                    self._on_start_recording(from_hold=True)
+                if time.time() - self._mouse_start >= 1.0:
+                    self._rec_mouse_hold = True
+                    self._on_start(from_hold=True)
                     return True
         return False

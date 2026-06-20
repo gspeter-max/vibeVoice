@@ -40,7 +40,7 @@ from src.streaming.capture_session import CaptureSession
 from src.streaming.session import should_split
 from src.ui.hud_client import start_hud_command_thread, start_volume_sender_thread
 from src.utils.settings import settings
-from src.input.hotkeys import _is_right_cmd
+from src.input.hotkeys import _is_rcmd
 
 logger = get_logger()
 try:
@@ -209,7 +209,7 @@ class Ear:
         Args:
             key: Keyboard key object from pynput.
         """
-        if not _is_right_cmd(key):
+        if not _is_rcmd(key):
             return
 
         log.debug("[Ear] Right CMD pressed")
@@ -261,7 +261,7 @@ class Ear:
         Args:
             key: Keyboard key object from pynput.
         """
-        if not _is_right_cmd(key):
+        if not _is_rcmd(key):
             return
 
         if self._toggle_active:
@@ -318,7 +318,7 @@ class Ear:
             rms = ear.last_rms
 
         if input_trigger is not None:
-            input_trigger.check_mouse_hold_threshold()
+            input_trigger.check_mouse_hold()
 
         if not recording:
             return

@@ -75,7 +75,7 @@ def start_ear():
         on_stop_recording=_stop_recording_wrapper,
         on_toggle_recording=_toggle_recording_wrapper,
     )
-    input_trigger.start_listening()
+    input_trigger.start()
 
     log.info("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record")
 
