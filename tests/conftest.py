@@ -22,11 +22,19 @@ sys.modules['pynput'] = type(sys)('pynput')
 sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
 sys.modules['pynput.mouse'] = type(sys)('pynput.mouse')
 
+class MockKey:
+    cmd_r = "cmd_r"
+    esc = "esc"
+
+sys.modules['pynput.keyboard'].Key = MockKey
+sys.modules['pynput.keyboard'].Listener = lambda *a, **kw: None
+
 class MockButton:
     left = 'left'
     right = 'right'
 
-sys.modules['pynput.mouse'].Button = MockButton()
+sys.modules['pynput.mouse'].Button = MockButton
+sys.modules['pynput.mouse'].Listener = lambda *a, **kw: None
 
 class MockPyAudio:
     paInt16 = 16

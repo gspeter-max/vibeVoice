@@ -6,11 +6,10 @@ inside the main Ear runtime class.
 
 from __future__ import annotations
 
-from pathlib import Path
 import platform
+from pathlib import Path
 
 from src import log
-
 
 _start_sound = None
 
@@ -20,7 +19,9 @@ def load_start_sound() -> None:
 
     global _start_sound
     try:
-        sound_path = str(Path(__file__).parent.parent.parent.parent / "sound_effect" / "start.mp3")
+        sound_path = str(
+            Path(__file__).parent.parent.parent.parent / "sound_effect" / "start.mp3"
+        )
 
         if platform.system() == "Darwin":
             try:
@@ -43,6 +44,7 @@ def load_start_sound() -> None:
                 _start_sound.setVolume(1.0)
             except ImportError:
                 log.info("[Ear] PySide6.QtMultimedia not available for sound effects")
+
     except (OSError, RuntimeError) as error:
         log.info("[Ear] Failed to load start sound: %s", error)
 
@@ -81,6 +83,8 @@ def enable_macos_voice_isolation() -> None:
             if not success:
                 log.info(f"[Ear] Voice processing not enabled: {error}")
         else:
-            log.info("[Ear] inputNode does not support setVoiceProcessingEnabled_error_")
+            log.info(
+                "[Ear] inputNode does not support setVoiceProcessingEnabled_error_"
+            )
     except RuntimeError as error:
         log.info("[Ear] Voice isolation init failed: %s", error)

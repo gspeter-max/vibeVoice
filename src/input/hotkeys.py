@@ -5,57 +5,17 @@ import threading
 from typing import Callable
 
 from src.utils.settings import settings
+from pynput import keyboard, mouse
 
-# We try to import pynput, which is a library that listens to the keyboard and mouse.
-# If it's not installed or can't load, we create "fallback" classes so the code doesn't crash.
-try:
-    from pynput import keyboard, mouse
-except ImportError:
-    # If pynput is missing, we create empty objects that look like pynput
-    # so the rest of the code can still run (even if it won't actually hear keys).
-    class _FallbackKey:
-        cmd_r = "cmd_r"
-
-    class _FallbackListener:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def start(self):
-            """Match pynput's listener API without doing any work."""
-            return None
-
-        def stop(self):
-            """Match pynput's listener API without doing any work."""
-            return None
-
-    class _FallbackKeyboardModule:
-        Key = _FallbackKey()
-        Listener = _FallbackListener
-    keyboard = _FallbackKeyboardModule()
-
-    class _FallbackMouseButton:
-        right = "right"
-    class _FallbackMouseModule:
-        Button = _FallbackMouseButton()
-        Listener = _FallbackListener
-    mouse = _FallbackMouseModule()
 
 def _is_right_cmd(key) -> bool:
-    """Return `True` when the key event represents Right Command."""
-    # 1. Standard check
-    _key_class = getattr(keyboard, 'Key', None)
-    if _key_class and key == getattr(_key_class, 'cmd_r', None):
-        return True
+    """Return whether a keyboard event matches the Right Command hotkey."""
+    return (
+        key == keyboard.Key.cmd_r
+        or getattr(key, "name", None) == "cmd_r"
+        or getattr(key, "vk", None) == settings.right_cmd_vk
+    )
 
-    # 2. Name-based check (for some OS versions)
-    if hasattr(key, 'name') and getattr(key, 'name', None) == 'cmd_r':
-        return True
-
-    # 3. Hardware-code check (for macOS specifically)
-    if hasattr(key, 'vk') and getattr(key, 'vk', None) == settings.right_cmd_vk:
-        return True
-
-    return False
 
 class InputTrigger:
     """
@@ -67,6 +27,7 @@ class InputTrigger:
     - Delayed Start: Waits 0.3s before triggering Push-to-Talk to prevent accidental flashes.
     - Double Tap Toggle: Tapping twice quickly locks the recording on.
     """
+
     def __init__(
         self,
         on_start_recording: Callable[[bool], None],
@@ -108,7 +69,7 @@ class InputTrigger:
             if self._keyboard_listener_thread is None:
                 self._keyboard_listener_thread = keyboard.Listener(
                     on_press=lambda k: self._handle_key_press(k, time.time()),
-                    on_release=lambda k: self._handle_key_release(k, time.time())
+                    on_release=lambda k: self._handle_key_release(k, time.time()),
                 )
                 if hasattr(self._keyboard_listener_thread, "start"):
                     self._keyboard_listener_thread.start()
@@ -211,7 +172,7 @@ class InputTrigger:
 
     def _handle_mouse_click(self, x, y, button, pressed):
         """Processes mouse clicks (Down or Up)."""
-        if button != getattr(mouse.Button, 'right', None):
+        if button != getattr(mouse.Button, "right", None):
             return
 
         with self._state_lock:
@@ -229,7 +190,10 @@ class InputTrigger:
     def check_mouse_hold_threshold(self) -> bool:
         """A 'Polling' function to check if the mouse has been held long enough."""
         with self._state_lock:
-            if self.is_mouse_button_held_down and not self._is_recording_due_to_mouse_hold:
+            if (
+                self.is_mouse_button_held_down
+                and not self._is_recording_due_to_mouse_hold
+            ):
                 if time.time() - self._mouse_press_start_time >= 1.0:
                     self._is_recording_due_to_mouse_hold = True
                     self._on_start_recording(from_hold=True)

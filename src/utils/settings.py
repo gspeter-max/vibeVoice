@@ -34,7 +34,6 @@ class VibeVoiceSettings(BaseSettings):
     vibevoice_provider_index: int = 0
     """Index into the PROVIDERS list in llm_router.py (0=Groq, 1=Cerebras, 2=OpenGateway)."""
 
-
     # ── Speech Models ─────────────────────────────────────────────────────
     available_stt_models: list[str] = Field(
         default_factory=lambda: [
@@ -103,7 +102,7 @@ class VibeVoiceSettings(BaseSettings):
     minimum_chunk_age_before_silence_split_seconds: float = 8.0
     semantic_overlapping_threshold: float = 0.70
     vad_status_log_interval: float = 5.0
-    recording_level_log_interval: float = 0.4
+    recording_level_log_interval: float = 0.1
 
     # ── UI & Input ─────────────────────────────────────────────────────────
     ansi_blue: str = "\033[94m"

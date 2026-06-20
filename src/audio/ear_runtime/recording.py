@@ -18,6 +18,8 @@ from src import log
 from src.audio.ear_runtime.analysis import (
     analyze_frequency_bands,
     boost_audio_chunk,
+)
+from src.audio.ear_runtime.analysis import (
     get_rms as runtime_get_rms,
 )
 from src.audio.ear_runtime.system_audio import play_start_sound
@@ -31,7 +33,6 @@ from src.ipc.protocol_message_formats import (
     format_session_commit_message,
     format_session_event_message,
 )
-from src.streaming.session import should_split
 from src.ui.hud_client import start_hud_command_thread
 from src.utils.settings import settings
 
@@ -71,7 +72,9 @@ def send_session_event_to_telemetry_brain(
         socket_factory=socket.socket,
     )
     if not sent:
-        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
+        log.info(
+            f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain"
+        )
     return sent
 
 
@@ -201,7 +204,9 @@ def flush_current_chunk(ear, *, stop_session: bool) -> bool:
                 "chunk_index": ear._capture_session.current_chunk_sequence_number - 1,
                 "chunk_age_seconds": round(chunk_age_seconds, 2),
                 "silence_elapsed_seconds": round(silence_elapsed_seconds, 2),
-                "split_reason": "silence_threshold_hit" if not stop_session else "session_stop",
+                "split_reason": "silence_threshold_hit"
+                if not stop_session
+                else "session_stop",
                 "overlap_seconds_added": round(overlap_seconds_added, 4),
                 "audio_bytes": len(overlapped_utterance_bytes),
             },
@@ -362,56 +367,3 @@ def process_audio_callback(ear, in_data, frame_count, time_info, status):
             ear._vad_state_log_time = now_seconds
 
     return (None, pyaudio.paContinue)
-
-
-def record_loop_tick(ear, input_trigger=None) -> None:
-    """Run one controller-managed recording loop tick."""
-
-    with ear._lock:
-        recording = ear.is_recording
-        rms = ear.last_rms
-
-    if input_trigger is not None:
-        input_trigger.check_mouse_hold_threshold()
-
-    if not recording:
-        return
-
-    now_seconds = time.time()
-    if now_seconds - ear._recording_level_log_time >= settings.recording_level_log_interval:
-        meter_width = 30
-        level = min(int(rms * 300), meter_width)
-        meter = "█" * level + "░" * (meter_width - level)
-        ear._recording_level_log_time = now_seconds
-        print(f"\r  Voice Level: [{meter}] ", end="", flush=True)
-
-    if not settings.is_silence_streaming_mode:
-        return
-
-    if "nemotron" in ear.current_model.lower():
-        time_since_last_chunk = ear._capture_session.current_chunk_age_seconds(now_seconds)
-        if time_since_last_chunk >= 1.12:
-            ear._stop_and_send(stop_session=False)
-        return
-
-    if ear._utterance_gate.has_speech_started() and not ear._silence_pending_logged:
-        silence_elapsed_seconds = ear._utterance_gate.silence_elapsed(now_seconds)
-        if silence_elapsed_seconds > 0.0:
-            ear._silence_pending_logged = True
-
-    silence_elapsed_seconds = (
-        ear._utterance_gate.silence_elapsed(now_seconds)
-        if ear._utterance_gate.has_speech_started()
-        else ear._utterance_gate.finalize_elapsed(now_seconds)
-    )
-    split_decision = should_split(
-        start_time=ear._capture_session.chunk_started_at_seconds,
-        now=now_seconds,
-        min_age=(
-            settings.minimum_chunk_age_before_silence_split_seconds
-        ),
-        gate_finalize=ear._utterance_gate.should_finalize(now_seconds),
-        silence_len=silence_elapsed_seconds,
-    )
-    if split_decision.should_split:
-        ear._stop_and_send(stop_session=False)
