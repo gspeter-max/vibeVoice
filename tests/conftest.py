@@ -13,7 +13,7 @@ def sample_audio_bytes():
     return audio_data.tobytes()
 
 @pytest.fixture
-def mock_socket_path(tmp_path):
+def mock_ear_to_brain_socket_path(tmp_path):
     """Returns a temporary socket path for testing."""
     return str(tmp_path / "test_parakeet.sock")
 

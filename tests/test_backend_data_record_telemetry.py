@@ -15,7 +15,7 @@ def test_telemetry_disabled_fast_return(monkeypatch):
     """
     import src.backend.data_record.telemetry as telemetry
     monkeypatch.setattr(telemetry.settings, "streaming_telemetry_enabled", False)
-    assert telemetry._telemetry_recorder_for_session("test_sess") is None
+    assert telemetry.build_recorder("test_sess") is None
 
 def test_model_name_for_telemetry_missing_engine():
     """

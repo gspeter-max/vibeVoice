@@ -1,39 +1,36 @@
+from dataclasses import dataclass
+
 import numpy as np
-from src.engines.base import TranscriptionEngine
 
-# We import the old backend logic to do the heavy lifting,
-# but we wrap it in our clean new class.
-try:
-    import src.backend.backend_parakeet as legacy_backend
-except ImportError:
-    legacy_backend = None
+from src.backend.backend_parakeet import load_model, transcribe
+from src.engines.interface import TranscriptionEngine
 
-class ParakeetEngine(TranscriptionEngine):
+
+@dataclass
+class ParakeetEngine:
     """
     The implementation for Parakeet, Conformer, and Moonshine models.
-    These models are "stateless", meaning they don't remember the past.
+    These models are "stateless", meaning they don't remember the insert_transcript.
     They transcribe whatever chunk of audio you give them, right now.
     """
-    def __init__(self, model_name: str):
-        self.model_name = model_name
-        self._loaded_model = None
 
-        # Load the model from disk into memory when the class is created
-        if legacy_backend:
-            self._loaded_model = legacy_backend.load_speech_recognition_model_from_disk(self.model_name)
+    model_name: str
+
+    def __post_init__(self):
+        self.tts_model = load_model(self.model_name)
 
     def is_stateful(self) -> bool:
-        """Parakeet models do not remember past audio chunks."""
+        """Parakeet models do not remember insert_transcript audio chunks."""
         return False
 
-    def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
+    def transcribe_chunk(self, audio_samples: np.ndarray | bytes) -> str:
         """
         Passes the audio to the Sherpa-ONNX backend and returns the text string.
         """
-        if not legacy_backend or not self._loaded_model:
-            return ""
+        if isinstance(audio_samples, bytes):
+            audio_samples = np.frombuffer(audio_samples, dtype=np.float32)
 
-        text = legacy_backend.convert_audio_to_text(self._loaded_model, audio_samples)
+        text = transcribe(self.tts_model, audio_samples)
         return text.strip()
 
     def clear_internal_memory(self) -> None:

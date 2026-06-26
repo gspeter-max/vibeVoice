@@ -16,30 +16,20 @@ It only decides whether audio looks like speech or silence.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 from src.utils.settings import settings
 
 
+@dataclass()
 class SileroVAD:
-    """
-    High-performance wrapper for the Silero Voice Activity Detection model.
-    This class manages the loading and execution of the ONNX-based AI model,
-    handling different model versions (V3 and V5) and their specific state
-    buffer requirements. It is optimized to run on CPU and provides real-time
-    classification of small audio frames, telling the system whether the
-    current microphone input contains human speech or just background noise.
-    """
+    """ONNX-based Silero Voice Activity Detection (VAD) model wrapper."""
 
     def __init__(self, model_path: str):
-        """
-        Initializes the VAD engine by loading the ONNX model from the disk.
-        It configures the ONNX runtime with single-threaded execution to
-        minimize CPU overhead while still maintaining fast inference times.
-        The constructor also detects the model version and allocates the
-        necessary recurrent state buffers, ensuring that the model can
-        maintain context across consecutive audio frames for higher accuracy.
-        """
+        """Load the VAD model and initialize the recurrent state and context buffers."""
         import onnxruntime as ort
 
         options = ort.SessionOptions()
@@ -73,14 +63,7 @@ class SileroVAD:
             self._c = np.zeros((2, 1, 64), dtype=np.float32)
 
     def reset(self):
-        """
-        Clears the internal recurrent state of the AI model.
-        This is called whenever a recording session ends or a silence
-        boundary is hit, ensuring that the next piece of speech starts with
-        a clean slate. Resetting the state prevents audio artifacts from
-        one utterance from leaking into the next, which significantly
-        improves the reliability of speech detection in noisy environments.
-        """
+        """Reset the internal model recurrent state buffers to clear context."""
         if self._version == 5:
             self._state = np.zeros_like(self._state)
             self._context = np.zeros_like(self._context)
@@ -88,15 +71,10 @@ class SileroVAD:
             self._h = np.zeros_like(self._h)
             self._c = np.zeros_like(self._c)
 
-    def is_speech(self, audio_samples: np.ndarray, sample_rate: int = settings.rate) -> float:
-        """
-        Analyzes a single frame of audio and returns a speech probability score.
-        It first normalizes the input frame to exactly 512 samples, padding or
-        trimming as necessary to match the model's requirements. The function
-        then executes the AI inference pass, updating its internal context and
-        returning a score between 0.0 and 1.0. A higher score indicates a
-        stronger confidence that the audio frame contains spoken human voice.
-        """
+    def is_speech(
+        self, audio_samples: np.ndarray, sample_rate: int = settings.rate
+    ) -> float:
+        """Analyze a 512-sample audio frame and return speech probability (0.0 to 1.0)."""
         if len(audio_samples) == 0:
             return 0.0
 
@@ -111,7 +89,9 @@ class SileroVAD:
             # by 64 samples of context from the previous frame. We maintain that
             # rolling window in self._context and prepend it here.
             audio_samples_2d = audio_samples.reshape(1, -1)
-            input_with_context = np.concatenate([self._context, audio_samples_2d], axis=1)
+            input_with_context = np.concatenate(
+                [self._context, audio_samples_2d], axis=1
+            )
             ort_inputs = {
                 "input": input_with_context,
                 "sr": np.array([sample_rate], dtype=np.int64),
@@ -135,18 +115,11 @@ class SileroVAD:
 
 
 class SileroUtteranceGate:
-    """
-    Logic engine for managing spoken utterances and silence detection.
-    The UtteranceGate acts as a supervisor that watches the stream of
-    individual audio frames and decides when a user has started talking
-    and, more importantly, when they have stopped. It uses a combination
-    of AI-based VAD scores and energy-based noise floor tracking to
-    precisely identify speech boundaries in real-world environments.
-    """
+    """Manages audio buffering and speech boundary detection using VAD and energy levels."""
 
     def __init__(
         self,
-        vad_engine,
+        vad_engine: Any,
         *,
         sample_rate: int = settings.rate,
         frame_samples: int = 512,
@@ -156,14 +129,7 @@ class SileroUtteranceGate:
         energy_threshold: float = 0.03,
         energy_ratio: float = 2.5,
     ):
-        """
-        Sets up the gate with specific sensitivity and timing parameters.
-        The constructor initializes the internal buffers used for audio
-        analysis and sets the thresholds for what counts as speech. It
-        also establishes the 'silence timeout', which determines how long
-        the system should wait after the last detected speech before
-        finalizing the chunk and sending it to the Brain for transcription.
-        """
+        """Set up the gate with audio analysis buffers and sensitivity thresholds."""
         self.vad_engine = vad_engine
         self.sample_rate = sample_rate
         self.frame_samples = frame_samples
@@ -185,15 +151,9 @@ class SileroUtteranceGate:
         self._last_dynamic_threshold = energy_threshold
         self._noise_floor = 0.0
 
-    def reset(self):
-        """
-        Clears all buffered audio and resets the speech detection state.
-        This is used to prepare for a completely new utterance, such as
-        after a previous chunk has been successfully flushed. It ensures
-        that counters, timers, and background noise estimates are reset,
-        providing a clean starting point for identifying the next segment
-         of user speech without interference from past recordings.
-        """
+    @property
+    def reset(self) -> None:
+        """Clear all buffered audio and reset speech detection timers."""
         self._buffer.clear()
         self._analysis_buffer.clear()
         self._raw_analysis_buffer.clear()
@@ -210,42 +170,19 @@ class SileroUtteranceGate:
             self.vad_engine.reset()
 
     def arm_finalize(self, now: float) -> None:
-        """
-        Activates a countdown timer for closing the current utterance.
-        This is called when the Ear process wants to stop recording, even
-        if the VAD engine hasn't detected a long enough silence yet. It
-        sets a timestamp that the gate uses to ensure the final few
-        milliseconds of audio are processed and flushed before the
-        application fully transitions back to its idle or hidden state.
-        """
+        """Arm the gate to stop recording and flush remaining audio after a short timeout."""
         self._finalize_armed = True
         self._finalize_time = now
 
+    @property
     def has_speech_started(self) -> bool:
-        """
-        Returns True if human speech has been detected in the current chunk.
-        This simple flag allows the caller to distinguish between a session
-        that contains actual spoken content and one that was just background
-        noise or an accidental button press. It is only set to True once
-        the VAD score or energy level exceeds the project's configured
-        sensitivity thresholds for a sustained period of time.
-        """
+        """Return True if speech has been detected in the current utterance."""
         return self._speech_started
 
     def push(
-            self,
-            audio_chunk: bytes,
-            now: float,
-            analysis_chunk : bytes | None = None
-        ) -> bool:
-        """
-        Feeds new microphone data into the gate for real-time analysis.
-        It buffers the incoming bytes and processes them in fixed-size
-        frames, running each through the AI model and energy checks. The
-        function also dynamically updates its internal 'noise floor' estimate,
-        allowing the speech detection to automatically adapt to changing
-        room environments like air conditioners or distant background chatter.
-        """
+        self, audio_chunk: bytes, now: float, analysis_chunk: bytes | None = None
+    ) -> bool:
+        """Process new audio bytes through VAD and energy checks. Return True if active speech is found."""
         if not audio_chunk:
             return False
         self._raw_analysis_buffer.extend(audio_chunk)
@@ -273,7 +210,8 @@ class SileroUtteranceGate:
                 / 32768.0
             )
             raw_audio_for_energy_detection = (
-                np.frombuffer(raw_frame_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                np.frombuffer(raw_frame_bytes, dtype=np.int16).astype(np.float32)
+                / 32768.0
             )
             score = (
                 1.0
@@ -283,7 +221,7 @@ class SileroUtteranceGate:
                     sample_rate=self.sample_rate,
                 )
             )
-            frame_rms = float(np.sqrt(np.mean(raw_audio_for_energy_detection ** 2)))
+            frame_rms = float(np.sqrt(np.mean(raw_audio_for_energy_detection**2)))
             self._last_energy = frame_rms
             self._last_score = float(score)
             if score > self._max_score:
@@ -313,14 +251,7 @@ class SileroUtteranceGate:
         return speech_detected
 
     def should_finalize(self, now: float) -> bool:
-        """
-        Determines if the current spoken segment is finished and ready to flush.
-        A segment is considered complete if a significant period of silence
-        has passed since the last speech frame was detected. It also checks
-        the total length of the buffer to ensure we don't send extremely
-        short, incomplete fragments to the AI, which helps maintain the
-        overall transcription accuracy and context for the user.
-        """
+        """Return True if the user has stopped speaking and the chunk is ready to send."""
         if self._speech_started:
             # Do not finalize very tiny audio fragments after speech starts.
             if len(self._buffer) < self.min_utterance_bytes:
@@ -332,80 +263,37 @@ class SileroUtteranceGate:
             and (now - self._finalize_time) >= self.silence_timeout_s
         )
 
-    def silence_elapsed(self, now: float) -> float:
-        """
-        Calculates the duration of the current silence in seconds.
-        It measures the time gap between the current moment and the last
-        timestamp where the system was confident that the user was still
-        speaking. This value is used by the Ear's main loop to decide
-        whether to split the recording into a new chunk or keep waiting
-        for the user to continue their sentence or thought.
-        """
+    def silence_len(self, now: float) -> float:
+        """Return the number of seconds that have passed since speech was last detected."""
         return now - self._last_voice_time
 
     def finalize_elapsed(self, now: float) -> float:
-        """
-        Returns the time since the 'finalize soon' timer was triggered.
-        This provides a secondary safety check for ending a recording,
-        ensuring that the application doesn't hang in a 'stopping' state
-        indefinitely. If the finalize timer has been active for longer
-        than the silence threshold, the gate assumes the recording is
-        fully complete regardless of any lingering background noise.
-        """
+        """Return the elapsed time in seconds since the finalize countdown was armed."""
         return now - self._finalize_time
 
+    @property
     def last_score(self) -> float:
-        """
-        Retrieves the AI confidence score from the most recent audio frame.
-        This numeric value (0.0 to 1.0) gives developers and the UI real-time
-        insight into whether the model currently 'hears' a voice. It is
-        frequently used for internal debugging and for driving advanced
-        HUD visualizations that might change color based on speech confidence.
-        """
+        """Return the latest VAD probability score."""
         return self._last_score
 
+    @property
     def max_score(self) -> float:
-        """
-        Returns the highest confidence score achieved during this utterance.
-        By tracking the peak speech score, the system can determine if a
-        recording session ever actually contained high-confidence speech.
-        This is a valuable metric for filtering out sessions that were
-        triggered by accidental bumps to the microphone or short, non-speech
-        sounds like a door closing or a cough in the background.
-        """
+        """Return the peak VAD probability score achieved during this utterance."""
         return self._max_score
 
+    @property
     def last_energy(self) -> float:
-        """
-        Reports the Root Mean Square (RMS) energy of the latest audio frame.
-        Unlike the AI-based VAD score, this is a purely mathematical measure
-        of loudness. It acts as a reliable backup for speech detection,
-        ensuring that even if the AI model is uncertain, loud sounds
-        (which are often speech) will still be captured and processed
-        by the transcription engine without being cut off early.
-        """
+        """Return the RMS energy of the last processed audio frame."""
         return self._last_energy
 
+    @property
     def last_dynamic_threshold(self) -> float:
-        """
-        Returns the current sensitivity threshold for energy-based detection.
-        This value is calculated based on the learned 'noise floor' of the
-        user's environment. By returning this dynamic value, the system
-        allows the caller to monitor how well the VAD is adapting to its
-        surroundings, which is critical for maintaining performance in
-        varying acoustic conditions like home offices versus busy cafes.
-        """
+        """Return the current dynamic energy threshold adjusted for background noise."""
         return self._last_dynamic_threshold
 
+    @property
     def flush(self) -> bytes:
-        """
-        Retrieves the complete buffered utterance and clears the gate's state.
-        This is the final step in the utterance lifecycle, where all the
-        captured speech bytes are handed off to the Ear for processing.
-        After calling flush, the gate is automatically reset, making it
-        immediately ready to begin capturing and analyzing the next
-        spoken sentence without any further manual intervention.
-        """
+        """Return the entire buffered audio utterance as bytes and reset the gate."""
         audio = bytes(self._buffer)
-        self.reset()
+        self.reset
         return audio

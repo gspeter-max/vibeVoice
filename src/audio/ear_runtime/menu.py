@@ -13,28 +13,38 @@ import tty
 import numpy as np
 
 from src import log
-from src.ipc.client import send_message_to_brain
+from src.ipc.client import send_message
 from src.ipc.protocol_message_formats import format_switch_model_message
 from src.utils.settings import settings
 
 
 def send_switch_command(model_name, ear_instance=None):
-    """Send a model-switch command to Brain and keep Ear model state aligned."""
+    """Send a model-switch command to Brain and keep Ear model state aligned.
 
+    Args:
+        model_name: The name of the speech-to-text model to switch to.
+        ear_instance: Optional Ear runtime instance to sync the local model state.
+    """
     log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
     if ear_instance:
         ear_instance.current_model = model_name
 
-    sent = send_message_to_brain(
+    sent = send_message(
         format_switch_model_message(model_name),
     )
     if not sent:
         log.info("\n❌ Failed to send switch command\n")
 
 
-def run_self_test(sample_rate: int = settings.rate):
-    """Send one second of synthetic audio to Brain to test the input path."""
+def self_test(sample_rate: int = settings.rate):
+    """Send one second of synthetic audio to Brain to test the input path.
 
+    Generates a 440Hz sine wave (1.0 second duration) to verify that the
+    IPC communication channel and Brain inference are receiving data properly.
+
+    Args:
+        sample_rate: Audio sample rate in Hz. Defaults to settings.rate.
+    """
     log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
     duration_seconds = 1.0
     frequency_hz = 440.0
@@ -44,14 +54,16 @@ def run_self_test(sample_rate: int = settings.rate):
         int(sample_rate * duration_seconds),
         endpoint=False,
     )
-    audio_data = (np.sin(2 * np.pi * frequency_hz * time_axis) * 32767).astype(
-        np.int16
-    ).tobytes()
+    audio_data = (
+        (np.sin(2 * np.pi * frequency_hz * time_axis) * 32767)
+        .astype(np.int16)
+        .tobytes()
+    )
 
     max_retries = 3
     retry_delay_seconds = 1
     for attempt_index in range(max_retries):
-        if not os.path.exists(settings.socket_path):
+        if not os.path.exists(settings.ear_to_brain_socket_path):
             if attempt_index < max_retries - 1:
                 log.info(
                     f"\r⏳ Socket not ready, retrying in {retry_delay_seconds}s... "
@@ -59,11 +71,13 @@ def run_self_test(sample_rate: int = settings.rate):
                 )
                 time.sleep(retry_delay_seconds)
                 continue
-            log.info(f"\r❌ Self-test failed: Socket not found at {settings.socket_path}\n")
+            log.info(
+                f"\r❌ Self-test failed: Socket not found at {settings.ear_to_brain_socket_path}\n"
+            )
             log.info("   Is Brain running? Check this terminal for Brain output.\n")
             return
 
-        if send_message_to_brain(audio_data):
+        if send_message(audio_data):
             log.info("\r✅ Self-test audio sent to Brain\n")
             return
 
@@ -75,19 +89,32 @@ def run_self_test(sample_rate: int = settings.rate):
             time.sleep(retry_delay_seconds)
         else:
             log.info("\r❌ Self-test failed: Brain not accepting connections\n")
-            log.info("   Brain might be loading model. Check this terminal for Brain output.\n")
+            log.info(
+                "   Brain might be loading model. Check this terminal for Brain output.\n"
+            )
 
 
 class TerminalMenu(threading.Thread):
-    """Background terminal input loop for model switching and self-test actions."""
-
     def __init__(self, ear_instance=None):
+        """Background terminal input loop for model switching and self-test actions.
+        Runs as a daemon thread to monitor standard input for specific keystrokes,
+        enabling runtime model switching and self-tests without blocking main execution.
+
+        Args:
+            ear_instance: Optional active Ear instance used to track model changes.
+        """
         super().__init__(daemon=True)
         self._stop = threading.Event()
         self.fd = sys.stdin.fileno()
         self.ear = ear_instance
 
     def run(self):
+        """Monitor standard input for user commands using raw termios terminal control.
+
+        Saves the current terminal settings, puts the terminal into non-canonical
+        (cbreak) mode to intercept raw keypresses, and polls standard input in a loop.
+        Restores settings when stopped or interrupted.
+        """
         if not sys.stdin.isatty():
             return
 
@@ -106,14 +133,11 @@ class TerminalMenu(threading.Thread):
                                 self.ear,
                             )
                     elif pressed_key.lower() == "t":
-                        threading.Thread(target=run_self_test, daemon=True).start()
-                    elif pressed_key == "\x03":
-                        os.kill(os.getpid(), 2)
-                        break
+                        threading.Thread(target=self_test, daemon=True).start()
+
         finally:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, old_settings)
 
     def stop(self):
         """Request the background menu thread to stop."""
-
         self._stop.set()

@@ -1,25 +1,37 @@
 import numpy as np
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 from src.engines.nemotron import NemotronEngine
 
 def test_nemotron_engine_is_stateful():
-    with patch("src.engines.nemotron.LegacyNemotron"):
-        engine = NemotronEngine()
-        assert engine.is_stateful() is True
+    engine = NemotronEngine()
+    assert engine.is_stateful() is True
 
 def test_nemotron_engine_transcribes_and_clears_memory():
-    with patch("src.engines.nemotron.LegacyNemotron") as mock_legacy_class:
-        mock_instance = MagicMock()
-        mock_instance.add_audio_chunk_and_get_text.return_value = "hello cumulative world"
-        mock_legacy_class.return_value = mock_instance
-        
-        engine = NemotronEngine()
-        
-        fake_audio = np.zeros(1024, dtype=np.float32)
-        result = engine.transcribe_chunk(fake_audio)
-        
-        assert result == "hello cumulative world"
-        mock_instance.add_audio_chunk_and_get_text.assert_called_once_with(fake_audio)
-        
-        engine.clear_internal_memory()
-        mock_instance.clear_internal_memory.assert_called_once()
+    engine = NemotronEngine()
+    engine._engine = MagicMock()
+    engine._engine.add_audio_chunk_and_get_text.return_value = "hello cumulative world"
+    
+    fake_audio = np.zeros(1024, dtype=np.float32)
+    result = engine.transcribe_chunk(fake_audio)
+    
+    assert result == "hello cumulative world"
+    engine._engine.add_audio_chunk_and_get_text.assert_called_once_with(fake_audio)
+    
+    engine.clear_internal_memory()
+    engine._engine.clear_internal_memory.assert_called_once()
+
+def test_nemotron_engine_transcribes_bytes():
+    engine = NemotronEngine()
+    engine._engine = MagicMock()
+    engine._engine.add_audio_chunk_and_get_text.return_value = "hello cumulative world"
+    
+    fake_audio = np.zeros(1024, dtype=np.float32)
+    fake_audio_bytes = fake_audio.tobytes()
+    result = engine.transcribe_chunk(fake_audio_bytes)
+    
+    assert result == "hello cumulative world"
+    args, kwargs = engine._engine.add_audio_chunk_and_get_text.call_args
+    passed_array = args[0]
+    assert isinstance(passed_array, np.ndarray)
+    assert passed_array.dtype == np.float32
+    assert np.allclose(passed_array, fake_audio)

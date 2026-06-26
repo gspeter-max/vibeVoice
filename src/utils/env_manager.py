@@ -76,7 +76,7 @@ def check_and_ask_for_api_key(provider_name: str, env_var_name: str) -> None:
     console.print(f"You can get your key from the {provider_name} dashboard.\n")
 
     try:
-        user_key = Prompt.ask(f"Please paste your [bold cyan]{provider_name} API Key[/bold cyan]")
+        user_key = Prompt.ask(f"Please insert_transcripte your [bold cyan]{provider_name} API Key[/bold cyan]")
         if user_key:
             save_to_env(env_var_name, user_key)
             console.print(f"[bold green]✅ Successfully saved {provider_name} API key![/bold green]\n")

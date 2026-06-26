@@ -11,13 +11,15 @@ import time
 import pyaudio
 
 from src import log
-from src.audio.ear_runtime.controller import Ear, TerminalMenu
+from src.audio.ear_runtime.controller import Ear
 from src.audio.ear_runtime.devices import select_mic
+from src.audio.ear_runtime.menu import TerminalMenu
 from src.audio.ear_runtime.recording import start_recording_state
 from src.input.hotkeys import InputTrigger
 from src.ipc.client import open_checked_raw_audio_stream_to_brain
-from src.ui.hud_client import start_hud_command_thread, start_volume_sender_thread
+from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
+
 
 def start_ear():
     """Start the Ear runtime using the controller class."""
@@ -37,7 +39,6 @@ def start_ear():
         temporary_pyaudio.terminate()
 
     ear = Ear(input_device_index=selected_mic_index)
-
     menu = TerminalMenu(ear_instance=ear)
     menu.start()
 
@@ -49,13 +50,14 @@ def start_ear():
             )
             if raw_stream_socket is None:
                 return
+            # recording.py use ear._brain_sock_lock and ear._brain_sock
             with ear._brain_sock_lock:
                 ear._brain_sock = raw_stream_socket
 
         start_recording_state(ear, from_hold=from_hold)
         ear._cmd_press_time = time.time()
-        start_hud_command_thread("listen", socket_factory=socket.socket)
-        start_volume_sender_thread(
+        change_ui_status("listen", socket_factory=socket.socket)
+        ui_wave_input(
             ear,
             volume_port=settings.vol_port,
             socket_factory=socket.socket,
@@ -103,6 +105,7 @@ def start_ear():
                 termios.TCSADRAIN,
                 termios.tcgetattr(sys.stdin.fileno()),
             )
+
 
 if __name__ == "__main__":
     start_ear()

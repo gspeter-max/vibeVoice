@@ -2,8 +2,8 @@
 test_integration.py — Integration test for the brain socket communication flow.
 
 Tests that the full CMD_AUDIO_CHUNK → CMD_SESSION_COMMIT pipeline works:
-  - Ear sends a chunk → Brain transcribes it (but does NOT paste yet)
-  - Ear sends a commit → Brain stitches and pastes the final text
+  - Ear sends a chunk → Brain transcribes it (but does NOT insert_transcripte yet)
+  - Ear sends a commit → Brain stitches and insert_transcriptes the final text
 
 After Phase 2 wiring, brain.py uses a single TranscriptionEngine engine object.
 We mock it with is_stateful()=False and transcribe_chunk() returning a fixed string.
@@ -20,11 +20,11 @@ from tests.conftest import MockConn
 
 def test_socket_communication(sample_audio_bytes):
     """
-    Test that a chunk sent by Ear is accumulated by Brain and only pasted on commit.
+    Test that a chunk sent by Ear is accumulated by Brain and only insert_transcripted on commit.
 
     Flow:
-      1. Ear sends CMD_AUDIO_CHUNK → Brain transcribes it, does NOT paste yet
-      2. Ear sends CMD_SESSION_COMMIT → Brain stitches and calls paste_instantly
+      1. Ear sends CMD_AUDIO_CHUNK → Brain transcribes it, does NOT insert_transcripte yet
+      2. Ear sends CMD_SESSION_COMMIT → Brain stitches and calls insert_transcripte
     """
     # Create a mock engine that is stateless (deduplication path)
     mock_engine = MagicMock()
@@ -41,17 +41,17 @@ def test_socket_communication(sample_audio_bytes):
     commit = b"CMD_SESSION_COMMIT:session123:0"
 
     with patch.object(brain, "keyboard", MagicMock()), \
-         patch.object(brain, "refine_text_with_fallbacks", return_value="integrated test result cleaned"), \
-         patch.object(brain, "paste_instantly") as mock_paste, \
+         patch.object(brain, "llm_refine", return_value="integrated test result cleaned"), \
+         patch.object(brain, "insert_transcripte") as mock_insert_transcripte, \
          patch.object(brain, "send_hud") as mock_hud:
 
-        # Step 1: Send the audio chunk — should transcribe but NOT paste yet
+        # Step 1: Send the audio chunk — should transcribe but NOT insert_transcripte yet
         brain.handle_connection(MockConn(chunk))
         mock_engine.transcribe_chunk.assert_called_once()
-        mock_paste.assert_not_called()
+        mock_insert_transcripte.assert_not_called()
 
-        # Step 2: Send the commit signal — should stitch and paste now
+        # Step 2: Send the commit signal — should stitch and insert_transcripte now
         brain.handle_connection(MockConn(commit))
 
-    mock_paste.assert_called_once_with("integrated test result cleaned ")
+    mock_insert_transcripte.assert_called_once_with("integrated test result cleaned ")
     assert any(call.args[0] == "done" for call in mock_hud.call_args_list)

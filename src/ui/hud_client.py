@@ -44,7 +44,7 @@ def send_hud_command(
         return False
 
 
-def start_hud_command_thread(
+def change_ui_status(
     command_text: str,
     *,
     host: str = settings.hud_host,
@@ -74,7 +74,7 @@ def start_hud_command_thread(
     return sender_thread
 
 
-def start_volume_sender_thread(
+def ui_wave_input(
     ear_state,
     *,
     host: str = settings.hud_host,

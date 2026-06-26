@@ -166,8 +166,8 @@ def check_if_brain_program_is_ready_to_receive_data(timeout_seconds: int = 30) -
     """
     Waits for the Brain UNIX socket to appear, proving it can accept connections.
     """
-    socket_path = "/tmp/parakeet.sock"
-    print(f"[Check] Waiting for Brain socket at {socket_path}...")
+    ear_to_brain_socket_path = "/tmp/parakeet.sock"
+    print(f"[Check] Waiting for Brain socket at {ear_to_brain_socket_path}...")
     start_time = time.time()
     
     while time.time() - start_time < timeout_seconds:
@@ -176,7 +176,7 @@ def check_if_brain_program_is_ready_to_receive_data(timeout_seconds: int = 30) -
             print("[Error] ❌ main application process crashed unexpectedly.")
             return False
 
-        if os.path.exists(socket_path):
+        if os.path.exists(ear_to_brain_socket_path):
             print("[Check] ✅ Brain socket found.")
             return True
         time.sleep(1)
@@ -251,13 +251,13 @@ def send_fake_audio_to_brain_and_see_if_it_survives() -> bool:
     Crucially, it verifies the Brain PID is still alive after receiving data,
     proving it did not crash from a bad response.
     """
-    socket_path = "/tmp/parakeet.sock"
+    ear_to_brain_socket_path = "/tmp/parakeet.sock"
     print("[Ping] Pinging Brain socket...")
     try:
         client_socket = create_socket(
             family=socket.AF_UNIX,
             socket_type=socket.SOCK_STREAM,
-            address=socket_path,
+            address=ear_to_brain_socket_path,
             timeout_seconds=5.0
         )
         

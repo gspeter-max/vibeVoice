@@ -1,15 +1,43 @@
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from threading import Lock
 
-if TYPE_CHECKING:
-    from src.backend.data_record.telemetry import StreamingSessionTelemetryRecorder
+from src.engines.interface import TranscriptionEngine
+from src.interface import TelemetryRecording
 
-# Global state
-backend_info = {"engine": None}
-backend_lock = threading.Lock()
-session_store = {}
-session_store_lock = threading.Lock()
+
+@dataclass
+class BackendState:
+    """Holds the active transcription engine behind a lock."""
+
+    _lock: Lock = field(default_factory=threading.Lock)
+    engine: TranscriptionEngine | None = None
+    model_name: str = "parakeet-tdt-0.6b-v3"
+
+    def get_engine(self) -> TranscriptionEngine:
+        with self._lock:
+            if self.engine is None:
+                self.load_tts(self.model_name)
+
+            if self.engine is None:
+                raise RuntimeError("Failed to load the transcription engine.")
+            return self.engine
+
+    def set_engine(self, engine: TranscriptionEngine | None) -> None:
+        with self._lock:
+            self.engine = engine
+
+    def load_tts(self, model_name):
+        if "nemotron" in model_name.lower():
+            from src.engines.nemotron import NemotronEngine
+
+            engine = NemotronEngine()
+            self.engine = engine
+
+        from src.engines.parakeet import ParakeetEngine
+
+        engine = ParakeetEngine(model_name)
+        self.engine = engine
 
 
 @dataclass
@@ -35,15 +63,21 @@ class SessionState:
     stored in the recordings dict keyed by its recording_index integer.
     """
 
-    engine: object
-    # recordings[0] = first button press, recordings[1] = second, …
     recordings: dict = field(default_factory=dict)
     stt_time: float = 0.0
-    telemetry_recorder: "StreamingSessionTelemetryRecorder | None" = None
-    lock: threading.Lock = field(default_factory=threading.Lock)
+    telemetry_recorder: TelemetryRecording | None = None
 
     def get_or_create_recording(self, rec_idx: int) -> "RecordingState":
         """Returns the RecordingState for rec_idx, creating it if needed."""
         if rec_idx not in self.recordings:
             self.recordings[rec_idx] = RecordingState()
         return self.recordings[rec_idx]
+
+
+@dataclass
+class SessionStates:
+    """Top-level container: one engine shared across all sessions."""
+
+    backend: BackendState = field(default_factory=BackendState)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    sessions: dict[str, SessionState] = field(default_factory=dict)

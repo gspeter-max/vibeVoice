@@ -6,6 +6,7 @@ updates the .env file, and prepares the environment for the background processes
 
 import os
 import sys
+
 from dotenv import load_dotenv
 
 # Ensure we can import from src
@@ -14,8 +15,9 @@ sys.path.append(os.getcwd())
 # Load existing .env before starting the UI so it can pre-populate
 load_dotenv()
 
-from src.utils.wizard_tui import WizardApp
 from src.utils.env_manager import is_interactive
+from src.utils.wizard_tui import WizardApp
+
 
 def run_wizard():
     """
@@ -27,6 +29,7 @@ def run_wizard():
 
     app = WizardApp()
     app.run()
+
 
 if __name__ == "__main__":
     try:

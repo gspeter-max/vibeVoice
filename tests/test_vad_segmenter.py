@@ -1,4 +1,5 @@
 import numpy as np
+
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
 
@@ -62,8 +63,8 @@ def test_gate_falls_back_to_energy_when_silero_score_flatlines():
         frame_samples=4,
     )
 
-    loud = (b"\x00\x10" * 4)
-    quiet = (b"\x00\x01" * 4)
+    loud = b"\x00\x10" * 4
+    quiet = b"\x00\x01" * 4
 
     assert gate.push(loud, now=0.0) is True
     assert gate.has_speech_started() is True
@@ -84,11 +85,14 @@ def test_gate_keeps_raw_audio_but_uses_analysis_audio_for_detection():
     raw_audio_chunk = b"\x01\x00" * 4
     analysis_audio_chunk = b"\x02\x00" * 4
 
-    assert gate.push(
-        raw_audio_chunk,
-        now=0.0,
-        analysis_chunk=analysis_audio_chunk,
-    ) is True
+    assert (
+        gate.push(
+            raw_audio_chunk,
+            now=0.0,
+            analysis_chunk=analysis_audio_chunk,
+        )
+        is True
+    )
     assert gate.flush() == raw_audio_chunk
     assert vad_engine.seen_audio_samples[0].tolist() == [2 / 32768.0] * 4
 
@@ -107,11 +111,14 @@ def test_gate_uses_current_raw_frame_for_energy_fallback_not_first_frame_forever
     boosted_quiet_analysis_audio_chunk = b"\x00\x06" * 4
 
     assert gate.push(loud_raw_audio_chunk, now=0.0) is True
-    assert gate.push(
-        quiet_raw_audio_chunk,
-        now=0.1,
-        analysis_chunk=boosted_quiet_analysis_audio_chunk,
-    ) is False
+    assert (
+        gate.push(
+            quiet_raw_audio_chunk,
+            now=0.1,
+            analysis_chunk=boosted_quiet_analysis_audio_chunk,
+        )
+        is False
+    )
 
 
 def test_silero_v5_wrapper_prepends_64_sample_context_for_onnx_input(monkeypatch):
@@ -135,7 +142,9 @@ def test_silero_v5_wrapper_prepends_64_sample_context_for_onnx_input(monkeypatch
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+            return np.array([[0.9]], dtype=np.float32), np.zeros(
+                (2, 1, 128), dtype=np.float32
+            )
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
@@ -169,7 +178,9 @@ def test_silero_v5_wrapper_updates_context_after_each_call(monkeypatch):
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+            return np.array([[0.9]], dtype=np.float32), np.zeros(
+                (2, 1, 128), dtype=np.float32
+            )
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
@@ -205,13 +216,15 @@ def test_silero_v5_wrapper_reset_clears_context(monkeypatch):
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
+            return np.array([[0.9]], dtype=np.float32), np.zeros(
+                (2, 1, 128), dtype=np.float32
+            )
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
     vad = SileroVAD("fake.onnx")
     vad.is_speech(np.ones(512, dtype=np.float32) * 0.10, sample_rate=16000)
-    vad.reset()
+    vad.reset
     vad.is_speech(np.ones(512, dtype=np.float32) * 0.20, sample_rate=16000)
 
     assert np.allclose(seen_inputs[1][0, :64], 0.0)

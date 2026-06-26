@@ -1,148 +1,112 @@
-"""Socket transport helpers for Ear-to-Brain IPC.
+"""Socket transport helpers for the Ear-to-Brain IPC layer.
 
-This module owns the mechanical socket work. It does not decide command bytes.
-Callers build protocol messages separately and then ask this module to send
-them or manage a long-lived raw-audio stream.
+This module handles the low-level socket mechanics only. It does not define
+or interpret protocol/command bytes — callers are responsible for constructing
+those. The two public surfaces are:
+
+- ``create_socket`` – a context manager that opens and closes a Unix socket.
+- ``send_message`` – a one-shot helper that sends a pre-built byte
+  payload over a short-lived connection.
 """
 
 from __future__ import annotations
 
 import os
 import socket
-from typing import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Callable, Optional
+
 from src import log
 from src.utils.settings import settings
-from src.utils.socket_utils import create_socket
 
 
-def send_message_to_brain(
-    message_bytes: bytes,
-    timeout_seconds: float = 5.0,
-    socket_factory: Callable[..., socket.socket] | None = None,
-) -> bool:
+@dataclass(frozen=True)
+class SocketConfig:
+    """Immutable configuration for a Unix socket connection.
+
+    Attributes:
+        family: Socket address family (default: ``AF_UNIX``).
+        socket_type: Socket type (default: ``SOCK_STREAM``).
+        address: Filesystem path to the Unix socket (default: ``settings.ear_to_brain_socket_path``).
+        timeout: Optional socket timeout in seconds. ``None`` means blocking mode.
+    """
+
+    family: int = socket.AF_UNIX
+    socket_type: int = socket.SOCK_STREAM
+    address: str = settings.ear_to_brain_socket_path
+    timeout: float | None = None
+
+
+@contextmanager
+def create_socket(cfg: SocketConfig) -> Callable:
+    """Open a Unix socket connection and yield it as a context manager.
+
+    Creates a socket using the family and type from *cfg*, optionally sets a
+    timeout, connects to *cfg.address*, and yields the connected socket.
+    The socket is always closed in the ``finally`` block, regardless of
+    whether an exception was raised inside the ``with`` block.
+
+    Args:
+        cfg: A ``SocketConfig`` instance describing the socket parameters.
+
+    Yields:
+        socket.socket: A connected, ready-to-use socket.
+
+    Raises:
+        FileExistsError: If the socket file at *cfg.address* does not exist.
+    """
+    try:
+        if not os.path.exists(cfg.address):
+            raise FileExistsError(" cfg.address is not exists ")
+
+        sock = socket.socket(cfg.family, cfg.socket_type)
+        if cfg.timeout is not None:
+            sock.settimeout(cfg.timeout)
+        if cfg.address is not None:
+            sock.connect(cfg.address)
+
+        yield sock
+
+    finally:
+        sock.close()
+
+
+def send_message(message_bytes: bytes, sock: Optional[socket.socket] = None) -> bool:
     """Send one complete message over a short-lived Unix socket connection.
 
-    The caller provides already-formatted bytes. This helper only opens the
-    socket, sends the bytes, shuts down the write side, and closes the socket.
-    If the payload is empty or any socket step fails, the function returns
-    `False` so the caller can preserve existing error handling.
-    """
+    Opens a new socket, sends *message_bytes* in full, then performs a
+    half-close (``SHUT_WR``) before the connection is torn down by
+    ``create_socket``'s ``finally`` block.
 
+    Args:
+        message_bytes: The raw byte payload to transmit. Must be non-empty.
+        timeout: Socket timeout in seconds applied to the connection.
+            Defaults to ``5.0``.
+
+    Returns:
+        ``True`` if the message was sent successfully.
+        ``False`` if *message_bytes* is empty or any ``OSError`` is raised
+        during the socket operation, allowing callers to keep their existing
+        error-handling paths without catching exceptions here.
+    """
     if not message_bytes:
         return False
-
     try:
-        # Use our shared utility to create and connect the socket
-        with create_socket(
-            family=socket.AF_UNIX,
-            socket_type=socket.SOCK_STREAM,
-            address=settings.socket_path,
-            timeout_seconds=timeout_seconds,
-            socket_factory=socket_factory
-        ) as client_socket:
-            client_socket.sendall(message_bytes)
-            client_socket.shutdown(socket.SHUT_WR)
+        if sock is None:
+            cfg = SocketConfig()
+            sock = create_socket(cfg)
+
+        with sock as sock:
+            if isinstance(sock, Exception):
+                raise sock
+
+            sock.sendall(message_bytes)
+            sock.shutdown(socket.SHUT_WR)
+
         return True
-    except Exception as e :
-        log.error(f"Error sending message to brain: |{e}|")
+
+    except OSError as e:
+        log.error(f"Failed Send message over {cfg.address} : |{e}|")
+
         return False
-
-
-def open_raw_audio_stream_to_brain(
-    timeout_seconds: float = 5.0,
-    socket_factory: Callable[..., socket.socket] | None = None,
-) -> socket.socket | None:
-    """Open the long-lived raw-audio stream used by no-streaming mode.
-
-    This helper returns an open socket object on success. It returns `None`
-    when the socket path is missing or the connection attempt fails.
-    """
-
-    try:
-        # Use our shared utility to create and connect the socket
-        return create_socket(
-            family=socket.AF_UNIX,
-            socket_type=socket.SOCK_STREAM,
-            address=settings.socket_path,
-            timeout_seconds=timeout_seconds,
-            socket_factory=socket_factory
-        )
-    except Exception as e:
-        log.error(f"Error opening raw audio stream to brain: |{e}|")
-        return None
-
-
-def open_checked_raw_audio_stream_to_brain(
-    timeout_seconds: float = 5.0,
-    socket_factory: Callable[..., socket.socket] | None = None,
-) -> socket.socket | None:
-    """Open the raw-audio stream only when the Brain socket path exists.
-
-    The Ear controller should not repeat file-existence checks or socket-open
-    rules. This helper centralizes that transport policy and returns `None`
-    for both a missing socket path and a failed connection attempt.
-    """
-
-    if not os.path.exists(settings.socket_path):
-        return None
-
-    return open_raw_audio_stream_to_brain(
-        timeout_seconds=timeout_seconds,
-        socket_factory=socket_factory,
-    )
-
-
-def send_raw_audio_stream_chunk(
-    raw_stream_socket: socket.socket | None,
-    chunk_bytes: bytes,
-) -> bool:
-    """Send one raw audio chunk on an already-open stream socket."""
-
-    if raw_stream_socket is None:
-        return False
-
-    try:
-        raw_stream_socket.sendall(chunk_bytes)
-        return True
-    except OSError:
-        return False
-
-
-def send_raw_audio_stream_chunk_or_close(
-    raw_stream_socket: socket.socket | None,
-    chunk_bytes: bytes,
-) -> socket.socket | None:
-    """Send one raw chunk and close the stream on failure.
-
-    Returning the surviving socket keeps the controller logic literal:
-    callers can store the returned handle directly, and `None` means the
-    stream is gone and must not be reused.
-    """
-
-    if raw_stream_socket is None:
-        return None
-
-    if send_raw_audio_stream_chunk(raw_stream_socket, chunk_bytes):
-        return raw_stream_socket
-
-    close_raw_audio_stream_to_brain(raw_stream_socket)
-    return None
-
-
-def close_raw_audio_stream_to_brain(raw_stream_socket: socket.socket | None) -> None:
-    """Shut down and close an open raw-audio stream socket."""
-
-    if raw_stream_socket is None:
-        return
-
-    try:
-        raw_stream_socket.shutdown(socket.SHUT_WR)
-    except OSError:
-        pass
-
-    try:
-        raw_stream_socket.close()
-    except OSError:
-        pass
-
-

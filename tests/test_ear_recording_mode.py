@@ -1,16 +1,15 @@
+import sys
 import threading
 from unittest.mock import Mock, patch
-import sys
-
-
 
 import src.audio.ear_runtime.controller as ear_module
 import src.audio.ear_runtime.menu as menu_module
-from src.utils.settings import settings
 from src.audio.ear_runtime.controller import Ear as RuntimeEar
 from src.audio.ear_runtime.menu import TerminalMenu as RuntimeTerminalMenu
-from src.audio.ear_runtime.menu import run_self_test
+from src.audio.ear_runtime.menu import self_test
 from src.audio.ear_runtime.runtime import start_ear as runtime_start_ear
+from src.utils.settings import settings
+
 
 def test_nemotron_not_in_models_when_no_streaming(monkeypatch):
     """
@@ -69,7 +68,9 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
             return None
 
     class FakeInputTrigger:
-        def __init__(self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs):
+        def __init__(
+            self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs
+        ):
             captured["on_start_recording"] = on_start_recording
             captured["on_stop_recording"] = on_stop_recording
             captured["on_toggle_recording"] = on_toggle_recording
@@ -85,10 +86,12 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
     monkeypatch.setattr(runtime_module, "TerminalMenu", FakeMenu)
     monkeypatch.setattr(runtime_module, "InputTrigger", FakeInputTrigger)
     monkeypatch.setattr(runtime_module, "select_mic", lambda _p: 7)
-    monkeypatch.setattr(runtime_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance())
+    monkeypatch.setattr(
+        runtime_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance()
+    )
     monkeypatch.setattr(runtime_module.sys.stdin, "isatty", lambda: False)
-    monkeypatch.setattr(runtime_module, "start_hud_command_thread", Mock())
-    monkeypatch.setattr(runtime_module, "start_volume_sender_thread", Mock())
+    monkeypatch.setattr(runtime_module, "change_ui_status", Mock())
+    monkeypatch.setattr(runtime_module, "ui_wave_input", Mock())
     monkeypatch.setattr(
         runtime_module,
         "start_recording_state",
@@ -99,8 +102,8 @@ def test_runtime_start_wrapper_uses_real_hud_helpers(monkeypatch):
     runtime_module.start_ear()
     captured["on_start_recording"](from_hold=True)
 
-    runtime_module.start_hud_command_thread.assert_called_once()
-    runtime_module.start_volume_sender_thread.assert_called_once()
+    runtime_module.change_ui_status.assert_called_once()
+    runtime_module.ui_wave_input.assert_called_once()
     assert captured["started_from_hold"] is True
 
 
@@ -140,7 +143,9 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
             return None
 
     class FakeInputTrigger:
-        def __init__(self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs):
+        def __init__(
+            self, on_start_recording, on_stop_recording, on_toggle_recording, **_kwargs
+        ):
             captured["on_start_recording"] = on_start_recording
 
         def start(self):
@@ -154,12 +159,18 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
     monkeypatch.setattr(runtime_module, "TerminalMenu", FakeMenu)
     monkeypatch.setattr(runtime_module, "InputTrigger", FakeInputTrigger)
     monkeypatch.setattr(runtime_module, "select_mic", lambda _p: 7)
-    monkeypatch.setattr(runtime_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance())
+    monkeypatch.setattr(
+        runtime_module.pyaudio, "PyAudio", lambda: FakePyAudioInstance()
+    )
     monkeypatch.setattr(runtime_module.sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(runtime_module.settings, "recording_mode", "no_streaming")
-    monkeypatch.setattr(runtime_module, "open_checked_raw_audio_stream_to_brain", Mock(return_value=opened_socket))
-    monkeypatch.setattr(runtime_module, "start_hud_command_thread", Mock())
-    monkeypatch.setattr(runtime_module, "start_volume_sender_thread", Mock())
+    monkeypatch.setattr(
+        runtime_module,
+        "open_checked_raw_audio_stream_to_brain",
+        Mock(return_value=opened_socket),
+    )
+    monkeypatch.setattr(runtime_module, "change_ui_status", Mock())
+    monkeypatch.setattr(runtime_module, "ui_wave_input", Mock())
     monkeypatch.setattr(
         runtime_module,
         "start_recording_state",
@@ -172,6 +183,7 @@ def test_runtime_start_wrapper_uses_real_ipc_helper_in_no_streaming_mode(monkeyp
 
     runtime_module.open_checked_raw_audio_stream_to_brain.assert_called_once()
     assert captured["ear"]._brain_sock is opened_socket
+
 
 def test_terminal_menu_run_uses_audio_ear_switch_command_seam(monkeypatch):
     monkeypatch.setattr("sys.stdin.fileno", lambda: 0)
@@ -211,15 +223,18 @@ def test_terminal_menu_run_uses_audio_ear_switch_command_seam(monkeypatch):
     }
 
 
-def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
+def test_self_test_uses_audio_ear_ear_to_brain_socket_path_override(monkeypatch):
     from unittest.mock import MagicMock
+
     import src.ipc.client as ipc_client
 
     checked_paths = []
     used_address = []
     mock_socket = MagicMock()
 
-    monkeypatch.setattr(menu_module.settings, "socket_path", "/tmp/custom-parakeet.sock")
+    monkeypatch.setattr(
+        menu_module.settings, "ear_to_brain_socket_path", "/tmp/custom-parakeet.sock"
+    )
 
     monkeypatch.setattr(
         "src.audio.ear_runtime.menu.os.path.exists",
@@ -228,13 +243,16 @@ def test_run_self_test_uses_audio_ear_socket_path_override(monkeypatch):
     monkeypatch.setattr(
         ipc_client,
         "create_socket",
-        lambda *args, **kwargs: used_address.append(kwargs.get("address")) or mock_socket,
+        lambda *args, **kwargs: (
+            used_address.append(kwargs.get("address")) or mock_socket
+        ),
     )
 
-    run_self_test()
+    self_test()
 
     assert checked_paths == ["/tmp/custom-parakeet.sock"]
     assert used_address == ["/tmp/custom-parakeet.sock"]
+
 
 def test_nemotron_in_models_when_silence_streaming(monkeypatch):
     """
@@ -247,9 +265,12 @@ def test_nemotron_in_models_when_silence_streaming(monkeypatch):
     # Menu should allow all 5 options
     assert len(models) == 5
 
-@patch('sys.stdin.fileno', return_value=0)
-@patch('src.audio.ear_runtime.menu.send_switch_command')
-def test_terminal_menu_ignores_nemotron_key_in_no_streaming(mock_send, mock_fileno, monkeypatch):
+
+@patch("sys.stdin.fileno", return_value=0)
+@patch("src.audio.ear_runtime.menu.send_switch_command")
+def test_terminal_menu_ignores_nemotron_key_in_no_streaming(
+    mock_send, mock_fileno, monkeypatch
+):
     """
     Verifies that pressing '5' in the terminal menu does absolutely nothing
     if the current mode does not support Nemotron.
@@ -258,10 +279,10 @@ def test_terminal_menu_ignores_nemotron_key_in_no_streaming(mock_send, mock_file
 
     monkeypatch.setattr(settings, "recording_mode", "no_streaming")
     # We simulate the sys.stdin.read returning '5'
-    with patch('sys.stdin.read', return_value='5'):
+    with patch("sys.stdin.read", return_value="5"):
         # Trigger the logic that handles 'c in 12345'
         # (Note: we just test the inner logic, not the full run() loop which is blocking)
-        c = '5'
+        c = "5"
         idx = int(c) - 1
         active_models = settings.active_stt_models
 
@@ -272,16 +293,19 @@ def test_terminal_menu_ignores_nemotron_key_in_no_streaming(mock_send, mock_file
         # 4 < 4 is False.
         mock_send.assert_not_called()
 
-@patch('sys.stdin.fileno', return_value=0)
-@patch('src.audio.ear_runtime.menu.send_switch_command')
-def test_terminal_menu_accepts_nemotron_key_in_streaming(mock_send, mock_fileno, monkeypatch):
+
+@patch("sys.stdin.fileno", return_value=0)
+@patch("src.audio.ear_runtime.menu.send_switch_command")
+def test_terminal_menu_accepts_nemotron_key_in_streaming(
+    mock_send, mock_fileno, monkeypatch
+):
     """
     Verifies that pressing '5' works when in streaming mode.
     """
     menu = ear_module.TerminalMenu()
 
     monkeypatch.setattr(settings, "recording_mode", "silence_streaming")
-    c = '5'
+    c = "5"
     idx = int(c) - 1
     active_models = settings.active_stt_models
 

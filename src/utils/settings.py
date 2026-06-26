@@ -67,16 +67,12 @@ class VibeVoiceSettings(BaseSettings):
     """Transcription backend: 'parakeet' or 'nemotron'."""
 
     # ── IPC / Network ─────────────────────────────────────────────────────
-    socket_path: str = "/tmp/parakeet.sock"
+    ear_to_brain_socket_path: str = "/tmp/ear_to_brain_socket_path.sock"
     """Unix socket path for Ear → Brain audio streaming."""
+    ear_to_hud_socket_path: str = "/tmp/ear_to_hud_socket_path"
+    """Unix socket path for Ear → HUD for HUd ui status i."""
+    brain_to_hud_socket_path: str = "/tmp/brain_to_hud_socket_path"
 
-    hud_host: str = "127.0.0.1"
-    """Hostname the Brain uses to send state updates to the HUD."""
-
-    hud_port: int = 57234
-    """TCP port the HUD listens on for state commands from the Brain."""
-
-    vol_port: int = 57235
     """UDP port used by the Ear to send live volume levels to the HUD."""
 
     # ── Telemetry ─────────────────────────────────────────────────────────

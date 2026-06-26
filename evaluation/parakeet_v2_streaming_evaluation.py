@@ -32,9 +32,9 @@ DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run
 
 
 def load_evaluation_model():
-    from src.backend.backend_parakeet import load_speech_recognition_model_from_disk
+    from src.backend.backend_parakeet import tts_from_disk
 
-    return load_speech_recognition_model_from_disk(PARAKEET_V2_MODEL_NAME)
+    return tts_from_disk(PARAKEET_V2_MODEL_NAME)
 
 
 def resolve_dataset_config_name_to_load(
@@ -403,13 +403,13 @@ def run_fake_microphone_stream_for_one_dataset_item(
         if chunk_started_at_seconds is None:
             chunk_started_at_seconds = current_time_seconds
 
-        silence_duration_seconds = utterance_gate.silence_elapsed(current_time_seconds)
+        silence_len = utterance_gate.silence_len(current_time_seconds)
         split_decision = should_split(
             start_time=chunk_started_at_seconds,
             now=current_time_seconds,
             min_age=minimum_chunk_age_before_silence_split_seconds,
             gate_finalize=utterance_gate.should_finalize(current_time_seconds),
-            silence_len=silence_duration_seconds,
+            silence_len=silence_len,
         )
         if split_decision.should_split:
             raw_chunk_audio = utterance_gate.flush()

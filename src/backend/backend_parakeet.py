@@ -8,6 +8,9 @@ Runs significantly faster than Whisper on CPU.
 from __future__ import annotations
 
 import os
+import tarfile
+import urllib.request
+from typing import Any
 
 import numpy as np
 
@@ -17,143 +20,118 @@ from src.utils.settings import settings
 
 try:
     import sherpa_onnx
+
     _SHERPA_ONNX_IMPORT_ERROR = None
 except (ImportError, OSError) as exc:  # pragma: no cover - depends on platform wheels
-    sherpa_onnx = None  # type: ignore[assignment]
     _SHERPA_ONNX_IMPORT_ERROR = exc
 
-# Default model on startup if this backend is forced
-CURRENT_MODEL_NAME = "nemo-parakeet-tdt-0.6b-v3"
 
-
-def get_model_folder_path_and_download_link(model_name_to_check: str) -> tuple[str, str]:
+def _get_model_paths(model_name: str) -> tuple[str, str]:
     """Return the local model folder and the download URL for one model name."""
-    clean_model_name = model_name_to_check.replace("nemo-", "")
-    is_moonshine_model = "moonshine" in clean_model_name
+    is_moonshine = "moonshine" in model_name
 
     # We make the folder name based on if it is a moonshine model or a normal nemo model
-    if is_moonshine_model:
-        folder_name_on_computer = f"sherpa-onnx-{clean_model_name}-en-int8"
+    if is_moonshine:
+        folder_name = f"sherpa-onnx-{model_name}-en-int8"
     else:
-        folder_name_on_computer = f"sherpa-onnx-nemo-{clean_model_name}-int8"
+        folder_name = f"sherpa-onnx-nemo-{model_name}-int8"
 
-    base_cache_folder_path = os.path.expanduser("~/.cache/parakeet-flow/models")
-    full_model_folder_path = os.path.join(base_cache_folder_path, folder_name_on_computer)
+    base_cache = os.path.expanduser("~/.cache/parakeet-flow/models")
+    cache_path = os.path.join(base_cache, folder_name)
 
-    internet_download_link = (
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-        f"{folder_name_on_computer}.tar.bz2"
+    download_url = (
+        f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{folder_name}.tar.bz2"
     )
 
-    return full_model_folder_path, internet_download_link
+    return cache_path, download_url
 
 
-def download_model_file_and_unzip_it(
-    internet_download_link: str,
-    destination_folder_path: str,
-):
+def _download_and_extract(url: str, dest_dir: str) -> None:
     """
-    This function downloads the compressed model file from the internet and unzips it into a folder.
-
-    Steps:
-    1. Find the file name from the internet link.
-    2. Make the folder on your computer if it does not exist.
-    3. Download the file from the internet to your computer.
-    4. Unzip the file so the computer can use it.
-    5. Delete the compressed file to save space on your computer.
+    Downloads the compressed model file from the internet and extracts it.
     """
-    import tarfile
-    import urllib.request
-
-    compressed_file_name = internet_download_link.split("/")[-1]
-    full_path_to_compressed_file = os.path.join(destination_folder_path, compressed_file_name)
+    filename = url.split("/")[-1]
+    archive_path = os.path.join(dest_dir, filename)
 
     # Make the folder if it does not exist
-    os.makedirs(destination_folder_path, exist_ok=True)
+    os.makedirs(dest_dir, exist_ok=True)
 
-    log.info(f"⬇️ Downloading {compressed_file_name} (this may take a minute)...")
+    log.info(f"⬇️ Downloading {filename} (this may take a minute)...")
     try:
         # Download the file
-        urllib.request.urlretrieve(internet_download_link, full_path_to_compressed_file)
+        urllib.request.urlretrieve(url, archive_path)
 
-        log.info(f"📦 Extracting {compressed_file_name}...")
-        # Unzip the file
-        with tarfile.open(full_path_to_compressed_file, "r:bz2") as tar_file_object:
-            tar_file_object.extractall(path=destination_folder_path)
+        log.info(f"📦 Extracting {filename}...")
+        # Extract the file
+        with tarfile.open(archive_path, "r:bz2") as tar:
+            tar.extractall(path=dest_dir)
 
         log.info("✅ Done.")
     finally:
         # Delete the compressed file
-        if os.path.exists(full_path_to_compressed_file):
-            os.remove(full_path_to_compressed_file)
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
 
 
-def load_speech_recognition_model_from_disk(
-    requested_model_name=None,
-) -> sherpa_onnx.OfflineRecognizer:
+def load_model(model_name: str | None = None) -> sherpa_onnx.OfflineRecognizer | Any:
     """Load the requested sherpa-onnx model into memory."""
-    global CURRENT_MODEL_NAME
 
-    # Step 1: Check if the sherpa_onnx library is installed
-    if sherpa_onnx is None:
-        error_message_to_show = "sherpa-onnx is unavailable in this environment"
-        if _SHERPA_ONNX_IMPORT_ERROR:
-            error_message_to_show += f": {_SHERPA_ONNX_IMPORT_ERROR}"
-        raise RuntimeError(error_message_to_show)
+    # Check if the sherpa_onnx library is installed
+    if isinstance(_SHERPA_ONNX_IMPORT_ERROR, BaseException):
+        raise RuntimeError(
+            "sherpa-onnx is unavailable in this environment"
+        ) from _SHERPA_ONNX_IMPORT_ERROR
 
-    # Step 2: Get the exact model name
-    target_model_name = requested_model_name or CURRENT_MODEL_NAME
+    # Get the exact model name
+    name = model_name or settings.stt_model
 
-    # Step 3: Get the folder path and download link for the model
-    model_folder_path, internet_download_link = (
-        get_model_folder_path_and_download_link(target_model_name)
-    )
-    CURRENT_MODEL_NAME = target_model_name.replace("nemo-", "")
+    # Get the folder path and download link for the model
+    cache_path, download_url = _get_model_paths(name)
+    clean_name = name.replace("nemo-", "")
 
-    # Step 4: If the model is not on your computer, download and unzip it
-    if not os.path.exists(model_folder_path):
-        log.info(f"Model not found. Initiating auto-download for {CURRENT_MODEL_NAME}...")
-        cache_base_folder = os.path.dirname(model_folder_path)
-        download_model_file_and_unzip_it(internet_download_link, cache_base_folder)
+    # If the model is not on your computer, download and unzip it
+    if not os.path.exists(cache_path):
+        log.info(f"Model not found. Initiating auto-download for {clean_name}...")
+        parent_dir = os.path.dirname(cache_path)
+        _download_and_extract(download_url, parent_dir)
 
-    log.info(f"\n[sherpa-onnx] Loading {CURRENT_MODEL_NAME} (INT8) from {model_folder_path}...")
+    log.info(f"\n[sherpa-onnx] Loading {clean_name} (INT8) from {cache_path}...")
 
-    # Step 5: Find out how many CPU threads to use for speed
-    number_of_cpu_threads_to_use = get_integer_from_environment("PARAKEET_THREADS", 6)
+    # Find out how many CPU threads to use for speed
+    threads = get_integer_from_environment("PARAKEET_THREADS", 6)
+    log.info(f"[sherpa-onnx] Using {threads} threads")
 
-    log.info(f"[sherpa-onnx] Using {number_of_cpu_threads_to_use} threads")
+    is_moonshine = "moonshine" in clean_name
+    is_ctc = "ctc" in clean_name
 
-    is_moonshine_model = "moonshine" in CURRENT_MODEL_NAME
-    is_ctc_model = "ctc" in CURRENT_MODEL_NAME
-
-    # Step 6: Load the model into memory based on what type of model it is
-    if is_moonshine_model:
-        loaded_speech_recognizer = sherpa_onnx.OfflineRecognizer.from_moonshine(
-            preprocessor=f"{model_folder_path}/preprocess.onnx",
-            encoder=f"{model_folder_path}/encode.int8.onnx",
-            uncached_decoder=f"{model_folder_path}/uncached_decode.int8.onnx",
-            cached_decoder=f"{model_folder_path}/cached_decode.int8.onnx",
-            tokens=f"{model_folder_path}/tokens.txt",
-            num_threads=number_of_cpu_threads_to_use,
+    # Load the model into memory based on what type of model it is
+    if is_moonshine:
+        recognizer = sherpa_onnx.OfflineRecognizer.from_moonshine(
+            preprocessor=f"{cache_path}/preprocess.onnx",
+            encoder=f"{cache_path}/encode.int8.onnx",
+            uncached_decoder=f"{cache_path}/uncached_decode.int8.onnx",
+            cached_decoder=f"{cache_path}/cached_decode.int8.onnx",
+            tokens=f"{cache_path}/tokens.txt",
+            num_threads=threads,
             debug=False,
         )
-    elif is_ctc_model:
-        loaded_speech_recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
-            model=f"{model_folder_path}/model.int8.onnx",
-            tokens=f"{model_folder_path}/tokens.txt",
-            num_threads=number_of_cpu_threads_to_use,
+    elif is_ctc:
+        recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+            model=f"{cache_path}/model.int8.onnx",
+            tokens=f"{cache_path}/tokens.txt",
+            num_threads=threads,
             sample_rate=settings.rate,
             feature_dim=80,
             debug=False,
         )
     else:
         # Use the from_transducer factory method which is available in the Python API
-        loaded_speech_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=f"{model_folder_path}/encoder.int8.onnx",
-            decoder=f"{model_folder_path}/decoder.int8.onnx",
-            joiner=f"{model_folder_path}/joiner.int8.onnx",
-            tokens=f"{model_folder_path}/tokens.txt",
-            num_threads=number_of_cpu_threads_to_use,
+        recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=f"{cache_path}/encoder.int8.onnx",
+            decoder=f"{cache_path}/decoder.int8.onnx",
+            joiner=f"{cache_path}/joiner.int8.onnx",
+            tokens=f"{cache_path}/tokens.txt",
+            num_threads=threads,
             sample_rate=settings.rate,
             feature_dim=80,
             decoding_method="greedy_search",
@@ -162,18 +140,14 @@ def load_speech_recognition_model_from_disk(
         )
 
     log.info("[sherpa-onnx] ✅ Model loaded.")
+    return recognizer
 
-    # Step 7: Return the loaded model
-    return loaded_speech_recognizer
 
-def convert_audio_to_text(
-    loaded_speech_recognizer_model: sherpa_onnx.OfflineRecognizer,
-    audio_data_array: np.ndarray,
-) -> str:
+def transcribe(recognizer: sherpa_onnx.OfflineRecognizer | Any, audio: np.ndarray) -> str:
     """Run one audio array through the loaded recognizer and return text."""
-    audio_stream = loaded_speech_recognizer_model.create_stream()
-    audio_stream.accept_waveform(settings.rate, audio_data_array)
-    loaded_speech_recognizer_model.decode_stream(audio_stream)
+    stream = recognizer.create_stream()
+    stream.accept_waveform(settings.rate, audio)
+    recognizer.decode_stream(stream)
 
-    final_text_string = audio_stream.result.text.strip()
-    return final_text_string
+    text = stream.result.text.strip()
+    return text

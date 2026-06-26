@@ -1,7 +1,7 @@
 # tests/test_ipc_protocol.py
 import json
 from src.ipc.client import (
-    send_message_to_brain,
+    send_message,
 )
 from src.ipc.protocol_message_formats import (
     format_audio_chunk_message,

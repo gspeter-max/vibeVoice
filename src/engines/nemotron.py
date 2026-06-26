@@ -1,30 +1,34 @@
+from dataclasses import dataclass
+
 import numpy as np
-from src.engines.base import TranscriptionEngine
 
-try:
-    from src.streaming.nemotron import NemotronStreamingEngine as LegacyNemotron
-except ImportError:
-    LegacyNemotron = None
+from src.engines.interface import TranscriptionEngine
+from src.streaming.nemotron import NemotronStreamingEngine
 
+
+@dataclass
 class NemotronEngine(TranscriptionEngine):
     """
     The implementation for the Nemotron streaming model.
     This model is "stateful", meaning it keeps an internal buffer of the audio.
     When you give it a new chunk, it returns the transcript for the ENTIRE recording so far.
     """
-    def __init__(self):
-        self._engine = LegacyNemotron() if LegacyNemotron else None
+
+    _engine = NemotronStreamingEngine()
 
     def is_stateful(self) -> bool:
-        """Nemotron absolutely remembers past chunks."""
+        """Nemotron absolutely remembers insert_transcript chunks."""
         return True
 
-    def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
+    def transcribe_chunk(self, audio_samples: np.ndarray | bytes) -> str:
         """
         Adds the audio to Nemotron's internal buffer and gets the full, cumulative text back.
         """
         if not self._engine:
             return ""
+
+        if isinstance(audio_samples, bytes):
+            audio_samples = np.frombuffer(audio_samples, dtype=np.float32)
 
         text = self._engine.add_audio_chunk_and_get_text(audio_samples)
         return text.strip()

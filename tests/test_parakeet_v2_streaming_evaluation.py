@@ -369,7 +369,7 @@ def test_run_fake_microphone_stream_tracks_chunk_event_text_states(monkeypatch):
                 return b"\x05\x00\x06\x00\x07\x00\x08\x00"
             return b""
 
-        def silence_elapsed(self, now):
+        def silence_len(self, now):
             return 0.70
 
     transcriptions_by_audio_bytes = {
@@ -456,7 +456,7 @@ def test_run_fake_microphone_stream_counts_real_chunk_events_even_if_dedup_remov
                 return b"\x05\x00\x06\x00\x07\x00\x08\x00"
             return b""
 
-        def silence_elapsed(self, now):
+        def silence_len(self, now):
             return 0.70
 
     transcriptions_by_audio_bytes = {
@@ -515,7 +515,7 @@ def test_run_fake_microphone_stream_only_splits_when_silence_gate_says_finalize(
                 return b"\x01\x00\x02\x00\x03\x00\x04\x00"
             return b""
 
-        def silence_elapsed(self, now):
+        def silence_len(self, now):
             return 0.70
 
     monkeypatch.setattr(

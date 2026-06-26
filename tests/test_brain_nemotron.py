@@ -5,7 +5,7 @@ After Phase 2 wiring, brain.py uses the TranscriptionEngine interface.
 These tests verify that:
   - load_transcription_engine returns a single NemotronEngine for nemotron models
   - handle_streaming_audio_chunk correctly calls engine.transcribe_chunk() for stateful engines
-  - _finalize_recording_if_ready always calls engine.clear_internal_memory()
+  - finalize_recording always calls engine.clear_internal_memory()
 """
 
 import numpy as np
@@ -57,10 +57,10 @@ def test_handle_streaming_audio_chunk_uses_transcribe_chunk_for_stateful_engine(
 
 
 @patch.object(brain, "send_hud")
-@patch.object(brain, "paste_instantly")
-def test_finalize_recording_if_ready_always_clears_engine_memory(mock_paste, mock_hud):
+@patch.object(brain, "insert_transcripte")
+def testfinalize_recording_always_clears_engine_memory(mock_insert_transcripte, mock_hud):
     """
-    Verify that _finalize_recording_if_ready always calls engine.clear_internal_memory()
+    Verify that finalize_recording always calls engine.clear_internal_memory()
     after finalizing — regardless of whether the engine is stateful or stateless.
     (Stateless engines safely do nothing when clear_internal_memory is called.)
     """
@@ -83,7 +83,7 @@ def test_finalize_recording_if_ready_always_clears_engine_memory(mock_paste, moc
 
     brain.session_store[session_id] = session
 
-    brain._finalize_recording_if_ready(session_id, 0)
+    brain.finalize_recording(session_id, 0)
 
     # clear_internal_memory must have been called exactly once after finalization
     mock_engine.clear_internal_memory.assert_called_once()

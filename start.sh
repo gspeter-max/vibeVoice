@@ -39,7 +39,7 @@ VENV_PYTHON="./.venv/bin/python"
 # 0. Ensure .venv exists (Auto-setup for new clones)
 if [ ! -f "$VENV_PYTHON" ]; then
     log_info "No virtual environment found. Starting auto-setup..."
-    
+
     # Linux-specific check for PortAudio (pyaudio dependency)
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         if ! ldconfig -p | grep -q libportaudio >/dev/null 2>&1; then
@@ -57,7 +57,7 @@ if [ ! -f "$VENV_PYTHON" ]; then
         python3 -m venv .venv
         ./.venv/bin/pip install -e .
     fi
-    
+
     if [ ! -f "$VENV_PYTHON" ]; then
         log_error "Auto-setup failed. Please install dependencies manually."
         exit 1
@@ -70,16 +70,19 @@ fi
 "$VENV_PYTHON" src/utils/wizard.py
 
 # 2. Load the UPDATED environment
-[ -f .env ] && { set -a; . ./.env; set +a; }
+[ -f .env ] && {
+    set -a
+    . ./.env
+    set +a
+}
 
 export BACKEND="${BACKEND:-parakeet}"
-export QT_MAC_WANTS_LAYER=1 # Intel Mac Sonoma+ fix
+export QT_MAC_WANTS_LAYER=1      # Intel Mac Sonoma+ fix
 export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
 export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
 export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-0}"
 export RECORDING_MODE="${RECORDING_MODE:-silence_streaming}"
 export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
-
 
 # Startup Banner
 echo "
@@ -95,10 +98,16 @@ echo "
   Logs     : live terminal output
 "
 
-[[ "${START_SH_DRY_RUN:-0}" == "1" ]] && { log_info "Dry run: exiting before Brain startup"; exit 0; }
+[[ "${START_SH_DRY_RUN:-0}" == "1" ]] && {
+    log_info "Dry run: exiting before Brain startup"
+    exit 0
+}
 
 # Sanity Check
-[ -f "$VENV_PYTHON" ] || { log_error ".venv not found. Run: uv venv && uv pip install -e ."; exit 1; }
+[ -f "$VENV_PYTHON" ] || {
+    log_error ".venv not found. Run: uv venv && uv pip install -e ."
+    exit 1
+}
 
 # Cleanup stale processes
 log_info "Cleaning up old processes..."
@@ -113,7 +122,7 @@ mkdir -p logs
 log_info "Starting Brain..."
 "$VENV_PYTHON" src/backend/brain.py &
 BRAIN_PID=$!
-echo $BRAIN_PID > /tmp/parakeet-brain.pid
+echo $BRAIN_PID >/tmp/parakeet-brain.pid
 log_info "Brain PID: $BRAIN_PID | live terminal output"
 
 # Wait for Brain
@@ -126,19 +135,27 @@ while [ ! -S /tmp/parakeet.sock ]; do
     sleep 1
     ((WAIT++))
     ((WAIT % 10 == 0)) && printf ". [%02ds/%02ds]\n  " "$WAIT" "$MAX_WAIT" || printf "."
-    kill -0 "$BRAIN_PID" 2>/dev/null || { echo; log_error "Brain crashed on startup."; exit 1; }
-    [[ $WAIT -ge $MAX_WAIT ]] && { echo; log_error "Timed out waiting for Brain."; exit 1; }
+    kill -0 "$BRAIN_PID" 2>/dev/null || {
+        echo
+        log_error "Brain crashed on startup."
+        exit 1
+    }
+    [[ $WAIT -ge $MAX_WAIT ]] && {
+        echo
+        log_error "Timed out waiting for Brain."
+        exit 1
+    }
 done
 echo -e "\n\n  ✅ Brain is Online!\n══════════════════════════════════════════════════\n"
 
 # Start HUD
 log_info "Starting HUD..."
 kill_hud_processes
-"$VENV_PYTHON" src/ui/hud.py > logs/hud.log 2>&1 &
+"$VENV_PYTHON" src/ui/hud.py >logs/hud.log 2>&1 &
 HUD_PID=$!
-echo $HUD_PID > /tmp/parakeet-hud.pid
+echo $HUD_PID >/tmp/parakeet-hud.pid
 log_info "HUD PID: $HUD_PID | log: logs/hud.log"
 sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
-"$VENV_PYTHON" src/audio/ear_runtime/runtime.py
+"$VENV_PYTHON" -m pdb src/audio/ear_runtime/runtime.py

@@ -4,12 +4,14 @@ This file is the main door to all AI text cleaners.
 It holds one internet connection open to save time.
 It tries different AI companies in order so we never fail.
 """
+
 import os
 import threading
+
 import httpx
-from src.text_refiner.providers.generic_openai_provider import call_openai_compatible_api
 
 from src import log
+from src.text_refiner.providers.generic_openai_provider import call_openai_compatible_api
 from src.utils.env_manager import check_and_ask_for_api_key
 
 # 1. Configuration for our Providers
@@ -21,7 +23,7 @@ PROVIDERS = [
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "model": "llama-3.3-70b-versatile",
         "description": "Fastest Performance",
-        "feature": "Ultra-low latency"
+        "feature": "Ultra-low latency",
     },
     {
         "name": "Cerebras",
@@ -29,7 +31,7 @@ PROVIDERS = [
         "url": "https://api.cerebras.ai/v1/chat/completions",
         "model": "llama3.1-8b",
         "description": "Fast Backup",
-        "feature": "Llama 3.1 8B on Cerebras hardware"
+        "feature": "Llama 3.1 8B on Cerebras hardware",
     },
     {
         "name": "OpenGateway",
@@ -51,6 +53,7 @@ _provider_lock = threading.Lock()
 # We use a 4.0s timeout to ensure we stay under the 5.0s user limit.
 global_http_client = httpx.Client(timeout=4.0)
 
+
 def set_primary_provider(index: int) -> None:
     """
     Sets which AI provider we should try to use first.
@@ -64,7 +67,8 @@ def set_primary_provider(index: int) -> None:
             current_provider_index = index
         log.info(f"LLM Router: Primary provider set to {PROVIDERS[index]['name']}")
 
-def refine_text_with_fallbacks(raw_text: str) -> str:
+
+def llm_refine(raw_text: str) -> str:
     """
     Clean the text using the current leader provider.
     If the leader is slow or broken, we return raw text INSTANTLY
@@ -115,8 +119,7 @@ def refine_text_with_fallbacks(raw_text: str) -> str:
             next_provider = PROVIDERS[current_provider_index]["name"]
 
         log.warning(
-            f"LLM Router: {provider_name} failed. "
-            f"Rotating to {next_provider}. Error: {error}"
+            f"LLM Router: {provider_name} failed. Rotating to {next_provider}. Error: {error}"
         )
 
         # 5. Return raw text immediately so the user gets their text without delay

@@ -11,12 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.utils.env_utils import get_float_from_environment
-from src.backend.state import (
-    backend_info, session_store, session_store_lock, SessionState
-)
+from structlog import get_logger
 
+from src.backend.state import SessionStates
+from src.interface import TelemetryRecording
+from src.utils.env_utils import get_float_from_environment
 from src.utils.settings import settings
+
+log = get_logger()
 
 
 @dataclass
@@ -52,7 +54,7 @@ class StreamingSessionTelemetryRecorder:
                 "total_chunks_received": 0,
                 "total_decode_seconds": 0.0,
                 "final_text": "",
-                "final_paste_success": None,
+                "final_insert_transcripte_success": None,
                 "flags": {},
                 **self.summary_seed,
             },
@@ -78,7 +80,7 @@ class StreamingSessionTelemetryRecorder:
 
         with wave.open(str(file_path), "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2) # 16-bit
+            wf.setsampwidth(2)  # 16-bit
             wf.setframerate(sample_rate)
             wf.writeframes(pcm_bytes)
 
@@ -168,21 +170,7 @@ class StreamingSessionTelemetryRecorder:
         os.replace(temp_name, destination)
 
 
-def _model_name_for_telemetry() -> str | None:
-    """
-    Returns the active model name for labeling telemetry sessions.
-    This function checks the currently loaded backend and model to extract
-    a human-readable name, such as 'base.en' or 'parakeet-tdt'. This ensures
-    that every saved telemetry file can clearly show which AI model was used
-    to generate the transcriptions during that specific session.
-    """
-    engine = backend_info.get("engine")
-    if engine is None:
-        return None
-    return str(getattr(engine, "model_name", "unknown_model"))
-
-
-def _telemetry_seed() -> dict:
+def _telemetry_seed(state: SessionStates) -> dict:
     """
     Constructs the initial configuration data for a new telemetry session.
     This dictionary includes the recording mode, current backend type, and model name,
@@ -190,10 +178,14 @@ def _telemetry_seed() -> dict:
     By seeding this data at the start, we create a comprehensive 'header' in the
     telemetry file that documents the exact settings and hardware state for debugging.
     """
+    engine = state.backend.get_engine()
+    model_name = (
+        getattr(engine, "model_name", None) or state.backend.model_name or settings.stt_model
+    )
     return {
         "recording_mode": settings.recording_mode,
         "backend": settings.backend,
-        "model": _model_name_for_telemetry(),
+        "model": model_name,
         "telemetry_enabled": settings.streaming_telemetry_enabled,
         "flags": {
             "vad_no_speech_warning_seen": False,
@@ -213,9 +205,7 @@ def _telemetry_seed() -> dict:
     }
 
 
-def _telemetry_recorder_for_session(
-    session_id: str,
-) -> StreamingSessionTelemetryRecorder | None:
+def build_recorder(session_id: str, state: SessionStates) -> TelemetryRecording | None:
     """
     Retrieves or initializes a telemetry recorder for a given session ID.
     If telemetry is globally disabled, it returns None immediately. Otherwise,
@@ -226,52 +216,53 @@ def _telemetry_recorder_for_session(
     if not settings.streaming_telemetry_enabled:
         return None
 
-    with session_store_lock:
-        session = session_store.get(session_id)
+    from src.backend.state import SessionState
+
+    with state.lock:
+        session = state.sessions.get(session_id, None)
         if session and session.telemetry_recorder is not None:
             return session.telemetry_recorder
 
         recorder = StreamingSessionTelemetryRecorder(
             session_id=session_id,
             output_dir=settings.streaming_telemetry_dir,
-            summary_seed=_telemetry_seed(),
+            summary_seed=_telemetry_seed(state),
         )
         if session is None:
-            session = SessionState(
-                engine=backend_info.get("engine"),
-                telemetry_recorder=recorder,
-            )
-            session_store[session_id] = session
+            session = SessionState(telemetry_recorder=recorder)
+            state.sessions[session_id] = session
         else:
             session.telemetry_recorder = recorder
         return recorder
 
 
 def _update_chunk_telemetry_summary(
-    session_id: str, recording_index: int, chunk_index: int, fields: dict
+    session_id: str, recording_index: int, chunk_index: int, fields: dict, state: SessionStates
 ) -> None:
     """Updates the summary data for a specific chunk inside a given recording."""
-    recorder = _telemetry_recorder_for_session(session_id)
-    if recorder is None:
-        return
-    recorder.update_chunk_summary(recording_index, chunk_index, fields)
+    recorder = build_recorder(session_id, state)
+    if recorder:
+        recorder.update_chunk_summary(recording_index, chunk_index, fields)
+    else:
+        log.warning("recorder is None therefore recorder.update_chunk_summary fail")
 
 
-def _update_session_telemetry_summary(session_id: str, fields: dict) -> None:
+def update_summary(session_id: str, fields: dict, state: SessionStates) -> None:
     """
     Merges top-level session information into the overall telemetry report.
     This is used to record final session outcomes such as the total processing time,
-    the final combined transcript, and whether the final paste was successful.
+    the final combined transcript, and whether the final insert_transcripte was successful.
     It provides a high-level overview of the entire session's performance and
     success rate without needing to dig into every individual audio chunk.
     """
-    recorder = _telemetry_recorder_for_session(session_id)
-    if recorder is None:
-        return
-    recorder.update_session_summary(fields)
+    recorder = build_recorder(session_id, state)
+    if recorder:
+        recorder.update_session_summary(fields)
+    else:
+        log.warning("recorder is None therefore recorder.update_chunk_summary fail")
 
 
-def _handle_session_telemetry_event(session_id: str, payload: dict) -> None:
+def _handle_session_telemetry_event(session_id: str, payload: dict, state: SessionStates) -> None:
     """
     Routes incoming telemetry commands from the Ear to the correct recorder logic.
     Updates the session-wide 'summary' flags, such as flagging that a VAD warning
@@ -282,7 +273,7 @@ def _handle_session_telemetry_event(session_id: str, payload: dict) -> None:
     recording_index = payload.get("recording_index", 0)
 
     if event_type == "vad_no_speech_warning":
-        _update_session_telemetry_summary(
+        update_summary(
             session_id,
             {
                 "flags": {
@@ -290,6 +281,7 @@ def _handle_session_telemetry_event(session_id: str, payload: dict) -> None:
                     "dedup_trim_applied": False,
                 }
             },
+            state,
         )
         return
 
@@ -302,6 +294,6 @@ def _handle_session_telemetry_event(session_id: str, payload: dict) -> None:
     if event_type in ("chunk_sent_to_brain", "silence_threshold_hit"):
         if chunk_index is not None:
             _update_chunk_telemetry_summary(
-                session_id, recording_index, int(chunk_index), fields
+                session_id, recording_index, int(chunk_index), fields, state
             )
         return

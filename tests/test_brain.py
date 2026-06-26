@@ -4,7 +4,7 @@ test_brain.py — Unit tests for src/backend/brain.py
 These tests verify that brain.py correctly:
   - Routes raw audio to the engine for transcription
   - Handles model switching commands
-  - Stitches and pastes final text after a recording session
+  - Stitches and insert_transcriptes final text after a recording session
   - Deduplicates overlapping text chunks from stateless engines
 
 After Phase 2 wiring, brain.py no longer holds a separate 'backend' and 'model'.
@@ -35,7 +35,7 @@ def clear_session_store():
 def test_handle_connection_transcribes_audio(sample_audio_bytes):
     """
     Verify that when raw audio arrives (no CMD_ prefix), brain transcribes it
-    using engine.transcribe_chunk(), cleans it, and pastes the result.
+    using engine.transcribe_chunk(), cleans it, and insert_transcriptes the result.
     """
     # Create a mock engine that returns "hello world" when asked to transcribe
     mock_engine = MagicMock()
@@ -48,16 +48,16 @@ def test_handle_connection_transcribes_audio(sample_audio_bytes):
 
     with (
         patch.object(brain, "send_hud") as mock_hud,
-        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
-        patch.object(brain, "paste_instantly") as mock_paste,
+        patch.object(brain, "llm_refine", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "insert_transcripte") as mock_insert_transcripte,
     ):
         brain.handle_connection(conn)
 
     # The engine must have been asked to transcribe exactly once
     mock_engine.transcribe_chunk.assert_called_once()
     mock_groq.assert_called_once_with("hello world")
-    # The transcribed text should have been pasted with a trailing space
-    mock_paste.assert_called_once_with("hello world cleaned ")
+    # The transcribed text should have been insert_transcripted with a trailing space
+    mock_insert_transcripte.assert_called_once_with("hello world cleaned ")
     assert any(call.args[0] == "done" for call in mock_hud.call_args_list)
 
 
@@ -80,13 +80,13 @@ def test_handle_connection_no_streaming_buffers_raw_audio_until_socket_close(
 
     with (
         patch.object(brain, "send_hud"),
-        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
-        patch.object(brain, "paste_instantly") as mock_paste,
+        patch.object(brain, "llm_refine", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "insert_transcripte") as mock_insert_transcripte,
     ):
         brain.handle_connection(conn)
     mock_engine.transcribe_chunk.assert_called_once()
     mock_groq.assert_called_once_with("hello world")
-    mock_paste.assert_called_once_with("hello world cleaned ")
+    mock_insert_transcripte.assert_called_once_with("hello world cleaned ")
 
 
 def test_handle_connection_switch_model_command():
@@ -124,11 +124,11 @@ def test_handle_connection_skips_too_short_audio():
     short_audio = b"\x00\x00" * 1600
     conn = MockConn(short_audio)
 
-    with patch.object(brain, "send_hud"), patch.object(brain, "paste_instantly") as mock_paste:
+    with patch.object(brain, "send_hud"), patch.object(brain, "insert_transcripte") as mock_insert_transcripte:
         brain.handle_connection(conn)
 
     mock_engine.transcribe_chunk.assert_not_called()
-    mock_paste.assert_not_called()
+    mock_insert_transcripte.assert_not_called()
 
 def test_handle_streaming_audio_chunk_dedupes_against_last_chunk_text():
     """
@@ -163,10 +163,10 @@ def test_handle_streaming_audio_chunk_dedupes_against_last_chunk_text():
     assert session.recordings[0].transcript_parts[1] == "doing H3 grid"
 
 
-def test_finalize_session_pastes_stitched_text_directly():
+def test_finalize_session_insert_transcriptes_stitched_text_directly():
     """
     Verify that after all chunks arrive and the session is closed,
-    _finalize_recording_if_ready stitches the parts, cleans them using Groq, and calls paste_instantly.
+    finalize_recording stitches the parts, cleans them using Groq, and calls insert_transcripte.
     """
     session_id = "session123"
     mock_engine = MagicMock()
@@ -186,10 +186,10 @@ def test_finalize_session_pastes_stitched_text_directly():
         patch("src.backend.brain.log.info") as mock_log,
         patch.object(brain, "_show_summary_table") as mock_summary_table,
         patch.object(brain, "send_hud"),
-        patch.object(brain, "refine_text_with_fallbacks", return_value="hello world cleaned") as mock_groq,
-        patch.object(brain, "paste_instantly") as mock_paste,
+        patch.object(brain, "llm_refine", return_value="hello world cleaned") as mock_groq,
+        patch.object(brain, "insert_transcripte") as mock_insert_transcripte,
     ):
-        brain._finalize_recording_if_ready(session_id, 0)
+        brain.finalize_recording(session_id, 0)
     mock_groq.assert_called_once_with("hello world")
     mock_summary_table.assert_called_once()
     summary_args = mock_summary_table.call_args.args
@@ -200,7 +200,7 @@ def test_finalize_session_pastes_stitched_text_directly():
         0.0,
     )
     assert isinstance(summary_args[4], float)
-    mock_paste.assert_called_once_with("hello world cleaned ")
+    mock_insert_transcripte.assert_called_once_with("hello world cleaned ")
     assert not any("[Brain] 🏁" in call.args[0] for call in mock_log.call_args_list if call.args)
 
 
@@ -217,12 +217,12 @@ def test_handle_session_event_writes_telemetry_file(tmp_path, monkeypatch):
     mock_engine.model_name = "base.en"
     state.backend_info["engine"] = mock_engine
 
-    blob = (
+    audio = (
         b"CMD_SESSION_EVENT:session123:0\n\n"
         b'{"type":"vad_no_speech_warning","chunk_index":0,"max_score":0.017,"threshold":0.5,"last_energy":0.0074,"energy_threshold":0.05}'
     )
 
-    brain._handle_session_event(blob)
+    brain._handle_session_event(audio)
 
     json_files = list(tmp_path.glob("*session123*.json"))
     assert len(json_files) == 1
@@ -251,7 +251,7 @@ def test_brain_logs_match_pulse_format(capsys):
     rec = session.get_or_create_recording(0)
     rec.closed = True
     # 3. Finalize
-    brain._finalize_recording_if_ready(session_id, 0)
+    brain.finalize_recording(session_id, 0)
 
     captured = capsys.readouterr()
     stdout = captured.out
