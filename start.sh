@@ -102,7 +102,7 @@ echo -e "
   ${ORANGE}└──────────────────────────────────────────────┘${NC}
 "
 echo -e "${ORANGE}"
-cat << 'EOF'
+cat <<'EOF'
   ██╗   ██╗██╗██████╗ ███████╗██╗   ██╗██████╗ ██╗ ██████╗███████╗
   ██║   ██║██║██╔══██╗██╔════╝██║   ██║██╔══██╗██║██╔════╝██╔════╝
   ██║   ██║██║██████╔╝█████╗  ██║   ██║██║  ██║██║██║     █████╗  
@@ -140,9 +140,19 @@ kill_hud_processes
 rm -f /tmp/parakeet.sock
 mkdir -p logs
 printf "\r\033[K  [1/3] ⚙️  Cleaning up stale processes...  ${GREEN}✓ Done${NC}\n"
+if [[ "$BACKEND" == "nemotron" ]]; then
+    MODEL_FOLDER="nemotron-0.6b-onnx"
+else
+    MODEL_NAME="${STT_MODEL:-parakeet-tdt-0.6b-v3}"
+    if [[ "$MODEL_NAME" == *"moonshine"* ]]; then
+        MODEL_FOLDER="sherpa-onnx-${MODEL_NAME}-en-int8"
+    else
+        MODEL_FOLDER="sherpa-onnx-nemo-${MODEL_NAME}-int8"
+    fi
+fi
 
 # 2. Start Brain
-[ -d ~/.cache/parakeet-flow/models/deepdml ] || log_warn "First run: Downloading model (~1.5 GB)..."
+[ -d "$HOME/.cache/parakeet-flow/models/$MODEL_FOLDER" ] || log_warn "First run: Downloading model (~1.5 GB)..."
 printf "  [2/3] 🧠  Launching Brain server..."
 osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
 BRAIN_PID=0
@@ -151,9 +161,9 @@ WAIT=0
 MAX_WAIT=300
 SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
 while [ ! -S /tmp/parakeet.sock ]; do
-    sleep 0.2
+    sleep 0.1
     ((WAIT++))
-    elapsed=$((WAIT/5))
+    elapsed=$((WAIT / 10))
 
     SPIN="${SPINNER[WAIT % ${#SPINNER[@]}]}"
     printf "\r\033[K  [2/3] 🧠  Launching Brain server...       %s Waiting [%02ds/%02ds]" "$SPIN" "$elapsed" "$MAX_WAIT"
