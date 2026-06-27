@@ -5,9 +5,19 @@
 
 set -euo pipefail
 
-log_info() { echo "  $1"; }
-log_warn() { echo "⚠️  $1"; }
-log_error() { echo "❌ $1"; }
+# Colors
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+GRAY='\033[0;90m'
+NC='\033[0m'
+
+log_info() { echo -e "  ${BLUE}ℹ${NC} $1"; }
+log_warn() { echo -e "  ${YELLOW}⚠️${NC} $1"; }
+log_error() { echo -e "  ${RED}✗${NC} $1"; }
+log_success() { echo -e "  ${GREEN}✓${NC} $1"; }
 
 kill_pid_file_process() {
     local pid_file="$1"
@@ -29,7 +39,7 @@ cleanup() {
     kill_pid_file_process /tmp/parakeet-hud.pid
     kill_hud_processes
     rm -f /tmp/parakeet.sock
-    log_info "Done. Goodbye."
+    log_success "Done. Goodbye."
 }
 trap cleanup EXIT INT TERM
 
@@ -85,17 +95,15 @@ export RECORDING_MODE="${RECORDING_MODE:-silence_streaming}"
 export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
 
 # Startup Banner
-echo "
-╔══════════════════════════════════════════════════╗
-║        🎙️  PARAKEET FLOW  v2                      ║
-╚══════════════════════════════════════════════════╝
-  Backend  : $BACKEND
-  Mode     : $RECORDING_MODE
-  Telemetry: $([ "$STREAMING_TELEMETRY_ENABLED" = "1" ] && echo "enabled -> $STREAMING_TELEMETRY_DIR" || echo "disabled")
-  Threads  : ${PARAKEET_THREADS:-auto (all cores)}
-  Python   : $($VENV_PYTHON --version 2>&1)
-  Theme    : Dark with premium white waveform bars
-  Logs     : live terminal output
+echo -e "
+  ${CYAN}🎙️  PARAKEET FLOW v2${NC}
+  ${GRAY}──────────────────────────────────────────────────${NC}
+  ${BLUE}Backend${NC}   : $BACKEND
+  ${BLUE}Mode${NC}      : $RECORDING_MODE
+  ${BLUE}Telemetry${NC} : $([ "$STREAMING_TELEMETRY_ENABLED" = "1" ] && echo -e "${GREEN}Enabled${NC} (${GRAY}$STREAMING_TELEMETRY_DIR${NC})" || echo -e "${GRAY}Disabled${NC}")
+  ${BLUE}Threads${NC}   : ${PARAKEET_THREADS:-auto}
+  ${BLUE}Python${NC}    : $($VENV_PYTHON --version 2>&1 | awk '{print $2}')
+  ${GRAY}──────────────────────────────────────────────────${NC}
 "
 
 [[ "${START_SH_DRY_RUN:-0}" == "1" ]] && {
@@ -164,7 +172,7 @@ kill_hud_processes
 "$VENV_PYTHON" src/ui/hud.py >logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID >/tmp/parakeet-hud.pid
-log_info "HUD PID: $HUD_PID | log: logs/hud.log"
+log_info "HUD started (PID: ${GRAY}$HUD_PID${NC} | log: ${GRAY}logs/hud.log${NC})"
 sleep 0.8 # Allow Qt/Cocoa connection
 
 # Start Ear
