@@ -12,6 +12,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 GRAY='\033[0;90m'
+ORANGE='\033[38;5;208m'
 NC='\033[0m'
 
 log_info() { echo -e "  ${BLUE}ℹ${NC} $1"; }
@@ -96,8 +97,22 @@ export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessio
 
 # Startup Banner
 echo -e "
-  ${CYAN}🎙️  PARAKEET FLOW v2${NC}
-  ${GRAY}──────────────────────────────────────────────────${NC}
+  ${ORANGE}┌──────────────────────────────────────────────┐${NC}
+  ${ORANGE}│  * Welcome to VibeVoice research preview!    │${NC}
+  ${ORANGE}└──────────────────────────────────────────────┘${NC}
+"
+echo -e "${ORANGE}"
+cat << 'EOF'
+  ██╗   ██╗██╗██████╗ ███████╗██╗   ██╗██████╗ ██╗ ██████╗███████╗
+  ██║   ██║██║██╔══██╗██╔════╝██║   ██║██╔══██╗██║██╔════╝██╔════╝
+  ██║   ██║██║██████╔╝█████╗  ██║   ██║██║  ██║██║██║     █████╗  
+  ╚██╗ ██╔╝██║██╔══██╗██╔══╝  ╚██╗ ██╔╝██║  ██║██║██║     ██╔══╝  
+   ╚████╔╝ ██║██████╔╝███████╗ ╚████╔╝ ██████╔╝██║╚██████╗███████╗
+    ╚═══╝  ╚═╝╚═════╝ ╚══════╝  ╚═══╝  ╚═════╝ ╚═╝ ╚═════╝╚══════╝
+EOF
+echo -e "${NC}"
+
+echo -e "
   ${BLUE}Backend${NC}   : $BACKEND
   ${BLUE}Mode${NC}      : $RECORDING_MODE
   ${BLUE}Telemetry${NC} : $([ "$STREAMING_TELEMETRY_ENABLED" = "1" ] && echo -e "${GREEN}Enabled${NC} (${GRAY}$STREAMING_TELEMETRY_DIR${NC})" || echo -e "${GRAY}Disabled${NC}")
