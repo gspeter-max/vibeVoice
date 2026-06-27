@@ -120,33 +120,43 @@ mkdir -p logs
 
 # Start Brain
 log_info "Starting Brain..."
-"$VENV_PYTHON" src/backend/brain.py &
-BRAIN_PID=$!
-echo $BRAIN_PID >/tmp/parakeet-brain.pid
-log_info "Brain PID: $BRAIN_PID | live terminal output"
+osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
+# "$VENV_PYTHON" src/backend/brain.py &
+BRAIN_PID=0
+log_info "Brain started in a new Terminal window"
 
 # Wait for Brain
-echo -n "  Waiting for Brain to be ready"
 [ -d ~/.cache/parakeet-flow/models/deepdml ] || log_warn "First run: Downloading model (~1.5 GB)..."
 
 WAIT=0
 MAX_WAIT=300
+SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+GREEN='\033[0;32m'
+NC='\033[0m'
+
 while [ ! -S /tmp/parakeet.sock ]; do
-    sleep 1
+    sleep 0.2
     ((WAIT++))
-    ((WAIT % 10 == 0)) && printf ". [%02ds/%02ds]\n  " "$WAIT" "$MAX_WAIT" || printf "."
-    kill -0 "$BRAIN_PID" 2>/dev/null || {
-        echo
-        log_error "Brain crashed on startup."
-        exit 1
-    }
-    [[ $WAIT -ge $MAX_WAIT ]] && {
-        echo
+    elapsed=$((WAIT/5))
+
+    SPIN="${SPINNER[WAIT % ${#SPINNER[@]}]}"
+    printf "\r\033[K  %s Waiting for Brain to be ready... [%02ds/%02ds]" "$SPIN" "$elapsed" "$MAX_WAIT"
+
+    if [ "$BRAIN_PID" -ne 0 ]; then
+        kill -0 "$BRAIN_PID" 2>/dev/null || {
+            printf "\n"
+            log_error "Brain crashed on startup."
+            exit 1
+        }
+    fi
+    if [[ $elapsed -ge $MAX_WAIT ]]; then
+        printf "\n"
         log_error "Timed out waiting for Brain."
         exit 1
-    }
+    fi
 done
-echo -e "\n\n  ✅ Brain is Online!\n══════════════════════════════════════════════════\n"
+printf "\r\033[K${GREEN}  ✅ Brain is Online!${NC}\n"
+echo "══════════════════════════════════════════════════"
 
 # Start HUD
 log_info "Starting HUD..."
