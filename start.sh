@@ -132,38 +132,31 @@ echo -e "
     exit 1
 }
 
-# Cleanup stale processes
-log_info "Cleaning up old processes..."
-
+# 1. Cleanup stale processes
+printf "  [1/3] ⚙️  Cleaning up stale processes..."
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes
 rm -f /tmp/parakeet.sock
 mkdir -p logs
+printf "\r\033[K  [1/3] ⚙️  Cleaning up stale processes...  ${GREEN}✓ Done${NC}\n"
 
-# Start Brain
-log_info "Starting Brain..."
-osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
-# "$VENV_PYTHON" src/backend/brain.py &
-BRAIN_PID=0
-log_info "Brain started in a new Terminal window"
-
-# Wait for Brain
+# 2. Start Brain
 [ -d ~/.cache/parakeet-flow/models/deepdml ] || log_warn "First run: Downloading model (~1.5 GB)..."
+printf "  [2/3] 🧠  Launching Brain server..."
+osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
+BRAIN_PID=0
 
 WAIT=0
 MAX_WAIT=300
 SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-GREEN='\033[0;32m'
-NC='\033[0m'
-
 while [ ! -S /tmp/parakeet.sock ]; do
     sleep 0.2
     ((WAIT++))
     elapsed=$((WAIT/5))
 
     SPIN="${SPINNER[WAIT % ${#SPINNER[@]}]}"
-    printf "\r\033[K  %s Waiting for Brain to be ready... [%02ds/%02ds]" "$SPIN" "$elapsed" "$MAX_WAIT"
+    printf "\r\033[K  [2/3] 🧠  Launching Brain server...       %s Waiting [%02ds/%02ds]" "$SPIN" "$elapsed" "$MAX_WAIT"
 
     if [ "$BRAIN_PID" -ne 0 ]; then
         kill -0 "$BRAIN_PID" 2>/dev/null || {
@@ -178,17 +171,17 @@ while [ ! -S /tmp/parakeet.sock ]; do
         exit 1
     fi
 done
-printf "\r\033[K${GREEN}  ✅ Brain is Online!${NC}\n"
-echo "══════════════════════════════════════════════════"
+printf "\r\033[K  [2/3] 🧠  Launching Brain server...       ${GREEN}✓ Online${NC}\n"
 
-# Start HUD
-log_info "Starting HUD..."
+# 3. Start HUD
+printf "  [3/3] 🖥️  Initializing HUD window..."
 kill_hud_processes
 "$VENV_PYTHON" src/ui/hud.py >logs/hud.log 2>&1 &
 HUD_PID=$!
 echo $HUD_PID >/tmp/parakeet-hud.pid
-log_info "HUD started (PID: ${GRAY}$HUD_PID${NC} | log: ${GRAY}logs/hud.log${NC})"
-sleep 0.8 # Allow Qt/Cocoa connection
+sleep 0.8
+printf "\r\033[K  [3/3] 🖥️  Initializing HUD window...      ${GREEN}✓ Ready${NC} ${GRAY}(PID: $HUD_PID)${NC}\n"
+echo "══════════════════════════════════════════════════"
 
 # Start Ear
 "$VENV_PYTHON" -m pdb src/audio/ear_runtime/runtime.py
