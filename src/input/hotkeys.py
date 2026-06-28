@@ -25,7 +25,7 @@ def is_rcmd(key: Any) -> bool:
 class RecordingCallbacks:
     """Holds all external callbacks that define what happens on recording events."""
 
-    on_start: Callable[[bool], None]
+    on_start: Callable[[], None]
     on_stop: Callable[[bool], None]
     on_toggle: Callable[[], None]
 
@@ -115,7 +115,7 @@ class InputTrigger:
         with self.lock:
             if self.key.held and not self.key.toggle_active:
                 self.key.rec_hold = True
-                self.callbacks.on_start(from_hold=True)
+                self.callbacks.on_start()
 
     def key_press(self, key: Any, current_time: float) -> None:
         """Handle OS key press events.
@@ -214,6 +214,6 @@ class InputTrigger:
             if self.mouse.held and not self.mouse.rec_hold:
                 if time.time() - self.mouse.start >= 1.0:
                     self.mouse.rec_hold = True
-                    self.callbacks.on_start(from_hold=True)
+                    self.callbacks.on_start()
                     return True
         return False
