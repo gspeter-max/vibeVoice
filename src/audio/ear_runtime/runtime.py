@@ -16,8 +16,7 @@ from src.audio.ear_runtime.devices import select_mic
 from src.audio.ear_runtime.menu import TerminalMenu
 from src.audio.ear_runtime.recording import LogState, start_recording_state
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
-from src.input.hotkeys import InputTrigger
-from src.ipc.client import open_checked_raw_audio_stream_to_brain
+from src.input.hotkeys import InputTrigger, RecordingCallbacks
 from src.streaming.capture_session import CaptureSession
 from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
@@ -66,25 +65,11 @@ def start_ear():
     menu = TerminalMenu(ear_instance=ear)
     menu.start()
 
-    def _start_recording_wrapper(from_hold: bool):
-        if settings.is_no_streaming_mode:
-            raw_stream_socket = open_checked_raw_audio_stream_to_brain(
-                timeout_seconds=5.0,
-                socket_factory=socket.socket,
-            )
-            if raw_stream_socket is None:
-                return
-            with ear._brain_sock_lock:
-                ear._brain_sock = raw_stream_socket
-
-        start_recording_state(ear, session, utr_gate, log_state, from_hold)
+    def _start_recording_wrapper():
+        start_recording_state(ear, session, utr_gate, log_state, ear._telemetry_enabled)
         ear._cmd_press_time = time.time()
-        change_ui_status("listen", socket_factory=socket.socket)
-        ui_wave_input(
-            ear,
-            volume_port=settings.vol_port,
-            socket_factory=socket.socket,
-        )
+        change_ui_status("listen")
+        ui_wave_input(ear)
 
     def _stop_recording_wrapper(stop_session: bool):
         ear._stop_and_send(session, utr_gate, log_state, stop_session=stop_session)
@@ -93,12 +78,14 @@ def start_ear():
     def _toggle_recording_wrapper():
         ear._toggle_active = True
         log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
-        _start_recording_wrapper(from_hold=False)
+        _start_recording_wrapper()
 
     input_trigger = InputTrigger(
-        on_start_recording=_start_recording_wrapper,
-        on_stop_recording=_stop_recording_wrapper,
-        on_toggle_recording=_toggle_recording_wrapper,
+        callbacks=RecordingCallbacks(
+            on_start=_start_recording_wrapper,
+            on_stop=_stop_recording_wrapper,
+            on_toggle=_toggle_recording_wrapper,
+        )
     )
     input_trigger.start()
 
@@ -116,7 +103,9 @@ def start_ear():
     log.info("Ready. Press hotkey to record.")
 
     try:
-        ear.record_loop(input_trigger=input_trigger, utr_gate=utr_gate, session=session, log_state=log_state)
+        ear.record_loop(
+            input_trigger=input_trigger, utr_gate=utr_gate, session=session, log_state=log_state
+        )
     except KeyboardInterrupt:
         log.info("\r\n\nShutting down Ear...")
     finally:
