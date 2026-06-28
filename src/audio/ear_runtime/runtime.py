@@ -15,8 +15,10 @@ from src.audio.ear_runtime.controller import Ear
 from src.audio.ear_runtime.devices import select_mic
 from src.audio.ear_runtime.menu import TerminalMenu
 from src.audio.ear_runtime.recording import LogState, start_recording_state
+from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 from src.input.hotkeys import InputTrigger
 from src.ipc.client import open_checked_raw_audio_stream_to_brain
+from src.streaming.capture_session import CaptureSession
 from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
 
@@ -39,8 +41,27 @@ def start_ear():
         temporary_pyaudio.terminate()
 
     ear = Ear(input_device_index=selected_mic_index)
-    session = ear._capture_session if hasattr(ear, "_capture_session") else None
-    utr_gate = ear._utterance_gate if hasattr(ear, "_utterance_gate") else None
+
+    session = CaptureSession(
+        sample_rate=settings.rate,
+        overlap_seconds=settings.overlap_seconds,
+    )
+
+    try:
+        vad_engine = SileroVAD(settings.vad_model_path)
+        log.info("[Ear] Silero VAD loaded ✓")
+    except Exception as e:
+        vad_engine = None
+        log.warning(f"[Ear] VAD load failed: {e}")
+
+    utr_gate = SileroUtteranceGate(
+        vad_engine,
+        voice_threshold=settings.vad_score_threshold,
+        silence_timeout_s=settings.silence_timeout_seconds,
+        energy_threshold=settings.vad_energy_threshold,
+        energy_ratio=settings.vad_energy_ratio,
+    )
+
     log_state = LogState()
     menu = TerminalMenu(ear_instance=ear)
     menu.start()
@@ -66,7 +87,7 @@ def start_ear():
         )
 
     def _stop_recording_wrapper(stop_session: bool):
-        ear._stop_and_send(stop_session=stop_session)
+        ear._stop_and_send(session, utr_gate, log_state, stop_session=stop_session)
         ear._toggle_active = False
 
     def _toggle_recording_wrapper():
