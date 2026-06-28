@@ -25,72 +25,63 @@ class CaptureSession:
 
     sample_rate: int
     overlap_seconds: float
-    current_session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    current_recording_index: int = 0
-    current_chunk_sequence_number: int = 0
-    chunk_started_at_seconds: float = 0.0
-    last_chunk_tail_bytes: bytes = b""
-    overlap_audio_byte_count_override: int | None = None
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    rec_idx: int = 0
+    chunk_seq: int = 0
+    chunk_start: float = 0.0
+    tail: bytes = b""
+    overlap_override: int | None = None
 
     @property
-    def overlap_audio_byte_count(self) -> int:
+    def overlap_bytes(self) -> int:
         """Return the number of overlap bytes to keep from one chunk to the next."""
-
-        if self.overlap_audio_byte_count_override is not None:
-            return self.overlap_audio_byte_count_override
+        if self.overlap_override is not None:
+            return self.overlap_override
         return int(self.sample_rate * 2 * self.overlap_seconds)
 
-    def begin_recording(self, now_seconds: float | None = None) -> None:
-        """Start one new recording while keeping the same process-level session id."""
-
-        if now_seconds is None:
-            now_seconds = time.time()
-        self.current_chunk_sequence_number = 0
-        self.chunk_started_at_seconds = now_seconds
-
-    def mark_chunk_sent(self) -> int:
-        """Return the current chunk sequence number and advance to the next one."""
-
-        sequence_number = self.current_chunk_sequence_number
-        self.current_chunk_sequence_number += 1
-        return sequence_number
-
-    def mark_recording_committed(self) -> None:
-        """Advance to the next recording slot after the current one is finalized."""
-
-        self.current_recording_index += 1
-        self.current_chunk_sequence_number = 0
-
-    def mark_recording_stopped(self) -> None:
-        """Reset final-stop state that belongs to the capture session itself."""
-
-        self.chunk_started_at_seconds = 0.0
-        self.clear_overlap_tail()
-
-    def mark_nonfinal_chunk_sent(self, now_seconds: float | None = None) -> None:
-        """Store the start time for the next chunk after a non-final send."""
-
-        if now_seconds is None:
-            now_seconds = time.time()
-        self.chunk_started_at_seconds = now_seconds
-
-    def current_chunk_age_seconds(self, now_seconds: float | None = None) -> float:
+    @property
+    def chunk_age(self) -> float:
         """Return the age of the active chunk using the session-owned start time."""
+        return max(0.0, time.time() - self.chunk_start)
 
-        if now_seconds is None:
-            now_seconds = time.time()
-        return max(0.0, now_seconds - self.chunk_started_at_seconds)
+    def begin(self, now: float | None = None) -> None:
+        """Start one new recording while keeping the same process-level session id."""
+        if now is None:
+            now = time.time()
+        self.chunk_seq = 0
+        self.chunk_start = now
 
-    def clear_overlap_tail(self) -> None:
+    def mark_sent(self) -> int:
+        """Return the current chunk sequence number and advance to the next one."""
+        seq = self.chunk_seq
+        self.chunk_seq += 1
+        return seq
+
+    def commit(self) -> None:
+        """Advance to the next recording slot after the current one is finalized."""
+        self.rec_idx += 1
+        self.chunk_seq = 0
+
+    def stop(self) -> None:
+        """Reset final-stop state that belongs to the capture session itself."""
+        self.chunk_start = 0.0
+        self.clear_tail()
+
+    def mark_next(self, now: float | None = None) -> None:
+        """Store the start time for the next chunk after a non-final send."""
+        if now is None:
+            now = time.time()
+        self.chunk_start = now
+
+    def clear_tail(self) -> None:
         """Forget any stored overlap bytes, usually after the final stop."""
+        self.tail = b""
 
-        self.last_chunk_tail_bytes = b""
-
-    def prepare_chunk_for_send(
+    def prep_chunk(
         self,
-        audio_chunk_for_brain: bytes,
+        audio: bytes,
         *,
-        stop_session: bool,
+        stop: bool,
         silence_seconds: float,
     ) -> bytes:
         """Apply overlap bytes and store the next overlap tail.
@@ -98,14 +89,13 @@ class CaptureSession:
         The overlap rule is the same as before: prepend the previous chunk tail
         for non-final chunks and clear overlap state on the final stop.
         """
-
         overlap_result = apply_overlap(
-            audio=audio_chunk_for_brain,
-            tail=self.last_chunk_tail_bytes,
-            overlap_bytes=self.overlap_audio_byte_count,
+            audio=audio,
+            tail=self.tail,
+            overlap_bytes=self.overlap_bytes,
             silence_bytes=int(silence_seconds * self.sample_rate * 2),
             rate=self.sample_rate,
-            stop=stop_session,
+            stop=stop,
         )
-        self.last_chunk_tail_bytes = overlap_result.tail
+        self.tail = overlap_result.tail
         return overlap_result.audio

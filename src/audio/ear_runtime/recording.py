@@ -30,9 +30,7 @@ from src.audio.ear_runtime.analysis import (
 )
 from src.audio.ear_runtime.system_audio import play_start_sound
 from src.ipc.client import (
-    close_raw_audio_stream_to_brain,
     send_message,
-    send_raw_audio_stream_chunk_or_close,
 )
 from src.ipc.protocol_message_formats import (
     format_audio_chunk_message,
@@ -53,7 +51,7 @@ def begin_recording_session(ear: Ear) -> None:
     Args:
         ear: The Ear controller instance.
     """
-    ear._capture_session.begin_recording(time.time())
+    ear._capture_session.begin(time.time())
     send_session_event_to_telemetry_brain(
         ear,
         "session_started",
@@ -80,21 +78,20 @@ def send_session_event_to_telemetry_brain(
     Returns:
         True if the event was successfully sent, False otherwise.
     """
-    if not ear._telemetry_enabled or not ear._capture_session.current_session_id:
+    if not ear._telemetry_enabled or not ear._capture_session.session_id:
         return False
 
     payload = {"type": event_type}
     if fields:
         payload.update(fields)
     message_bytes = format_session_event_message(
-        ear._capture_session.current_session_id,
-        ear._capture_session.current_recording_index,
+        ear._capture_session.session_id,
+        ear._capture_session.rec_idx,
         payload,
     )
     sent = send_message(
         message_bytes,
-        timeout_seconds=5.0,
-        socket_factory=socket.socket,
+        timeout=5.0,
     )
     if not sent:
         log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
@@ -115,12 +112,12 @@ def send_audio_chunk_to_brain(ear: Ear, utterance_bytes: bytes) -> bool:
     Returns:
         True if the chunk was successfully sent, False otherwise.
     """
-    if not utterance_bytes or not ear._capture_session.current_session_id:
+    if not utterance_bytes or not ear._capture_session.session_id:
         return False
 
-    session_id = ear._capture_session.current_session_id
-    recording_index = ear._capture_session.current_recording_index
-    sequence_number = ear._capture_session.mark_chunk_sent()
+    session_id = ear._capture_session.session_id
+    recording_index = ear._capture_session.rec_idx
+    sequence_number = ear._capture_session.mark_sent()
     message_bytes = format_audio_chunk_message(
         session_id,
         recording_index,
@@ -160,12 +157,12 @@ def commit_session_recording_stoped(ear: Ear) -> bool:
     Returns:
         True if the commit was successfully sent, False otherwise.
     """
-    if not ear._capture_session.current_session_id:
+    if not ear._capture_session.session_id:
         return False
 
     message_bytes = format_session_commit_message(
-        ear._capture_session.current_session_id,
-        ear._capture_session.current_recording_index,
+        ear._capture_session.session_id,
+        ear._capture_session.rec_idx,
     )
     sent = send_message(
         message_bytes,
@@ -175,10 +172,10 @@ def commit_session_recording_stoped(ear: Ear) -> bool:
     if sent:
         log.info(
             "✅ Session recording stop committed",
-            session=ear._capture_session.current_session_id[:8],
-            recording=ear._capture_session.current_recording_index,
+            session=ear._capture_session.session_id[:8],
+            recording=ear._capture_session.rec_idx,
         )
-        ear._capture_session.mark_recording_committed()
+        ear._capture_session.commit()
         return True
 
     log.error("❌ Failed to commit session recording stop")
@@ -223,20 +220,20 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
     utterance_bytes = ear._utterance_gate.flush
     if not utterance_bytes:
         if stop_session:
-            ear._capture_session.mark_recording_stopped()
+            ear._capture_session.stop()
             log.info("[Ear] 🔇 No speech captured; stopping recording")
             commit_session_recording_stoped(ear)
         return False
 
     boosted_utterance_bytes = boost_audio_chunk(utterance_bytes, ear.gain_multiplier)
-    previous_chunk_tail_bytes = ear._capture_session.last_chunk_tail_bytes
-    overlapped_utterance_bytes = ear._capture_session.prepare_chunk_for_send(
+    previous_chunk_tail_bytes = ear._capture_session.tail
+    overlapped_utterance_bytes = ear._capture_session.prep_chunk(
         boosted_utterance_bytes,
-        stop_session=stop_session,
+        stop=stop_session,
         silence_seconds=silence_len if not stop_session else 0.0,
     )
     overlap_seconds_added = len(previous_chunk_tail_bytes) / 2.0 / settings.rate
-    chunk_age_seconds = ear._capture_session.current_chunk_age_seconds(now_seconds)
+    chunk_age_seconds = ear._capture_session.chunk_age
     duration_seconds = (total_frames * settings.chunk) / settings.rate
 
     if stop_session:
@@ -256,7 +253,7 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
             ear,
             "silence_threshold_hit" if not stop_session else "session_stopped",
             {
-                "chunk_index": ear._capture_session.current_chunk_sequence_number - 1,
+                "chunk_index": ear._capture_session.chunk_seq - 1,
                 "chunk_age_seconds": round(chunk_age_seconds, 2),
                 "silence_elapsed_seconds": round(silence_len, 2),
                 "split_reason": "silence_threshold_hit" if not stop_session else "session_stop",
@@ -266,11 +263,11 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
         )
 
     if stop_session:
-        ear._capture_session.mark_recording_stopped()
+        ear._capture_session.stop()
         commit_session_recording_stoped(ear)
         close_mic_stream(ear)
     else:
-        ear._capture_session.mark_nonfinal_chunk_sent()
+        ear._capture_session.mark_next()
     return sent
 
 
@@ -347,7 +344,7 @@ def start_recording_state(ear: Ear, *, from_hold: bool) -> None:
         reset_chunk_tracking(ear)
         ear._recording_level_log_time = 0.0
 
-    ear._capture_session.clear_overlap_tail()
+    ear._capture_session.clear_tail()
     if settings.is_silence_streaming_mode:
         ear._utterance_gate.reset
         begin_recording_session(ear)

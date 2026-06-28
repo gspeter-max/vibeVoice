@@ -253,7 +253,7 @@ class Ear:
             return
 
         if "nemotron" in ear.current_model.lower():
-            time_since_last_chunk = ear._capture_session.current_chunk_age_seconds(now_seconds)
+            time_since_last_chunk = ear._capture_session.chunk_age
             if time_since_last_chunk >= 1.12:
                 ear._stop_and_send(stop_session=False)
             return
@@ -269,7 +269,7 @@ class Ear:
             else ear._utterance_gate.finalize_elapsed(now_seconds)
         )
         split_decision = should_split(
-            start_time=ear._capture_session.chunk_started_at_seconds,
+            start_time=ear._capture_session.chunk_start,
             now=now_seconds,
             min_age=(settings.minimum_chunk_age_before_silence_split_seconds),
             gate_finalize=ear._utterance_gate.should_finalize(now_seconds),
