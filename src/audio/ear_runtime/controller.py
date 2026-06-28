@@ -25,19 +25,16 @@ from src.audio.ear_runtime.devices import resolve_input_device_index
 from src.audio.ear_runtime.recording import (
     LogState,
     begin_recording_session,
-    close_mic_stream,
     flush_current_chunk,
     open_mic_stream,
     process_audio_callback,
-    record_loop_tick,
     reset_chunk_tracking,
     send_session_event_to_telemetry_brain,
     start_recording_state,
-    stop_no_streaming,
 )
 from src.audio.ear_runtime.system_audio import load_start_sound
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
-from src.input.hotkeys import _is_rcmd
+from src.input.hotkeys import is_rcmd
 from src.streaming.capture_session import CaptureSession
 from src.streaming.session import should_split
 from src.ui.hud_client import change_ui_status, ui_wave_input
@@ -81,12 +78,12 @@ class Ear:
     active_mic_name: str
     current_model: str
 
-    _lock: threading.Lock
-    _total_frames: int
+    lock: threading.Lock
+    total_frames: int
     last_frequency_bands: Dict[str, float]
-    _cmd_press_time: float
-    _toggle_active: bool
-    _telemetry_enabled: bool
+    cmd_press_time: float
+    toggle_active: bool
+    telemetry_enabled: bool
 
     def __init__(
         self,
@@ -104,10 +101,10 @@ class Ear:
         self.pyaudio_inst = pyaudio_lib or pyaudio.PyAudio()
         self.stream = None
         self.is_recording = False
-        self._lock = threading.Lock()
+        self.lock = threading.Lock()
         self.last_rms = 0.0
         self.gain_multiplier = 1.2  # Increased from 1.1 to fix quiet mic issues
-        self._total_frames = 0
+        self.total_frames = 0
         self.last_frequency_bands = {"bass": 0.33, "mid": 0.33, "treble": 0.34}
         self.input_device_index = resolve_input_device_index(
             self.pyaudio_inst,
@@ -118,9 +115,9 @@ class Ear:
             self.input_device_index
         ).get("name")
 
-        self._cmd_press_time = 0.0
-        self._toggle_active = False
-        self._telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
+        self.cmd_press_time = 0.0
+        self.toggle_active = False
+        self.telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
         self.current_model = "parakeet-tdt-0.6b-v3"  # Default model
 
         log.info(
@@ -145,22 +142,43 @@ class Ear:
         Args:
             ear: The Ear controller instance.
         """
-        with self._lock:
+        with self.lock:
             if not self.is_recording:
                 return
             self.is_recording = False
-            total_frames = self._total_frames
-            self._total_frames = 0
+            total_frames = self.total_frames
+            self.total_frames = 0
             self.last_rms = 0.0
 
         duration_seconds = (total_frames * settings.chunk) / settings.rate
         log.info(
             f"\r\n⏹️  Streamed {duration_seconds:.1f}s ({total_frames} chunks) — Brain transcribing...\n"
         )
-        change_ui_status("process", socket_factory=socket.socket)
-        close_mic_stream(self)
+        change_ui_status("process")
+        self.close_mic_stream()
 
-    def _stop_and_send(
+    @property
+    def close_mic_stream(self) -> None:
+        """Close and release the active PyAudio microphone input stream.
+
+        If a stream is currently active, it stops audio capture, closes the stream
+        interface, and sets the stream attribute back to None. It catches and
+        silences any OS-level errors during the teardown process.
+
+        Args:
+            ear: The Ear controller instance.
+        """
+        if self.stream is None:
+            return
+
+        try:
+            self.stream.stop_stream()
+            self.stream.close()
+        except OSError:
+            pass
+        self.stream = None
+
+    def stop_and_send(
         self,
         session: CaptureSession,
         utr_gate: SileroUtteranceGate,
@@ -169,8 +187,10 @@ class Ear:
     ) -> None:
         """Unified method to stop recording and transmit the final data."""
         if settings.is_no_streaming_mode:
-            stop_no_streaming(self)
-        flush_current_chunk(self, session, utr_gate, log_state, stop_session, self._telemetry_enabled)
+            self.stop_no_streaming()
+        flush_current_chunk(
+            self, session, utr_gate, log_state, stop_session, self.telemetry_enabled
+        )
 
     def record_loop(
         self,
@@ -181,9 +201,9 @@ class Ear:
     ) -> None:
         """Run the main background loop that keeps the Ear process alive."""
         while True:
-            self._record_loop_tick(input_trigger, utr_gate, session, log_state)
+            self.record_loop_tick(input_trigger, utr_gate, session, log_state)
 
-    def _record_loop_tick(
+    def record_loop_tick(
         self,
         input_trigger: Optional[Any],
         utr_gate: SileroUtteranceGate,
@@ -191,7 +211,7 @@ class Ear:
         log_state: LogState,
     ) -> None:
         """Execute a single tick of the background recording controller loop."""
-        with self._lock:
+        with self.lock:
             recording = self.is_recording
             rms = self.last_rms
 
@@ -214,7 +234,7 @@ class Ear:
 
         if "nemotron" in self.current_model.lower():
             if session.chunk_age >= 1.12:
-                self._stop_and_send(session, utr_gate, log_state, stop_session=False)
+                self.stop_and_send(session, utr_gate, log_state, stop_session=False)
             return
 
         if utr_gate.has_speech_started and not log_state.silence_pending_logged:
@@ -234,7 +254,7 @@ class Ear:
             silence_len=silence_len,
         )
         if split_decision.should_split:
-            self._stop_and_send(session, utr_gate, log_state, stop_session=False)
+            self.stop_and_send(session, utr_gate, log_state, stop_session=False)
 
     def cleanup(self) -> None:
         """Perform a clean shutdown of the active Ear controller resources.
@@ -243,5 +263,5 @@ class Ear:
         socket connection to the Brain, and terminates the underlying PyAudio
         library instance to release system audio handles.
         """
-        close_mic_stream(self)
+        self.close_mic_stream()
         self.pyaudio_inst.terminate()
