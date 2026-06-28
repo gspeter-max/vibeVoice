@@ -23,9 +23,15 @@ from structlog import get_logger
 from src import log
 from src.audio.ear_runtime.devices import resolve_input_device_index
 from src.audio.ear_runtime.recording import (
+    LogState,
+    begin_recording_session,
     close_mic_stream,
     flush_current_chunk,
+    open_mic_stream,
     process_audio_callback,
+    record_loop_tick,
+    reset_chunk_tracking,
+    send_session_event_to_telemetry_brain,
     start_recording_state,
     stop_no_streaming,
 )
@@ -81,11 +87,6 @@ class Ear:
     _cmd_press_time: float
     _toggle_active: bool
     _telemetry_enabled: bool
-    _chunk_speech_logged: bool
-    _silence_pending_logged: bool
-    _vad_state_log_time: float
-    _recording_level_log_time: float
-    _vad_no_speech_warned: bool
 
     def __init__(
         self,
@@ -120,14 +121,6 @@ class Ear:
         self._cmd_press_time = 0.0
         self._toggle_active = False
         self._telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
-
-        self._chunk_speech_logged = False
-        self._silence_pending_logged = False
-        self._vad_state_log_time = 0.0
-        self._recording_level_log_time = 0.0
-        self._vad_no_speech_warned = False
-        # Session ID is generated ONCE when the app launches — it never changes.
-        # _recording_index tracks how many times the user has pressed the record button.
         self.current_model = "parakeet-tdt-0.6b-v3"  # Default model
 
         log.info(
@@ -168,52 +161,36 @@ class Ear:
         close_mic_stream(self)
 
     def _stop_and_send(
-        self, session: CaptureSession, utr_gate: SileroUtteranceGate, stop_session: bool = True
+        self,
+        session: CaptureSession,
+        utr_gate: SileroUtteranceGate,
+        log_state: LogState,
+        stop_session: bool = True,
     ) -> None:
-        """Unified method to stop recording and transmit the final data.
-
-        It routes the stop command to either the streaming or non-streaming
-        handler depending on the current configuration. This ensures that
-        all recording logic follows the same cleanup path, whether it was
-        triggered by a keyboard release, a mouse release, or a toggle click.
-
-        Args:
-            stop_session: If True, fully commits and stops the recording.
-        """
+        """Unified method to stop recording and transmit the final data."""
         if settings.is_no_streaming_mode:
             stop_no_streaming(self)
-        flush_current_chunk(self, session, utr_gate, stop_session, self._telemetry_enabled)
+        flush_current_chunk(self, session, utr_gate, log_state, stop_session, self._telemetry_enabled)
 
     def record_loop(
-        self, input_trigger: Optional[Any], utr_gate: SileroUtteranceGate, session: CaptureSession
+        self,
+        input_trigger: Optional[Any],
+        utr_gate: SileroUtteranceGate,
+        session: CaptureSession,
+        log_state: LogState,
     ) -> None:
-        """Run the main background loop that keeps the Ear process alive.
-
-        This loop runs indefinitely during the application lifecycle. It checks
-        the recording state on every tick and coordinates with hotkey listeners
-        to detect if hold-to-talk triggers are still active.
-
-        Args:
-            input_trigger: The InputTrigger instance from hotkeys.py. When provided,
-                each tick calls input_trigger.check_mouse_hold_threshold()
-                to handle right-mouse-button hold-to-record activation.
-        """
+        """Run the main background loop that keeps the Ear process alive."""
         while True:
-            self._record_loop_tick(input_trigger, utr_gate, session)
+            self._record_loop_tick(input_trigger, utr_gate, session, log_state)
 
     def _record_loop_tick(
-        self, input_trigger: Optional[Any], utr_gate: SileroUtteranceGate, session: CaptureSession
+        self,
+        input_trigger: Optional[Any],
+        utr_gate: SileroUtteranceGate,
+        session: CaptureSession,
+        log_state: LogState,
     ) -> None:
-        """Execute a single tick of the background recording controller loop.
-
-        On every iteration, this function logs input levels, handles VAD checks,
-        and determines if the current audio chunk has exceeded the silence timeout.
-        If a silence boundary is hit, it triggers a chunk split and sends it.
-
-        Args:
-            ear: The Ear controller instance.
-            input_trigger: Optional mouse-trigger hook to check hold status.
-        """
+        """Execute a single tick of the background recording controller loop."""
         with self._lock:
             recording = self.is_recording
             rms = self.last_rms
@@ -225,11 +202,11 @@ class Ear:
             return
 
         now_seconds = time.time()
-        if now_seconds - self._recording_level_log_time >= settings.recording_level_log_interval:
+        if now_seconds - log_state.level_log_time >= settings.recording_level_log_interval:
             meter_width = 30
             level = min(int(rms * 300), meter_width)
             meter = "█" * level + "░" * (meter_width - level)
-            self._recording_level_log_time = now_seconds
+            log_state.level_log_time = now_seconds
             print(f"\r  Voice Level: [{meter}] ", end="", flush=True)
 
         if not settings.is_silence_streaming_mode:
@@ -237,12 +214,12 @@ class Ear:
 
         if "nemotron" in self.current_model.lower():
             if session.chunk_age >= 1.12:
-                self._stop_and_send(session, utr_gate, stop_session=False)
+                self._stop_and_send(session, utr_gate, log_state, stop_session=False)
             return
 
-        if utr_gate.has_speech_started and not self._silence_pending_logged:
+        if utr_gate.has_speech_started and not log_state.silence_pending_logged:
             if utr_gate.silence_len(now_seconds) > 0.0:
-                self._silence_pending_logged = True
+                log_state.silence_pending_logged = True
 
         silence_len = (
             utr_gate.silence_len(now_seconds)
@@ -257,7 +234,7 @@ class Ear:
             silence_len=silence_len,
         )
         if split_decision.should_split:
-            self._stop_and_send(session, utr_gate, stop_session=False)
+            self._stop_and_send(session, utr_gate, log_state, stop_session=False)
 
     def cleanup(self) -> None:
         """Perform a clean shutdown of the active Ear controller resources.

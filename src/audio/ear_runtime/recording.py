@@ -10,11 +10,32 @@ from __future__ import annotations
 import socket
 import threading
 import time
-from dataclasses import field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.audio.vad_segmenter import SileroUtteranceGate
 from src.streaming.capture_session import CaptureSession
+
+
+@dataclass
+class LogState:
+    """Throttle flags and timers for recording loop debug output."""
+
+    chunk_speech_logged: bool = False
+    silence_pending_logged: bool = False
+    vad_no_speech_warned: bool = False
+    vad_state_log_time: float = 0.0
+    level_log_time: float = 0.0
+
+    @property
+    def reset(self) -> "LogState":
+        """Reset all flags and timers back to their initial state."""
+        self.chunk_speech_logged = False
+        self.silence_pending_logged = False
+        self.vad_no_speech_warned = False
+        self.vad_state_log_time = 0.0
+        self.level_log_time = 0.0
+        return self
 
 if TYPE_CHECKING:
     from src.audio.ear_runtime.controller import Ear
@@ -108,25 +129,16 @@ def send_session_event_to_telemetry_brain(
     return sent
 
 
-def reset_chunk_tracking(ear: Ear) -> None:
-    """Reset the temporary status logging flags on the Ear controller.
-
-    These boolean flags are used to throttle repetitive logs (like VAD speech
-    detected warnings or silence alerts) during a recording loop tick.
-    Resetting them ensures clean logs for the next recording session.
-
-    Args:
-        ear: The Ear controller instance.
-    """
-    ear._chunk_speech_logged = False
-    ear._silence_pending_logged = False
-    ear._vad_no_speech_warned = False
+def reset_chunk_tracking(log_state: LogState) -> None:
+    """Reset all throttle flags on the LogState for the next recording session."""
+    log_state.reset
 
 
 def flush_current_chunk(
     ear: Ear,
     session: CaptureSession,
     utr_gate: SileroUtteranceGate,
+    log_state: LogState,
     stop_session: bool,
     telemetry_enabled: bool,
 ) -> bool:
@@ -147,7 +159,7 @@ def flush_current_chunk(
             ear.is_recording = False
         ear._total_frames = 0
         ear.last_rms = 0.0
-        reset_chunk_tracking(ear)
+        reset_chunk_tracking(log_state)
 
     if not utr_gate.flush:
         if stop_session:
@@ -202,16 +214,8 @@ def flush_current_chunk(
     return sent
 
 
-def open_mic_stream(ear: Ear, utr_gate: SileroUtteranceGate) -> None:
-    """Open the system microphone input stream using the PyAudio library.
-
-    This function releases any existing microphone stream before initializing
-    a new PyAudio stream. It binds the stream to the designated mic device index
-    and configures the real-time audio callback to process incoming frames.
-
-    Args:
-        ear: The Ear controller instance.
-    """
+def open_mic_stream(ear: Ear, utr_gate: SileroUtteranceGate, log_state: LogState) -> None:
+    """Open the system microphone input stream using the PyAudio library."""
     if ear.stream is not None:
         try:
             ear.stream.stop_stream()
@@ -230,7 +234,7 @@ def open_mic_stream(ear: Ear, utr_gate: SileroUtteranceGate) -> None:
         # (in_data, frame_count, time_info, status). The lambda satisfies this requirement
         # and forwards only the necessary components to our processing function.
         stream_callback=lambda in_data, frame_count, time_info, status: process_audio_callback(
-            ear, utr_gate, in_data
+            ear, utr_gate, log_state, in_data
         ),
     )
     log.info("[Ear] 🎤 Mic stream opened")
@@ -258,7 +262,11 @@ def close_mic_stream(ear: Ear) -> None:
 
 
 def start_recording_state(
-    ear: Ear, telemetry_enabled: bool, session: CaptureSession, utr_gate: SileroUtteranceGate
+    ear: Ear,
+    session: CaptureSession,
+    utr_gate: SileroUtteranceGate,
+    log_state: LogState,
+    telemetry_enabled: bool,
 ) -> None:
     """Reset and prepare the Ear controller state for a new recording run.
 
@@ -272,14 +280,14 @@ def start_recording_state(
     """
     play = PlaySound("STARTING")
     play()
-    open_mic_stream(ear, utr_gate)
+    open_mic_stream(ear, utr_gate, log_state)
 
     with ear._lock:
         ear.is_recording = True
         ear.last_rms = 0.0
         ear._total_frames = 0
-        reset_chunk_tracking(ear)
-        ear._recording_level_log_time = 0.0
+        reset_chunk_tracking(log_state)
+        log_state.level_log_time = 0.0
 
     session.clear_tail()
     if settings.is_silence_streaming_mode:
@@ -290,6 +298,7 @@ def start_recording_state(
 def process_audio_callback(
     ear: Ear,
     utr_gate: SileroUtteranceGate,
+    log_state: LogState,
     in_data: bytes,
 ) -> tuple[bytes | None, int]:
     """Process a single real-time microphone callback tick from PyAudio.
@@ -334,12 +343,12 @@ def process_audio_callback(
             analysis_chunk=boosted_chunk_bytes,
         )
 
-        if speech_now and not ear._chunk_speech_logged:
-            ear._chunk_speech_logged = True
-            ear._silence_pending_logged = False
+        if speech_now and not log_state.chunk_speech_logged:
+            log_state.chunk_speech_logged = True
+            log_state.silence_pending_logged = False
             log.info("[Ear] 🗣️  VAD speech detected")
 
-        if now_seconds - ear._vad_state_log_time >= settings.vad_status_log_interval:
+        if now_seconds - log_state.vad_state_log_time >= settings.vad_status_log_interval:
             try:
                 silence_len = (
                     utr_gate.silence_len(now_seconds) if utr_gate.has_speech_started else 0.0
@@ -354,6 +363,6 @@ def process_audio_callback(
                 )
             except (OSError, ValueError, TypeError):
                 pass
-            ear._vad_state_log_time = now_seconds
+            log_state.vad_state_log_time = now_seconds
 
     return (None, pyaudio.paContinue)
