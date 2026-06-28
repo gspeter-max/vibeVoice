@@ -51,6 +51,7 @@ import gc
 import json
 import os
 import platform
+import select
 import socket
 import subprocess
 import sys
@@ -819,12 +820,12 @@ def start_server() -> None:
     and shuts down the LLM router's HTTP connection pool before exiting.
     """
     # 1. Auto-fix environment issues (e.g., macOS library paths)
+    breakpoint()
     fix_macos_library_paths()
 
     safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
     set_primary_provider(safe_provider_index)
     log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
-
     state = SessionStates()
     backend = BackendState(model_name=settings.stt_model)
     state.backend = backend
@@ -845,8 +846,12 @@ def start_server() -> None:
 
     try:
         while True:
-            conn, _ = server.accept()
-            threading.Thread(target=handle_connection, args=(conn, state), daemon=True).start()
+            readable, _, _ = select.select([server], [], [], 0.4)
+            if server in readable:
+                conn, _ = server.accept()
+                threading.Thread(target=handle_connection, args=(conn, state), daemon=True).start()
+            continue
+
     except KeyboardInterrupt:
         log.info("\n[Brain] Shutting down...")
         try:

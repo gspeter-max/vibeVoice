@@ -10,7 +10,11 @@ from __future__ import annotations
 import socket
 import threading
 import time
+from dataclasses import field
 from typing import TYPE_CHECKING
+
+from src.audio.vad_segmenter import SileroUtteranceGate
+from src.streaming.capture_session import CaptureSession
 
 if TYPE_CHECKING:
     from src.audio.ear_runtime.controller import Ear
@@ -30,6 +34,9 @@ from src.audio.ear_runtime.analysis import (
 )
 from src.audio.ear_runtime.system_audio import play_start_sound
 from src.ipc.client import (
+    SocketConfig,
+    commit_stop,
+    send_audio,
     send_message,
 )
 from src.ipc.protocol_message_formats import (
@@ -41,7 +48,7 @@ from src.ui.hud_client import change_ui_status
 from src.utils.settings import settings
 
 
-def begin_recording_session(ear: Ear) -> None:
+def begin_recording_session(session: CaptureSession, telemetry_enabled: bool) -> None:
     """Start a new recording session on the CaptureSession manager.
 
     This function marks the start time of a recording event and sends a telemetry
@@ -51,16 +58,18 @@ def begin_recording_session(ear: Ear) -> None:
     Args:
         ear: The Ear controller instance.
     """
-    ear._capture_session.begin(time.time())
+    session.begin(time.time())
     send_session_event_to_telemetry_brain(
-        ear,
-        "session_started",
-        {"recording_mode": settings.recording_mode},
+        session=session,
+        telemetry_enabled=telemetry_enabled,
+        event_type="session_started",
+        fields={"recording_mode": settings.recording_mode},
     )
 
 
 def send_session_event_to_telemetry_brain(
-    ear: Ear,
+    session: CaptureSession,
+    telemetry_enabled: bool,
     event_type: str,
     fields: dict | None = None,
 ) -> bool:
@@ -78,108 +87,25 @@ def send_session_event_to_telemetry_brain(
     Returns:
         True if the event was successfully sent, False otherwise.
     """
-    if not ear._telemetry_enabled or not ear._capture_session.session_id:
+    if not telemetry_enabled or not session.session_id:
         return False
 
     payload = {"type": event_type}
     if fields:
         payload.update(fields)
     message_bytes = format_session_event_message(
-        ear._capture_session.session_id,
-        ear._capture_session.rec_idx,
+        session.session_id,
+        session.rec_idx,
         payload,
     )
+    cfg = SocketConfig(timeout=5.0)
     sent = send_message(
         message_bytes,
-        timeout=5.0,
+        cfg,
     )
     if not sent:
         log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
     return sent
-
-
-def send_audio_chunk_to_brain(ear: Ear, utterance_bytes: bytes) -> bool:
-    """Format and send a processed chunk of audio data to the Brain backend.
-
-    This function formats the audio bytes into the IPC message protocol, increments
-    the sequence counter on the capture session, and streams it over the socket.
-    It also sends a corresponding telemetry event to trace chunk latency and size.
-
-    Args:
-        ear: The Ear controller instance.
-        utterance_bytes: Raw audio data bytes to send.
-
-    Returns:
-        True if the chunk was successfully sent, False otherwise.
-    """
-    if not utterance_bytes or not ear._capture_session.session_id:
-        return False
-
-    session_id = ear._capture_session.session_id
-    recording_index = ear._capture_session.rec_idx
-    sequence_number = ear._capture_session.mark_sent()
-    message_bytes = format_audio_chunk_message(
-        session_id,
-        recording_index,
-        sequence_number,
-        utterance_bytes,
-    )
-    sent = send_message(
-        message_bytes,
-        timeout_seconds=5.0,
-        socket_factory=socket.socket,
-    )
-    if sent:
-        send_session_event_to_telemetry_brain(
-            ear,
-            "chunk_sent_to_brain",
-            {
-                "chunk_index": sequence_number,
-                "audio_bytes": len(utterance_bytes),
-            },
-        )
-        return True
-
-    log.error("❌ Failed to send chunk")
-    return False
-
-
-def commit_session_recording_stoped(ear: Ear) -> bool:
-    """Commit the end of the current recording session to the Brain backend.
-
-    This function sends the final commit message to close the session's stream,
-    logs the final recording stats, and marks the session as fully committed
-    in the CaptureSession model to prevent further chunk transmissions.
-
-    Args:
-        ear: The Ear controller instance.
-
-    Returns:
-        True if the commit was successfully sent, False otherwise.
-    """
-    if not ear._capture_session.session_id:
-        return False
-
-    message_bytes = format_session_commit_message(
-        ear._capture_session.session_id,
-        ear._capture_session.rec_idx,
-    )
-    sent = send_message(
-        message_bytes,
-        timeout_seconds=5.0,
-        socket_factory=socket.socket,
-    )
-    if sent:
-        log.info(
-            "✅ Session recording stop committed",
-            session=ear._capture_session.session_id[:8],
-            recording=ear._capture_session.rec_idx,
-        )
-        ear._capture_session.commit()
-        return True
-
-    log.error("❌ Failed to commit session recording stop")
-    return False
 
 
 def reset_chunk_tracking(ear: Ear) -> None:
@@ -197,7 +123,13 @@ def reset_chunk_tracking(ear: Ear) -> None:
     ear._vad_no_speech_warned = False
 
 
-def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
+def flush_current_chunk(
+    ear: Ear,
+    session: CaptureSession,
+    utr_gate: SileroUtteranceGate,
+    stop_session: bool,
+    telemetry_enabled: bool,
+) -> bool:
     """Finalize the active utterance and send it to the Brain backend.
 
     This function extracts the buffered audio bytes from the utterance gate,
@@ -205,7 +137,7 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
     chunk, and transmits the resulting package over the IPC socket."""
 
     now_seconds = time.time()
-    silence_len = ear._utterance_gate.silence_len(now_seconds)
+    silence_len = utr_gate.silence_len(now_seconds)
 
     with ear._lock:
         if not ear.is_recording:
@@ -217,23 +149,19 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
         ear.last_rms = 0.0
         reset_chunk_tracking(ear)
 
-    utterance_bytes = ear._utterance_gate.flush
-    if not utterance_bytes:
+    if not utr_gate.flush:
         if stop_session:
-            ear._capture_session.stop()
+            session.stop()
             log.info("[Ear] 🔇 No speech captured; stopping recording")
-            commit_session_recording_stoped(ear)
+            commit_stop(session=session)
         return False
 
-    boosted_utterance_bytes = boost_audio_chunk(utterance_bytes, ear.gain_multiplier)
-    previous_chunk_tail_bytes = ear._capture_session.tail
-    overlapped_utterance_bytes = ear._capture_session.prep_chunk(
-        boosted_utterance_bytes,
+    overlapped_utterance_bytes = session.prep_chunk(
+        boost_audio_chunk(utr_gate.flush, ear.gain_multiplier),
         stop=stop_session,
         silence_seconds=silence_len if not stop_session else 0.0,
     )
-    overlap_seconds_added = len(previous_chunk_tail_bytes) / 2.0 / settings.rate
-    chunk_age_seconds = ear._capture_session.chunk_age
+    overlap_seconds_added = len(session.tail) / 2.0 / settings.rate
     duration_seconds = (total_frames * settings.chunk) / settings.rate
 
     if stop_session:
@@ -247,14 +175,17 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
             f"{duration_seconds:.1f}s ({total_frames} chunks)"
         )
 
-    sent = send_audio_chunk_to_brain(ear, overlapped_utterance_bytes)
+    sent = send_audio(
+        session=session, audio_bytes=overlapped_utterance_bytes, telemetry_enabled=telemetry_enabled
+    )
     if sent:
         send_session_event_to_telemetry_brain(
-            ear,
-            "silence_threshold_hit" if not stop_session else "session_stopped",
-            {
-                "chunk_index": ear._capture_session.chunk_seq - 1,
-                "chunk_age_seconds": round(chunk_age_seconds, 2),
+            session=session,
+            telemetry_enabled=telemetry_enabled,
+            event_type="silence_threshold_hit" if not stop_session else "session_stopped",
+            fields={
+                "chunk_index": session.chunk_seq - 1,
+                "chunk_age_seconds": round(session.chunk_age, 2),
                 "silence_elapsed_seconds": round(silence_len, 2),
                 "split_reason": "silence_threshold_hit" if not stop_session else "session_stop",
                 "overlap_seconds_added": round(overlap_seconds_added, 4),
@@ -263,15 +194,15 @@ def flush_current_chunk(ear: Ear, *, stop_session: bool) -> bool:
         )
 
     if stop_session:
-        ear._capture_session.stop()
-        commit_session_recording_stoped(ear)
+        session.stop()
+        commit_stop(session)
         close_mic_stream(ear)
     else:
-        ear._capture_session.mark_next()
+        session.mark_next()
     return sent
 
 
-def open_mic_stream(ear: Ear) -> None:
+def open_mic_stream(ear: Ear, utr_gate: SileroUtteranceGate) -> None:
     """Open the system microphone input stream using the PyAudio library.
 
     This function releases any existing microphone stream before initializing
@@ -295,7 +226,12 @@ def open_mic_stream(ear: Ear) -> None:
         input=True,
         input_device_index=ear.input_device_index,
         frames_per_buffer=settings.chunk,
-        stream_callback=ear._audio_callback,
+        # PyAudio's background thread expects a specific 4-argument callback signature:
+        # (in_data, frame_count, time_info, status). The lambda satisfies this requirement
+        # and forwards only the necessary components to our processing function.
+        stream_callback=lambda in_data, frame_count, time_info, status: process_audio_callback(
+            ear, utr_gate, in_data
+        ),
     )
     log.info("[Ear] 🎤 Mic stream opened")
 
@@ -321,7 +257,9 @@ def close_mic_stream(ear: Ear) -> None:
     ear.stream = None
 
 
-def start_recording_state(ear: Ear, *, from_hold: bool) -> None:
+def start_recording_state(
+    ear: Ear, telemetry_enabled: bool, session: CaptureSession, utr_gate: SileroUtteranceGate
+) -> None:
     """Reset and prepare the Ear controller state for a new recording run.
 
     This function plays the audible start notification sound, initializes the
@@ -332,10 +270,9 @@ def start_recording_state(ear: Ear, *, from_hold: bool) -> None:
         ear: The Ear controller instance.
         from_hold: If True, indicates recording was started via mouse hold.
     """
-    del from_hold
     play = PlaySound("STARTING")
     play()
-    open_mic_stream(ear)
+    open_mic_stream(ear, utr_gate)
 
     with ear._lock:
         ear.is_recording = True
@@ -344,18 +281,16 @@ def start_recording_state(ear: Ear, *, from_hold: bool) -> None:
         reset_chunk_tracking(ear)
         ear._recording_level_log_time = 0.0
 
-    ear._capture_session.clear_tail()
+    session.clear_tail()
     if settings.is_silence_streaming_mode:
-        ear._utterance_gate.reset
-        begin_recording_session(ear)
+        utr_gate.reset
+        begin_recording_session(session, telemetry_enabled)
 
 
 def process_audio_callback(
     ear: Ear,
+    utr_gate: SileroUtteranceGate,
     in_data: bytes,
-    frame_count: int,
-    time_info: dict[str, float],
-    status: int,
 ) -> tuple[bytes | None, int]:
     """Process a single real-time microphone callback tick from PyAudio.
 
@@ -373,8 +308,6 @@ def process_audio_callback(
     Returns:
         A tuple of (None, continue_flag) indicating stream state.
     """
-    del frame_count, time_info, status
-
     with ear._lock:
         if not ear.is_recording:
             return (None, pyaudio.paContinue)
@@ -389,18 +322,13 @@ def process_audio_callback(
         )
 
         if settings.is_no_streaming_mode:
-            with ear._brain_sock_lock:
-                ear._brain_sock = send_raw_audio_stream_chunk_or_close(
-                    ear._brain_sock,
-                    boosted_chunk_bytes,
-                )
-                raw_stream_socket_alive = ear._brain_sock is not None
-            if not raw_stream_socket_alive:
-                log.info("\r⚠️  Brain disconnected — will transcribe on release\n")
+            cfg = SocketConfig()
+            send_message(boosted_chunk_bytes, cfg)
+
             return (None, pyaudio.paContinue)
 
         now_seconds = time.time()
-        speech_now = ear._utterance_gate.push(
+        speech_now = utr_gate.push(
             audio_chunk=in_data,
             now=now_seconds,
             analysis_chunk=boosted_chunk_bytes,
@@ -413,18 +341,16 @@ def process_audio_callback(
 
         if now_seconds - ear._vad_state_log_time >= settings.vad_status_log_interval:
             try:
-                score = ear._utterance_gate.last_score
-                energy = ear._utterance_gate.last_energy
-                dynamic_threshold = ear._utterance_gate.last_dynamic_threshold
-                started = ear._utterance_gate.has_speech_started
-                silence_len = ear._utterance_gate.silence_len(now_seconds) if started else 0.0
+                silence_len = (
+                    utr_gate.silence_len(now_seconds) if utr_gate.has_speech_started else 0.0
+                )
                 log.debug(
                     "[Ear] 🔎 "
-                    f"VAD score={score:.3f} "
+                    f"VAD score={utr_gate.last_score:.3f} "
                     f"threshold={settings.vad_score_threshold:.2f} "
-                    f"started={started} silence={silence_len:.2f}s "
+                    f"started={utr_gate.has_speech_started} silence={silence_len:.2f}s "
                     f"rms={ear.last_rms:.4f} "
-                    f"energy={energy:.4f} energy_threshold={dynamic_threshold:.4f}",
+                    f"energy={utr_gate.last_score:.4f} energy_threshold={utr_gate.last_dynamic_threshold:.4f}",
                 )
             except (OSError, ValueError, TypeError):
                 pass

@@ -151,11 +151,14 @@ else
     fi
 fi
 
+"$VENV_PYTHON" -m pdb src/audio/ear_runtime/runtime.py
+
 # 2. Start Brain
 [ -d "$HOME/.cache/parakeet-flow/models/$MODEL_FOLDER" ] || log_warn "First run: Downloading model (~1.5 GB)..."
 printf "  [2/3] 🧠  Launching Brain server..."
-osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
-BRAIN_PID=0
+"$VENV_PYTHON" src/backend/brain.py &
+# osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
+BRAIN_PID=$!
 
 WAIT=0
 MAX_WAIT=300
@@ -194,4 +197,3 @@ printf "\r\033[K  [3/3] 🖥️  Initializing HUD window...      ${GREEN}✓ Rea
 echo "══════════════════════════════════════════════════"
 
 # Start Ear
-"$VENV_PYTHON" -m pdb src/audio/ear_runtime/runtime.py

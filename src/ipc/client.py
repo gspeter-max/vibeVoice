@@ -14,10 +14,19 @@ from __future__ import annotations
 import os
 import socket
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Callable, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Iterator, Optional
+
+from rich.console import Capture
+from scipy.constants import audio
 
 from src import log
+from src.audio.ear_runtime.recording import send_session_event_to_telemetry_brain
+from src.ipc.protocol_message_formats import (
+    format_audio_chunk_message,
+    format_session_commit_message,
+)
+from src.streaming.capture_session import CaptureSession
 from src.utils.settings import settings
 
 
@@ -39,7 +48,7 @@ class SocketConfig:
 
 
 @contextmanager
-def create_socket(cfg: SocketConfig) -> Callable:
+def create_socket(cfg: SocketConfig) -> Iterator[socket.socket]:
     """Open a Unix socket connection and yield it as a context manager.
 
     Creates a socket using the family and type from *cfg*, optionally sets a
@@ -72,7 +81,7 @@ def create_socket(cfg: SocketConfig) -> Callable:
         sock.close()
 
 
-def send_message(message_bytes: bytes, sock: Optional[socket.socket] = None) -> bool:
+def send_message(message_bytes: bytes, cfg: SocketConfig | None = None) -> bool:
     """Send one complete message over a short-lived Unix socket connection.
 
     Opens a new socket, sends *message_bytes* in full, then performs a
@@ -92,12 +101,10 @@ def send_message(message_bytes: bytes, sock: Optional[socket.socket] = None) -> 
     """
     if not message_bytes:
         return False
+    if cfg is None:
+        cfg = SocketConfig()
     try:
-        if sock is None:
-            cfg = SocketConfig()
-            sock = create_socket(cfg)
-
-        with sock as sock:
+        with create_socket(cfg) as sock:
             if isinstance(sock, Exception):
                 raise sock
 
@@ -110,3 +117,55 @@ def send_message(message_bytes: bytes, sock: Optional[socket.socket] = None) -> 
         log.error(f"Failed Send message over {cfg.address} : |{e}|")
 
         return False
+
+
+def commit_stop(session: CaptureSession, cfg: SocketConfig | None = None):
+    if not session.session_id:
+        return False
+
+    fmt_msg = format_session_commit_message(
+        session_id=session.session_id, recording_index=session.rec_idx
+    )
+
+    sent = send_message(fmt_msg, cfg)
+
+    if sent:
+        log.info(
+            "✅ Session recording stop committed",
+            session=session.session_id[:8],
+            recording=session.rec_idx,
+        )
+        session.commit()
+        return True
+
+    log.error("❌ Failed to commit session recording stop")
+    return False
+
+
+def send_audio(
+    session: CaptureSession,
+    audio_bytes: bytes,
+    telemetry_enabled: bool,
+    cfg: SocketConfig | None = None,
+) -> bool:
+    if not audio_bytes or not session.session_id:
+        return False
+
+    fmt_msg = format_audio_chunk_message(
+        session.session_id, session.rec_idx, session.mark_sent(), audio_bytes
+    )
+    sent = send_message(fmt_msg, cfg)
+    if sent:
+        send_session_event_to_telemetry_brain(
+            session=session,
+            telemetry_enabled=telemetry_enabled,
+            event_type="chunk_sent_to_brain",
+            fields={
+                "chunk_index": session.mark_sent(),
+                "audio_bytes": len(audio_bytes),
+            },
+        )
+        return True
+
+    log.error("❌ Failed to send chunk")
+    return False
