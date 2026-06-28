@@ -237,7 +237,7 @@ class Ear:
 
         if "nemotron" in self.current_model.lower():
             if session.chunk_age >= 1.12:
-                self._stop_and_send(stop_session=False)
+                self._stop_and_send(session, utr_gate, stop_session=False)
             return
 
         if utr_gate.has_speech_started and not self._silence_pending_logged:
@@ -257,7 +257,7 @@ class Ear:
             silence_len=silence_len,
         )
         if split_decision.should_split:
-            self._stop_and_send(stop_session=False)
+            self._stop_and_send(session, utr_gate, stop_session=False)
 
     def cleanup(self) -> None:
         """Perform a clean shutdown of the active Ear controller resources.
