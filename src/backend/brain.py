@@ -81,8 +81,8 @@ from src.backend.state import (
 from src.ipc.client import SocketConfig, create_socket, send_message
 from src.text_refiner.llm_router import (
     PROVIDERS,
-    llm_refine,
-    set_primary_provider,
+    refine,
+    set_provider,
 )
 from src.utils.bootstrap import fix_macos_library_paths
 from src.utils.settings import settings
@@ -258,7 +258,7 @@ def finalize_recording(session_id: str, rec_idx: int, state: SessionStates) -> N
         send_hud("process")
 
         t_refine_start = time.perf_counter()
-        cleaned_text = llm_refine(text)
+        cleaned_text = refine(text)
         refine_time = time.perf_counter() - t_refine_start
 
         update_summary(
@@ -528,7 +528,7 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
     stt_time = time.perf_counter() - t_connect
 
     t_refine_start = time.perf_counter()
-    cleaned_text = llm_refine(final_text)
+    cleaned_text = refine(final_text)
     refine_time = time.perf_counter() - t_refine_start
     llm_log_str = f"{refine_time:.2f}s"
 
@@ -824,7 +824,7 @@ def start_server() -> None:
     fix_macos_library_paths()
 
     safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
-    set_primary_provider(safe_provider_index)
+    set_provider(safe_provider_index)
     log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
     state = SessionStates()
     backend = BackendState(model_name=settings.stt_model)

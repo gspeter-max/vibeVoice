@@ -14,7 +14,7 @@ from typing import Any
 from structlog import get_logger
 
 from src.backend.state import SessionStates
-from src.interface import TelemetryRecording
+from src.interfaces import TelemetryRecording
 from src.utils.env_utils import get_float_from_environment
 from src.utils.settings import settings
 

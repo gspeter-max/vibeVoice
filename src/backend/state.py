@@ -2,8 +2,7 @@ import threading
 from dataclasses import dataclass, field
 from threading import Lock
 
-from src.engines.interface import TranscriptionEngine
-from src.interface import TelemetryRecording
+from src.interfaces import TelemetryRecording, TranscriptionEngine
 
 
 @dataclass

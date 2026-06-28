@@ -66,17 +66,17 @@ def start_ear():
     menu.start()
 
     def _start_recording_wrapper():
-        start_recording_state(ear, session, utr_gate, log_state, ear._telemetry_enabled)
-        ear._cmd_press_time = time.time()
+        start_recording_state(ear, session, utr_gate, log_state, ear.telemetry_enabled)
+        ear.cmd_press_time = time.time()
         change_ui_status("listen")
         ui_wave_input(ear)
 
     def _stop_recording_wrapper(stop_session: bool):
-        ear._stop_and_send(session, utr_gate, log_state, stop_session=stop_session)
-        ear._toggle_active = False
+        ear.stop_and_send(session, utr_gate, log_state, stop_session=stop_session)
+        ear.toggle_active = False
 
     def _toggle_recording_wrapper():
-        ear._toggle_active = True
+        ear.toggle_active = True
         log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
         _start_recording_wrapper()
 

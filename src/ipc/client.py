@@ -22,9 +22,9 @@ from scipy.constants import audio
 
 from src import log
 from src.audio.ear_runtime.recording import send_session_event_to_telemetry_brain
-from src.ipc.protocol_message_formats import (
-    format_audio_chunk_message,
-    format_session_commit_message,
+from src.ipc.protocol import (
+    fmt_audio,
+    fmt_commit,
 )
 from src.streaming.capture_session import CaptureSession
 from src.utils.settings import settings
@@ -123,7 +123,7 @@ def commit_stop(session: CaptureSession, cfg: SocketConfig | None = None):
     if not session.session_id:
         return False
 
-    fmt_msg = format_session_commit_message(
+    fmt_msg = fmt_commit(
         session_id=session.session_id, recording_index=session.rec_idx
     )
 
@@ -151,7 +151,7 @@ def send_audio(
     if not audio_bytes or not session.session_id:
         return False
 
-    fmt_msg = format_audio_chunk_message(
+    fmt_msg = fmt_audio(
         session.session_id, session.rec_idx, session.mark_sent(), audio_bytes
     )
     sent = send_message(fmt_msg, cfg)

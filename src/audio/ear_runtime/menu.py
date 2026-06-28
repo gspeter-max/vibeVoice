@@ -14,7 +14,7 @@ import numpy as np
 
 from src import log
 from src.ipc.client import send_message
-from src.ipc.protocol_message_formats import format_switch_model_message
+from src.ipc.protocol import fmt_switch
 from src.utils.settings import settings
 
 
@@ -30,7 +30,7 @@ def send_switch_command(model_name, ear_instance=None):
         ear_instance.current_model = model_name
 
     sent = send_message(
-        format_switch_model_message(model_name),
+        fmt_switch(model_name),
     )
     if not sent:
         log.info("\n❌ Failed to send switch command\n")

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.engines.interface import TranscriptionEngine
+from src.interfaces import TranscriptionEngine
 from src.streaming.nemotron import NemotronStreamingEngine
 
 

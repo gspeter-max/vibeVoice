@@ -32,7 +32,6 @@ from src.audio.ear_runtime.recording import (
     send_session_event_to_telemetry_brain,
     start_recording_state,
 )
-from src.audio.ear_runtime.system_audio import load_start_sound
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 from src.input.hotkeys import is_rcmd
 from src.streaming.capture_session import CaptureSession
@@ -47,7 +46,7 @@ except ImportError:
     logger.critical("pynput is not installed. Install it with: pip install pynput")
     sys.exit()
 
-load_start_sound()
+
 
 
 class Ear:
@@ -155,7 +154,7 @@ class Ear:
             f"\r\n⏹️  Streamed {duration_seconds:.1f}s ({total_frames} chunks) — Brain transcribing...\n"
         )
         change_ui_status("process")
-        self.close_mic_stream()
+        self.close_mic_stream
 
     @property
     def close_mic_stream(self) -> None:
@@ -263,5 +262,5 @@ class Ear:
         socket connection to the Brain, and terminates the underlying PyAudio
         library instance to release system audio handles.
         """
-        self.close_mic_stream()
+        self.close_mic_stream
         self.pyaudio_inst.terminate()

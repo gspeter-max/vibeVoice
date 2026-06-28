@@ -11,46 +11,28 @@ import threading
 import time
 
 from src import log
+from src.ipc.client import SocketConfig, send_message
 from src.utils.settings import settings
 from src.utils.socket_utils import create_socket
 
+
 def send_hud_command(
     command_text: str,
-    *,
-    host: str = settings.hud_host,
-    port: int = settings.hud_port,
-    timeout_seconds: float = 0.2,
-    socket_factory=None,
+    timeout: float = 0.2,
 ) -> bool:
     """Send one HUD state command over TCP.
 
     The command vocabulary stays unchanged. This helper only handles the local
     socket send and returns `True` on success or `False` on failure.
     """
-
-    try:
-        # Use our shared utility to create and connect the TCP socket
-        hud_socket = create_socket(
-            family=socket.AF_INET,
-            socket_type=socket.SOCK_STREAM,
-            address=(host, port),
-            timeout_seconds=timeout_seconds,
-            socket_factory=socket_factory
-        )
-        hud_socket.sendall(command_text.encode())
-        hud_socket.close()
-        return True
-    except OSError:
-        return False
+    cfg = SocketConfig(address=settings.brain_to_hud_socket_path, timeout=timeout)
+    succ = send_message(message_bytes=command_text.encode("utf-8"), cfg=cfg)
+    return succ
 
 
 def change_ui_status(
     command_text: str,
-    *,
-    host: str = settings.hud_host,
-    port: int = settings.hud_port,
     timeout_seconds: float = 0.2,
-    socket_factory=None,
 ):
     """Start one daemon thread that sends a single HUD command.
 
@@ -63,10 +45,7 @@ def change_ui_status(
         target=send_hud_command,
         kwargs={
             "command_text": command_text,
-            "host": host,
-            "port": port,
             "timeout_seconds": timeout_seconds,
-            "socket_factory": socket_factory,
         },
         daemon=True,
     )
@@ -76,10 +55,6 @@ def change_ui_status(
 
 def ui_wave_input(
     ear_state,
-    *,
-    host: str = settings.hud_host,
-    volume_port: int = settings.vol_port,
-    socket_factory=None,
     send_interval_seconds: float = 0.04,
 ):
     """Start the background UDP sender that streams Ear volume information.
@@ -89,19 +64,10 @@ def ui_wave_input(
     The helper returns the created thread so tests can join it deterministically.
     """
 
-    # Use our shared utility to create the UDP socket
-    udp_socket = create_socket(
-        family=socket.AF_INET,
-        socket_type=socket.SOCK_DGRAM,
-        socket_factory=socket_factory
-    )
-
     def _sender():
-        packets_sent = 0
         while True:
-            with ear_state._lock:
+            with ear_state.lock:
                 if not ear_state.is_recording:
-                    log.info(f"[Ear] Volume sender stopped (sent {packets_sent} packets)")
                     break
                 rms = ear_state.last_rms
                 frequency_bands = ear_state.last_frequency_bands
@@ -111,13 +77,10 @@ def ui_wave_input(
                     f"vol:{rms:.4f},bass:{frequency_bands['bass']:.3f},"
                     f"mid:{frequency_bands['mid']:.3f},treble:{frequency_bands['treble']:.3f}"
                 )
-                udp_socket.sendto(message.encode(), (host, volume_port))
-                packets_sent += 1
+                send_hud_command(message)
             except OSError as error:
                 log.info("[Ear] Failed to send volume: %s", error)
             time.sleep(send_interval_seconds)
-
-        udp_socket.close()
 
     sender_thread = threading.Thread(target=_sender, daemon=True)
     sender_thread.start()

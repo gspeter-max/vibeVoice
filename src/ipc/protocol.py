@@ -1,84 +1,55 @@
-"""Canonical IPC protocol helpers for Ear and Brain.
-
-This module owns the exact byte format used on the local socket wire.
-The rules here must stay stable because tests and runtime code rely on the
-current command prefixes, field order, and separator bytes.
-"""
+"""IPC wire protocol helpers for message formatting and parsing."""
 
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 
-def format_audio_chunk_message(
+def fmt_audio(
     session_id: str,
     recording_index: int,
     sequence_number: int,
     audio_bytes: bytes,
 ) -> bytes:
-    """Build the exact wire message for one audio chunk.
-
-    The header format is:
-    `CMD_AUDIO_CHUNK:SESSION_ID:RECORDING_INDEX:SEQUENCE_NUMBER`
-
-    The header is followed by two newline bytes and then the raw audio bytes.
-    This function must not change spacing, separators, or field order because
-    the receiver parses these bytes exactly.
-    """
-
-    header_string = (
-        f"CMD_AUDIO_CHUNK:{session_id}:{recording_index}:{sequence_number}\n\n"
-    )
-    return header_string.encode("utf-8") + audio_bytes
+    """Build wire bytes for an audio chunk."""
+    header = f"CMD_AUDIO_CHUNK:{session_id}:{recording_index}:{sequence_number}\n\n"
+    return header.encode("utf-8") + audio_bytes
 
 
-def format_session_commit_message(session_id: str, recording_index: int) -> bytes:
-    """Build the exact wire message that closes one recording."""
-
-    command_string = f"CMD_SESSION_COMMIT:{session_id}:{recording_index}"
-    return command_string.encode("utf-8")
+def fmt_commit(session_id: str, recording_index: int) -> bytes:
+    """Build wire bytes to commit a recording session."""
+    return f"CMD_SESSION_COMMIT:{session_id}:{recording_index}".encode("utf-8")
 
 
-def format_session_event_message(
+def fmt_event(
     session_id: str,
     recording_index: int,
     event_payload: dict,
 ) -> bytes:
-    """Build the exact wire message for one telemetry or session event."""
-
-    header_string = f"CMD_SESSION_EVENT:{session_id}:{recording_index}\n\n"
-    compact_json_body = json.dumps(event_payload, separators=(",", ":"))
-    return header_string.encode("utf-8") + compact_json_body.encode("utf-8")
-
-
-def format_switch_model_message(model_name: str) -> bytes:
-    """Build the exact wire message for a model switch command."""
-
-    command_string = f"CMD_SWITCH_MODEL:{model_name}"
-    return command_string.encode("utf-8")
+    """Build wire bytes for a telemetry event."""
+    header = f"CMD_SESSION_EVENT:{session_id}:{recording_index}\n\n"
+    body = json.dumps(event_payload, separators=(",", ":"))
+    return header.encode("utf-8") + body.encode("utf-8")
 
 
-def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
-    """Parse a raw socket payload into the existing compatibility dictionary.
+def fmt_switch(model_name: str) -> bytes:
+    """Build wire bytes for switching transcription models."""
+    return f"CMD_SWITCH_MODEL:{model_name}".encode("utf-8")
 
-    The returned dictionary shape is intentionally unchanged so the Brain side
-    and the tests can keep using the current contract during the refactor.
-    Unknown bytes still fall back to the historical `raw_audio` behavior.
-    """
 
+def parse_msg(raw_bytes: bytes) -> dict[str, Any]:
+    """Parse raw wire bytes into a command dictionary."""
     if raw_bytes.startswith(b"CMD_SWITCH_MODEL:"):
         try:
-            full_text = raw_bytes.decode("utf-8").strip()
-            _, model_name = full_text.split(":", 1)
+            _, model_name = raw_bytes.decode("utf-8").strip().split(":", 1)
             return {"command_type": "switch_model", "model_name": model_name}
         except ValueError:
             return {"command_type": "error", "reason": "bad_switch_model_format"}
 
     if raw_bytes.startswith(b"CMD_SESSION_COMMIT:"):
         try:
-            full_text = raw_bytes.decode("utf-8").strip()
-            parts = full_text.split(":")
+            parts = raw_bytes.decode("utf-8").strip().split(":")
             if len(parts) == 3:
                 return {
                     "command_type": "session_commit",
@@ -92,8 +63,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
     if raw_bytes.startswith(b"CMD_SESSION_EVENT:") and b"\n\n" in raw_bytes:
         try:
             header_bytes, payload_bytes = raw_bytes.split(b"\n\n", 1)
-            header_text = header_bytes.decode("utf-8").strip()
-            parts = header_text.split(":")
+            parts = header_bytes.decode("utf-8").strip().split(":")
             if len(parts) == 3:
                 return {
                     "command_type": "session_event",
@@ -110,8 +80,7 @@ def parse_incoming_message(raw_bytes: bytes) -> Dict[str, Any]:
             return {"command_type": "error", "reason": "missing_separator"}
         try:
             header_bytes, audio_data = raw_bytes.split(b"\n\n", 1)
-            header_text = header_bytes.decode("utf-8").strip()
-            parts = header_text.split(":")
+            parts = header_bytes.decode("utf-8").strip().split(":")
             if len(parts) == 4:
                 return {
                     "command_type": "audio_chunk",
