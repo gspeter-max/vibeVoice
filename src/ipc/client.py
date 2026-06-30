@@ -21,10 +21,10 @@ from rich.console import Capture
 from scipy.constants import audio
 
 from src import log
-from src.audio.ear_runtime.recording import send_session_event_to_telemetry_brain
 from src.ipc.protocol import (
     fmt_audio,
     fmt_commit,
+    fmt_event,
 )
 from src.streaming.capture_session import CaptureSession
 from src.utils.settings import settings
@@ -63,13 +63,12 @@ def create_socket(cfg: SocketConfig) -> Iterator[socket.socket]:
         socket.socket: A connected, ready-to-use socket.
 
     Raises:
-        FileExistsError: If the socket file at *cfg.address* does not exist.
+        FileNotFoundError: If the socket server is not running (file not found).
+        ConnectionRefusedError: If the socket file exists but the server is offline.
+        OSError: For other socket-level errors.
     """
+    sock = socket.socket(cfg.family, cfg.socket_type)
     try:
-        if not os.path.exists(cfg.address):
-            raise FileExistsError(" cfg.address is not exists ")
-
-        sock = socket.socket(cfg.family, cfg.socket_type)
         if cfg.timeout is not None:
             sock.settimeout(cfg.timeout)
         if cfg.address is not None:
@@ -77,6 +76,17 @@ def create_socket(cfg: SocketConfig) -> Iterator[socket.socket]:
 
         yield sock
 
+    except FileNotFoundError as error:
+        raise FileNotFoundError(
+            f"Socket connection failed: '{cfg.address}' does not exist. Is the server running?"
+        ) from error
+    except ConnectionRefusedError as error:
+        raise ConnectionRefusedError(
+            f"Connection refused: No active listener on '{cfg.address}'."
+        ) from error
+    except OSError:
+        sock.close()
+        raise
     finally:
         sock.close()
 
@@ -123,9 +133,7 @@ def commit_stop(session: CaptureSession, cfg: SocketConfig | None = None):
     if not session.session_id:
         return False
 
-    fmt_msg = fmt_commit(
-        session_id=session.session_id, recording_index=session.rec_idx
-    )
+    fmt_msg = fmt_commit(session_id=session.session_id, recording_index=session.rec_idx)
 
     sent = send_message(fmt_msg, cfg)
 
@@ -142,6 +150,30 @@ def commit_stop(session: CaptureSession, cfg: SocketConfig | None = None):
     return False
 
 
+def send_event(
+    session: CaptureSession,
+    telemetry_enabled: bool,
+    event_type: str,
+    fields: dict | None = None,
+) -> bool:
+    """Send an Ear runtime telemetry event over the Telemetry Brain socket."""
+    if not telemetry_enabled or not session.session_id:
+        return False
+
+    payload = {"type": event_type}
+    if fields:
+        payload.update(fields)
+    message_bytes = fmt_event(
+        session.session_id,
+        session.rec_idx,
+        payload,
+    )
+    sent = send_message(message_bytes, SocketConfig(timeout=5.0))
+    if not sent:
+        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
+    return sent
+
+
 def send_audio(
     session: CaptureSession,
     audio_bytes: bytes,
@@ -151,12 +183,10 @@ def send_audio(
     if not audio_bytes or not session.session_id:
         return False
 
-    fmt_msg = fmt_audio(
-        session.session_id, session.rec_idx, session.mark_sent(), audio_bytes
-    )
+    fmt_msg = fmt_audio(session.session_id, session.rec_idx, session.mark_sent(), audio_bytes)
     sent = send_message(fmt_msg, cfg)
     if sent:
-        send_session_event_to_telemetry_brain(
+        send_event(
             session=session,
             telemetry_enabled=telemetry_enabled,
             event_type="chunk_sent_to_brain",

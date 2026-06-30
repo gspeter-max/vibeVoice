@@ -55,9 +55,9 @@ from src.ipc.client import (
     SocketConfig,
     commit_stop,
     send_audio,
+    send_event,
     send_message,
 )
-from src.ipc.protocol import fmt_event
 from src.ui.hud_client import change_ui_status
 from src.utils.settings import settings
 
@@ -73,7 +73,7 @@ def begin_recording_session(session: CaptureSession, telemetry_enabled: bool) ->
         ear: The Ear controller instance.
     """
     session.begin(time.time())
-    send_session_event_to_telemetry_brain(
+    send_event(
         session=session,
         telemetry_enabled=telemetry_enabled,
         event_type="session_started",
@@ -81,45 +81,7 @@ def begin_recording_session(session: CaptureSession, telemetry_enabled: bool) ->
     )
 
 
-def send_session_event_to_telemetry_brain(
-    session: CaptureSession,
-    telemetry_enabled: bool,
-    event_type: str,
-    fields: dict | None = None,
-) -> bool:
-    """Send an Ear runtime telemetry event over the Telemetry Brain socket.
 
-    If telemetry is disabled or there is no active session ID, it returns early.
-    Otherwise, it packages the event metadata along with the session details
-    and sends them to the Brain via an IPC socket.
-
-    Args:
-        ear: The Ear controller instance.
-        event_type: The name/type of the telemetry event.
-        fields: Optional dictionary containing event details.
-
-    Returns:
-        True if the event was successfully sent, False otherwise.
-    """
-    if not telemetry_enabled or not session.session_id:
-        return False
-
-    payload = {"type": event_type}
-    if fields:
-        payload.update(fields)
-    message_bytes = fmt_event(
-        session.session_id,
-        session.rec_idx,
-        payload,
-    )
-    cfg = SocketConfig(timeout=5.0)
-    sent = send_message(
-        message_bytes,
-        cfg,
-    )
-    if not sent:
-        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
-    return sent
 
 
 def reset_chunk_tracking(log_state: LogState) -> None:
@@ -184,7 +146,7 @@ def flush_current_chunk(
         session=session, audio_bytes=overlapped_utterance_bytes, telemetry_enabled=telemetry_enabled
     )
     if sent:
-        send_session_event_to_telemetry_brain(
+        send_event(
             session=session,
             telemetry_enabled=telemetry_enabled,
             event_type="silence_threshold_hit" if not stop_session else "session_stopped",

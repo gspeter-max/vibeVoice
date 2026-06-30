@@ -15,8 +15,9 @@ from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 
 # Import existing logic
 from src.text_refiner.llm_router import PROVIDERS
-from src.utils.settings import settings
 from src.utils.env_manager import save_to_env
+from src.utils.settings import settings
+
 
 class ApiKeyModal(ModalScreen[Optional[str]]):
     """A modal dialog to enter an API key."""
@@ -60,7 +61,7 @@ class ApiKeyModal(ModalScreen[Optional[str]]):
                 value=self.current_key,
                 placeholder=f"Paste {self.env_var} here...",
                 password=True,
-                id="key_input"
+                id="key_input",
             )
             with Horizontal():
                 yield Button("Save", variant="success", id="save")
@@ -72,6 +73,7 @@ class ApiKeyModal(ModalScreen[Optional[str]]):
             self.dismiss(self.query_one("#key_input").value)
         else:
             self.dismiss(None)
+
 
 class WizardApp(App):
     """The main Bento Grid application for VibeVoice setup."""
@@ -172,10 +174,7 @@ class WizardApp(App):
         # 1. AI Provider State
         raw_provider_index = int(os.environ.get("VIBEVOICE_PROVIDER_INDEX", "0"))
         self.selected_provider_index = min(raw_provider_index, len(PROVIDERS) - 1)
-        self.api_keys = {
-            p["env_var"]: os.environ.get(p["env_var"], "")
-            for p in PROVIDERS
-        }
+        self.api_keys = {p["env_var"]: os.environ.get(p["env_var"], "") for p in PROVIDERS}
 
         # 2. Hardware State (Microphones)
         self.pyaudio_instance = pyaudio.PyAudio()
@@ -284,7 +283,7 @@ class WizardApp(App):
                 break
 
         self.query_one("#details-text").update(
-            f"AI Provider : [cyan]{provider['name']}[/cyan] ({provider['description']})\n"
+            f"AI Provider : [cyan]{provider['name']}[/cyan] \n"
             f"Microphone  : [yellow]{mic_name}[/yellow]\n"
             f"STT Model   : [green]{self.stt_model}[/green]\n"
             f"Mode        : [white]{self.recording_mode}[/white]"
@@ -351,6 +350,7 @@ class WizardApp(App):
         save_to_env("STREAMING_TELEMETRY_ENABLED", "1" if self.telemetry_enabled else "0")
 
         self.exit()
+
 
 if __name__ == "__main__":
     app = WizardApp()

@@ -34,12 +34,21 @@ kill_hud_processes() {
     pkill -f "src/ui/hud.py" 2>/dev/null || true
 }
 
+export BACKEND="${BACKEND:-parakeet}"
+export QT_MAC_WANTS_LAYER=1      # Intel Mac Sonoma+ fix
+export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
+export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
+export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-0}"
+export RECORDING_MODE="${RECORDING_MODE:-silence_streaming}"
+export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
+export EAR_TO_BRAIN_SCOKET_PATH="${EAR_TO_BRAIN_SCOKET_PATH:-/tmp/ear_to_brain_socket_path.sock}"
+
 cleanup() {
     echo -e "\n  Cleaning up..."
     kill_pid_file_process /tmp/parakeet-brain.pid
     kill_pid_file_process /tmp/parakeet-hud.pid
     kill_hud_processes
-    rm -f /tmp/parakeet.sock
+    rm -f $EAR_TO_BRAIN_SCOKET_PATH
     log_success "Done. Goodbye."
 }
 trap cleanup EXIT INT TERM
@@ -86,15 +95,6 @@ fi
     . ./.env
     set +a
 }
-
-export BACKEND="${BACKEND:-parakeet}"
-export QT_MAC_WANTS_LAYER=1      # Intel Mac Sonoma+ fix
-export KMP_DUPLICATE_LIB_OK=TRUE # Fix: ctranslate2 and others bundle libiomp5.dylib
-export PARAKEET_THREADS="${PARAKEET_THREADS:-}"
-export STREAMING_TELEMETRY_ENABLED="${STREAMING_TELEMETRY_ENABLED:-0}"
-export RECORDING_MODE="${RECORDING_MODE:-silence_streaming}"
-export STREAMING_TELEMETRY_DIR="${STREAMING_TELEMETRY_DIR:-logs/streaming_sessions}"
-
 # Startup Banner
 echo -e "
   ${ORANGE}┌──────────────────────────────────────────────┐${NC}
@@ -137,7 +137,7 @@ printf "  [1/3] ⚙️  Cleaning up stale processes..."
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes
-rm -f /tmp/parakeet.sock
+rm -f $EAR_TO_BRAIN_SCOKET_PATH
 mkdir -p logs
 printf "\r\033[K  [1/3] ⚙️  Cleaning up stale processes...  ${GREEN}✓ Done${NC}\n"
 if [[ "$BACKEND" == "nemotron" ]]; then
@@ -151,19 +151,17 @@ else
     fi
 fi
 
-"$VENV_PYTHON" -m pdb src/audio/ear_runtime/runtime.py
-
-# 2. Start Brain
+# 2. Start Brain — launch BEFORE the spinner so the socket has time to appear
 [ -d "$HOME/.cache/parakeet-flow/models/$MODEL_FOLDER" ] || log_warn "First run: Downloading model (~1.5 GB)..."
 printf "  [2/3] 🧠  Launching Brain server..."
-"$VENV_PYTHON" src/backend/brain.py &
-# osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && $VENV_PYTHON src/backend/brain.py\""
+"$VENV_PYTHON" src/backend/brain.py >logs/brain.log 2>&1 &
 BRAIN_PID=$!
+echo $BRAIN_PID >/tmp/parakeet-brain.pid
 
 WAIT=0
 MAX_WAIT=300
 SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-while [ ! -S /tmp/parakeet.sock ]; do
+while [ ! -S BRAIN_SOCK ]; do
     sleep 0.1
     ((WAIT++))
     elapsed=$((WAIT / 10))
@@ -197,3 +195,4 @@ printf "\r\033[K  [3/3] 🖥️  Initializing HUD window...      ${GREEN}✓ Rea
 echo "══════════════════════════════════════════════════"
 
 # Start Ear
+"$VENV_PYTHON" src/audio/ear_runtime/runtime.py

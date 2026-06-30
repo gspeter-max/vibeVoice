@@ -24,13 +24,7 @@ from src import log
 from src.audio.ear_runtime.devices import resolve_input_device_index
 from src.audio.ear_runtime.recording import (
     LogState,
-    begin_recording_session,
     flush_current_chunk,
-    open_mic_stream,
-    process_audio_callback,
-    reset_chunk_tracking,
-    send_session_event_to_telemetry_brain,
-    start_recording_state,
 )
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 from src.input.hotkeys import is_rcmd

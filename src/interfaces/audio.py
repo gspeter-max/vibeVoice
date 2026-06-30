@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import threading
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, TYPE_CHECKING
 
 import pyaudio
 
-from src.audio.ear_runtime.recording import LogState
-from src.audio.vad_segmenter import SileroUtteranceGate
-
-# We import the dependency classes used in method type hints
-from src.streaming.capture_session import CaptureSession
+if TYPE_CHECKING:
+    from src.audio.ear_runtime.recording import LogState
+    from src.audio.vad_segmenter import SileroUtteranceGate
+    from src.streaming.capture_session import CaptureSession
 
 
 class EarProtocol(Protocol):

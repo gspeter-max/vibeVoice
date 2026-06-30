@@ -820,15 +820,16 @@ def start_server() -> None:
     and shuts down the LLM router's HTTP connection pool before exiting.
     """
     # 1. Auto-fix environment issues (e.g., macOS library paths)
-    breakpoint()
     fix_macos_library_paths()
 
     safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
     set_provider(safe_provider_index)
     log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
+
     state = SessionStates()
     backend = BackendState(model_name=settings.stt_model)
     state.backend = backend
+
     log.info(f"[Brain] Warming up model: {settings.stt_model}...")
     try:
         state.backend.get_engine().transcribe_chunk(np.zeros(8000, dtype=np.float32))
