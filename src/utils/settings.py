@@ -69,9 +69,9 @@ class VibeVoiceSettings(BaseSettings):
     # ── IPC / Network ─────────────────────────────────────────────────────
     ear_to_brain_socket_path: str = "/tmp/ear_to_brain_socket_path.sock"
     """Unix socket path for Ear → Brain audio streaming."""
-    ear_to_hud_socket_path: str = "/tmp/ear_to_hud_socket_path"
+    ear_to_hud_socket_path: str = "/tmp/ear_to_hud_socket_path.sock"
     """Unix socket path for Ear → HUD for HUd ui status i."""
-    brain_to_hud_socket_path: str = "/tmp/brain_to_hud_socket_path"
+    brain_to_hud_socket_path: str = "/tmp/brain_to_hud_socket_path.sock"
 
     """UDP port used by the Ear to send live volume levels to the HUD."""
 
@@ -84,9 +84,7 @@ class VibeVoiceSettings(BaseSettings):
 
     # ── Streaming / VAD Constants ──────────────────────────────────────────
     vad_model_path: str = Field(
-        default_factory=lambda: os.path.expanduser(
-            "~/.cache/parakeet-flow/vad/silero_vad.onnx"
-        ),
+        default_factory=lambda: os.path.expanduser("~/.cache/parakeet-flow/vad/silero_vad.onnx"),
     )
     """Filesystem path to the Silero VAD ONNX model (override via VAD_MODEL_PATH)."""
 

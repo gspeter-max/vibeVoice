@@ -119,12 +119,11 @@ def send_message(message_bytes: bytes, cfg: SocketConfig | None = None) -> bool:
                 raise sock
 
             sock.sendall(message_bytes)
-            sock.shutdown(socket.SHUT_WR)
 
         return True
 
     except OSError as e:
-        log.error(f"Failed Send message over {cfg.address} : |{e}|")
+        log.error(f"Failed to Send message over {cfg.address} : |{e}|")
 
         return False
 

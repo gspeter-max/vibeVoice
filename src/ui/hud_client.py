@@ -32,7 +32,7 @@ def send_hud_command(
 
 def change_ui_status(
     command_text: str,
-    timeout_seconds: float = 0.2,
+    timeout: float = 0.2,
 ):
     """Start one daemon thread that sends a single HUD command.
 
@@ -45,7 +45,7 @@ def change_ui_status(
         target=send_hud_command,
         kwargs={
             "command_text": command_text,
-            "timeout_seconds": timeout_seconds,
+            "timeout": timeout,
         },
         daemon=True,
     )

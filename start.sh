@@ -150,18 +150,29 @@ else
         MODEL_FOLDER="sherpa-onnx-nemo-${MODEL_NAME}-int8"
     fi
 fi
-
 # 2. Start Brain — launch BEFORE the spinner so the socket has time to appear
+
+printf "  [3/3] 🖥️  Initializing HUD window..."
+kill_hud_processes
+"$VENV_PYTHON" src/ui/hud.py >logs/hud.log 2>&1 &
+HUD_PID=$!
+echo $HUD_PID >/tmp/parakeet-hud.pid
+sleep 0.8
+printf "\r\033[K  [3/3] 🖥️  Initializing HUD window...      ${GREEN}✓ Ready${NC} ${GRAY}(PID: $HUD_PID)${NC}\n"
+echo "══════════════════════════════════════════════════"
+
 [ -d "$HOME/.cache/parakeet-flow/models/$MODEL_FOLDER" ] || log_warn "First run: Downloading model (~1.5 GB)..."
 printf "  [2/3] 🧠  Launching Brain server..."
-"$VENV_PYTHON" src/backend/brain.py >logs/brain.log 2>&1 &
-BRAIN_PID=$!
-echo $BRAIN_PID >/tmp/parakeet-brain.pid
-
+{
+    "$VENV_PYTHON" src/backend/brain.py 2>&1 &
+    echo $! >/tmp/parakeet-brain.pid
+} | tee logs/brain.log &
+sleep 0.2
+BRAIN_PID=$(cat /tmp/parakeet-brain.pid)
 WAIT=0
 MAX_WAIT=300
 SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-while [ ! -S BRAIN_SOCK ]; do
+while [ ! -S "$EAR_TO_BRAIN_SCOKET_PATH" ]; do
     sleep 0.1
     ((WAIT++))
     elapsed=$((WAIT / 10))
@@ -184,15 +195,6 @@ while [ ! -S BRAIN_SOCK ]; do
 done
 printf "\r\033[K  [2/3] 🧠  Launching Brain server...       ${GREEN}✓ Online${NC}\n"
 
-# 3. Start HUD
-printf "  [3/3] 🖥️  Initializing HUD window..."
-kill_hud_processes
-"$VENV_PYTHON" src/ui/hud.py >logs/hud.log 2>&1 &
-HUD_PID=$!
-echo $HUD_PID >/tmp/parakeet-hud.pid
-sleep 0.8
-printf "\r\033[K  [3/3] 🖥️  Initializing HUD window...      ${GREEN}✓ Ready${NC} ${GRAY}(PID: $HUD_PID)${NC}\n"
-echo "══════════════════════════════════════════════════"
-
 # Start Ear
+printf "runtime.py is started now -------------------------> \n\n\n\n"
 "$VENV_PYTHON" src/audio/ear_runtime/runtime.py

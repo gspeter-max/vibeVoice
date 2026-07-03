@@ -50,7 +50,6 @@ from src.audio.ear_runtime.analysis import (
 from src.audio.ear_runtime.analysis import (
     get_rms as runtime_get_rms,
 )
-
 from src.ipc.client import (
     SocketConfig,
     commit_stop,
@@ -81,9 +80,6 @@ def begin_recording_session(session: CaptureSession, telemetry_enabled: bool) ->
     )
 
 
-
-
-
 def reset_chunk_tracking(log_state: LogState) -> None:
     """Reset all throttle flags on the LogState for the next recording session."""
     log_state.reset
@@ -103,6 +99,9 @@ def flush_current_chunk(
     applies the volume gain boost, appends overlap data from the previous
     chunk, and transmits the resulting package over the IPC socket."""
 
+    # from remote_pdb import RemotePdb
+    #
+    # RemotePdb("127.0.0.1", 4444).set_trace()
     now_seconds = time.time()
     silence_len = utr_gate.silence_len(now_seconds)
 
@@ -116,7 +115,8 @@ def flush_current_chunk(
         ear.last_rms = 0.0
         reset_chunk_tracking(log_state)
 
-    if not utr_gate.flush:
+    audio_bytes = utr_gate.flush
+    if not audio_bytes:
         if stop_session:
             session.stop()
             log.info("[Ear] 🔇 No speech captured; stopping recording")
@@ -124,7 +124,7 @@ def flush_current_chunk(
         return False
 
     overlapped_utterance_bytes = session.prep_chunk(
-        boost_audio_chunk(utr_gate.flush, ear.gain_multiplier),
+        boost_audio_chunk(audio_bytes, ear.gain_multiplier),
         stop=stop_session,
         silence_seconds=silence_len if not stop_session else 0.0,
     )
@@ -141,10 +141,13 @@ def flush_current_chunk(
             f"\r[Ear] ✂️  Silence boundary hit ({silence_len:.2f}s) — sending chunk "
             f"{duration_seconds:.1f}s ({total_frames} chunks)"
         )
-
+    # from remote_pdb import RemotePdb
+    #
+    # RemotePdb("localhost", 4444).set_trace()
     sent = send_audio(
         session=session, audio_bytes=overlapped_utterance_bytes, telemetry_enabled=telemetry_enabled
     )
+    log.info(f"------------------------------------  send_audo is sended {sent} \n\n\n\n\n\n ")
     if sent:
         send_event(
             session=session,

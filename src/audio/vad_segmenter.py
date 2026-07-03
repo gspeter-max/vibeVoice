@@ -71,9 +71,7 @@ class SileroVAD:
             self._h = np.zeros_like(self._h)
             self._c = np.zeros_like(self._c)
 
-    def is_speech(
-        self, audio_samples: np.ndarray, sample_rate: int = settings.rate
-    ) -> float:
+    def is_speech(self, audio_samples: np.ndarray, sample_rate: int = settings.rate) -> float:
         """Analyze a 512-sample audio frame and return speech probability (0.0 to 1.0)."""
         if len(audio_samples) == 0:
             return 0.0
@@ -89,9 +87,7 @@ class SileroVAD:
             # by 64 samples of context from the previous frame. We maintain that
             # rolling window in self._context and prepend it here.
             audio_samples_2d = audio_samples.reshape(1, -1)
-            input_with_context = np.concatenate(
-                [self._context, audio_samples_2d], axis=1
-            )
+            input_with_context = np.concatenate([self._context, audio_samples_2d], axis=1)
             ort_inputs = {
                 "input": input_with_context,
                 "sr": np.array([sample_rate], dtype=np.int64),
@@ -152,7 +148,7 @@ class SileroUtteranceGate:
         self._noise_floor = 0.0
 
     @property
-    def reset(self) -> None:
+    def reset(self):
         """Clear all buffered audio and reset speech detection timers."""
         self._buffer.clear()
         self._analysis_buffer.clear()
@@ -179,16 +175,12 @@ class SileroUtteranceGate:
         """Return True if speech has been detected in the current utterance."""
         return self._speech_started
 
-    def push(
-        self, audio_chunk: bytes, now: float, analysis_chunk: bytes | None = None
-    ) -> bool:
+    def push(self, audio_chunk: bytes, now: float, analysis_chunk: bytes | None = None) -> bool:
         """Process new audio bytes through VAD and energy checks. Return True if active speech is found."""
         if not audio_chunk:
             return False
         self._raw_analysis_buffer.extend(audio_chunk)
-        self._analysis_buffer.extend(
-            analysis_chunk if analysis_chunk is not None else audio_chunk
-        )
+        self._analysis_buffer.extend(analysis_chunk if analysis_chunk is not None else audio_chunk)
         # Keep the full utterance audio so it can be flushed later.
         self._buffer.extend(audio_chunk)
 
@@ -205,13 +197,9 @@ class SileroUtteranceGate:
             del self._raw_analysis_buffer[:frame_bytes]
 
             # Convert PCM16 bytes into normalized float audio for the model.
-            audio = (
-                np.frombuffer(frame_bytes_data, dtype=np.int16).astype(np.float32)
-                / 32768.0
-            )
+            audio = np.frombuffer(frame_bytes_data, dtype=np.int16).astype(np.float32) / 32768.0
             raw_audio_for_energy_detection = (
-                np.frombuffer(raw_frame_bytes, dtype=np.int16).astype(np.float32)
-                / 32768.0
+                np.frombuffer(raw_frame_bytes, dtype=np.int16).astype(np.float32) / 32768.0
             )
             score = (
                 1.0
@@ -258,10 +246,7 @@ class SileroUtteranceGate:
                 return False
             return (now - self._last_voice_time) >= self.silence_timeout_s
 
-        return (
-            self._finalize_armed
-            and (now - self._finalize_time) >= self.silence_timeout_s
-        )
+        return self._finalize_armed and (now - self._finalize_time) >= self.silence_timeout_s
 
     def silence_len(self, now: float) -> float:
         """Return the number of seconds that have passed since speech was last detected."""

@@ -1,16 +1,20 @@
 """Heads-up display widget and server for Ear/Brain status updates."""
 
-import sys
-import math
 import logging
+import math
+import os
 import platform
+import select
 import socket
+import sys
 import threading
 import time
 
-from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
+
+from src.ipc.client import SocketConfig
 from src.utils.settings import settings
 
 # Global activation policy setup for macOS
@@ -18,6 +22,7 @@ _HAS_APPKIT = False
 if platform.system() == "Darwin":
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+
         ns_app = NSApplication.sharedApplication()
         ns_app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     except ImportError:
@@ -29,6 +34,7 @@ if platform.system() == "Darwin":
             NSStatusWindowLevel,
             NSWindowCollectionBehaviorCanJoinAllSpaces,
         )
+
         _HAS_APPKIT = True
     except ImportError:
         pass
@@ -58,21 +64,23 @@ class HudCommandBridge(QObject):
     creates a timer in that thread (which has no Qt event loop), so the
     callback never fires and HUD state never changes.
     """
+
     command_received = Signal(str)
 
 
 class RoundedRectangularIndicatorWidget(QWidget):
     """Persistent floating indicator that renders animated vertical bars."""
+
     def __init__(self):
         super().__init__()
 
         # 1. Fundamental Window Flags
         self.setWindowFlags(
-            Qt.WindowStaysOnTopHint |       # Always above other windows
-            Qt.FramelessWindowHint |        # No title bar or borders
-            Qt.Tool |                       # Floating tool level (macOS/Linux)
-            Qt.WindowDoesNotAcceptFocus |   # Keyboard ignores this window
-            Qt.WindowTransparentForInput    # Mouse clicks go through to windows behind
+            Qt.WindowStaysOnTopHint  # Always above other windows
+            | Qt.FramelessWindowHint  # No title bar or borders
+            | Qt.Tool  # Floating tool level (macOS/Linux)
+            | Qt.WindowDoesNotAcceptFocus  # Keyboard ignores this window
+            | Qt.WindowTransparentForInput  # Mouse clicks go through to windows behind
         )
 
         # 2. Attributes for persistence and non-activation
@@ -80,9 +88,7 @@ class RoundedRectangularIndicatorWidget(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)  # Don't steal focus on show
 
         if platform.system() == "Darwin":
-            self.setAttribute(
-                Qt.WA_MacAlwaysShowToolWindow
-            )  # Stay visible when app is background
+            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)  # Stay visible when app is background
 
         self.setFixedSize(INDICATOR_WIDTH, INDICATOR_HEIGHT)
 
@@ -96,7 +102,7 @@ class RoundedRectangularIndicatorWidget(QWidget):
         # Smooth transition: rendered amplitude and pill size lerp toward target each frame
         # to avoid jarring instant state changes (inspired by Wispr Flow)
         self._smooth_amplitude = 0.0
-        self._smooth_width = 44.0   # Idle width
+        self._smooth_width = 44.0  # Idle width
         self._smooth_height = 20.0  # Idle height
         self._smooth_spinner_opacity = 0.0  # Smooth fade in for loading spinner
         self._smooth_bar_offset = 0.0  # Smooth left/right shift for bars
@@ -196,23 +202,15 @@ class RoundedRectangularIndicatorWidget(QWidget):
             self._smooth_height += (target_h - self._smooth_height) * lerp_factor_size
 
             target_spinner = (
-                1.0
-                if self._interface_state in (STATE_THINKING, STATE_PROCESSING)
-                else 0.0
+                1.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
             )
-            spinner_fade_speed = (
-                10.0
-                if target_spinner > self._smooth_spinner_opacity
-                else 25.0
+            spinner_fade_speed = 10.0 if target_spinner > self._smooth_spinner_opacity else 25.0
+            self._smooth_spinner_opacity += (target_spinner - self._smooth_spinner_opacity) * (
+                1.0 - math.exp(-dt * spinner_fade_speed)
             )
-            self._smooth_spinner_opacity += (
-                target_spinner - self._smooth_spinner_opacity
-            ) * (1.0 - math.exp(-dt * spinner_fade_speed))
 
             target_bar_offset = (
-                -14.0
-                if self._interface_state in (STATE_THINKING, STATE_PROCESSING)
-                else 0.0
+                -14.0 if self._interface_state in (STATE_THINKING, STATE_PROCESSING) else 0.0
             )
             self._smooth_bar_offset += (
                 target_bar_offset - self._smooth_bar_offset
@@ -267,7 +265,7 @@ class RoundedRectangularIndicatorWidget(QWidget):
         # Bar layout — 11 centered bars, 3px wide with 2px gap
         # Full pill-shaped rounding (radius = width/2) creates smooth capsules.
         num_bars = 9
-        bar_spacing = 5    # 3px bar + 2px gap
+        bar_spacing = 5  # 3px bar + 2px gap
         bar_width = 3
         bar_rounding = bar_width / 2.0  # Full pill shape — perfectly round tips
         total_width = (num_bars - 1) * bar_spacing + bar_width
@@ -305,9 +303,8 @@ class RoundedRectangularIndicatorWidget(QWidget):
 
             # Multi-frequency layered oscillation — two sin waves at different
             # speeds create smooth, organic movement across the bar group
-            wave = (
-                0.60 * math.sin(elapsed * 2.0 + offset)
-                + 0.40 * math.sin(elapsed * 3.4 + offset * 1.3)
+            wave = 0.60 * math.sin(elapsed * 2.0 + offset) + 0.40 * math.sin(
+                elapsed * 3.4 + offset * 1.3
             )
 
             # Drastic bell curve — edges shrink by 85% to become tiny dots
@@ -388,8 +385,10 @@ class RoundedRectangularIndicatorWidget(QWidget):
 
         painter.restore()
 
+
 class OscillatingInterfaceController:
     """Manage widget lifecycle, positioning, and state transitions."""
+
     def __init__(self):
         self.widget = RoundedRectangularIndicatorWidget()
 
@@ -447,6 +446,7 @@ class OscillatingInterfaceController:
         # Delay the FPS drop so the smooth fade-out animation completes at 60 FPS
         QTimer.singleShot(600, lambda: self._set_animation_speed(100))
 
+
 class HudServer(threading.Thread):
     """
     TCP server that listens for state commands from Ear and Brain.
@@ -456,6 +456,7 @@ class HudServer(threading.Thread):
     queues the signal and delivers it on the main thread where the
     controller can safely update the widget.
     """
+
     def __init__(self, controller):
         super().__init__(daemon=True)
         self.controller = controller
@@ -467,27 +468,46 @@ class HudServer(threading.Thread):
         self.command_bridge.command_received.connect(controller.on_interface_command)
 
     def run(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind((settings.hud_host, settings.hud_port))
-            except OSError as e:
-                logging.error("HUD Server bind error: %s", e)
-                return
-            s.listen()
-            while True:
-                conn, _addr = s.accept()
+        # internally thread automatically call run() method
+        #   -- thread.start()
+        #       -- thread.run()
+
+        print("hudThrad.run() function  is runting ")
+        if os.path.exists(settings.brain_to_hud_socket_path):
+            os.remove(settings.brain_to_hud_socket_path)
+        if os.path.exists(settings.ear_to_hud_socket_path):
+            os.remove(settings.ear_to_hud_socket_path)
+
+        sock_1 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock_2 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+        sock_1.bind(settings.ear_to_hud_socket_path)
+        sock_2.bind(settings.brain_to_hud_socket_path)
+
+        sock_1.listen()
+        sock_2.listen()
+
+        while True:
+            (
+                readable,
+                _,
+                _,
+            ) = select.select([sock_1, sock_2], [], [], 0.4)
+
+            for ready_socket in readable:
+                conn, _ = ready_socket.accept()
                 with conn:
                     data = conn.recv(1024)
                     if not data:
                         continue
                     command = data.decode().strip()
-                    # Emit signal — Qt queues it to the main thread automatically
                     self.command_bridge.command_received.emit(command)
+
 
 def initialize_hud() -> OscillatingInterfaceController:
     """Helper to instantiate the controller."""
     return OscillatingInterfaceController()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

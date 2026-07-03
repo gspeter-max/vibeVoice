@@ -111,10 +111,9 @@ def send_hud(cmd: str) -> None:
             address=settings.brain_to_hud_socket_path,
             timeout=0.2,
         )
-        s = create_socket(cfg)
-        send_message(message_bytes=cmd.encode(), sock=s)
-    except (OSError, ConnectionRefusedError):
-        pass  # HUD is optional — Brain never blocks on UI feedback
+        send_message(cmd.encode(), cfg)
+    except (OSError, ConnectionRefusedError) as e:
+        log.error(f"[send_hud] failing exception : {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +594,7 @@ def insert_transcripte(text: str) -> None:
     """
     if platform.system() == "Darwin":
         try:
-            old = subprocess.check_output(["pbinsert_transcripte"], stderr=subprocess.DEVNULL)
+            old = subprocess.check_output(["pbpaste"], stderr=subprocess.DEVNULL)
 
             _copy_to_clipboard(text.encode("utf-8"))
             _insert_transcripte_to_clipboard()
@@ -821,7 +820,7 @@ def start_server() -> None:
     """
     # 1. Auto-fix environment issues (e.g., macOS library paths)
     fix_macos_library_paths()
-
+    log.info("something something here")
     safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
     set_provider(safe_provider_index)
     log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
