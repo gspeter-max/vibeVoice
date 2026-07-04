@@ -20,7 +20,7 @@ class NemotronEngine(TranscriptionEngine):
         """Nemotron absolutely remembers insert_transcript chunks."""
         return True
 
-    def transcribe_chunk(self, audio_samples: np.ndarray | bytes) -> str:
+    def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
         """
         Adds the audio to Nemotron's internal buffer and gets the full, cumulative text back.
         """

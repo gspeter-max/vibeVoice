@@ -29,7 +29,7 @@ class PlaySound:
         system = platform.system()
 
         if cmd := self.command.get(system):
-            subprocess.run(cmd, check=True)
+            subprocess.Popen(cmd)
         elif system == "Windows":
             log.warning("its not implemented")
         else:

@@ -181,7 +181,6 @@ def _show_summary_table(
     # Clear the previous meter line from Ear
     sys.stdout.write("\r\033[K")
     sys.stdout.flush()
-
     table = Table(title=f"📋 Session: {session_id[:8]}", box=box.ROUNDED, expand=True)
     table.add_column("Field", style="cyan")
     table.add_column("Value")
@@ -271,10 +270,10 @@ def finalize_recording(session_id: str, rec_idx: int, state: SessionStates) -> N
             },
             state,
         )
+        send_hud("done")
         insert_transcripte(cleaned_text + " ")
         _show_summary_table(session_id, text, cleaned_text, stt_time, refine_time)
         update_summary(session_id, {"final_insert_transcripte_success": True}, state)
-        send_hud("done")
 
     else:
         update_summary(
@@ -331,6 +330,9 @@ def handle_streaming_audio_chunk(
     _get_or_create_session(session_id, state)
     with state.lock:
         session = state.sessions.get(session_id)
+        if session is None:
+            log.error(f"[Brain] Session {session_id} not found.")
+            return
         rec = session.get_or_create_recording(rec_idx)
         rec.received_count += 1
 
@@ -384,38 +386,42 @@ def handle_streaming_audio_chunk(
     if recorder:
         audio_file_path = recorder.save_chunk_audio(rec_idx, seq, audio_bytes)
 
-    _update_chunk_telemetry_summary(
-        session_id,
-        rec_idx,
-        seq,
-        {
-            "audio_file_path": audio_file_path,
-            "decode_seconds": round(elapsed, 2),
-            "last_chunk_text": last_chunk_text,
-            "raw_text": text,
-            "cleaned_text_after_dedup": dedup_analysis.text if dedup_analysis else text,
-            "dedup_stats": {
-                "overlap_word_count": (dedup_analysis.overlap_words if dedup_analysis else 0),
-                "trim_applied": dedup_analysis.trimmed if dedup_analysis else False,
-                "combined_score": (
-                    round(dedup_analysis.combined_score, 4) if dedup_analysis else 0.0
-                ),
-                "char_score": round(dedup_analysis.char_score, 4) if dedup_analysis else 0.0,
-                "token_score": round(dedup_analysis.token_score, 4) if dedup_analysis else 0.0,
-                "skipped_too_small": (dedup_analysis.skipped if dedup_analysis else False),
+    if settings.streaming_telemetry_enabled:
+        _update_chunk_telemetry_summary(
+            session_id,
+            rec_idx,
+            seq,
+            {
+                "audio_file_path": audio_file_path,
+                "decode_seconds": round(elapsed, 2),
+                "last_chunk_text": last_chunk_text,
+                "raw_text": text,
+                "cleaned_text_after_dedup": dedup_analysis.text if dedup_analysis else text,
+                "dedup_stats": {
+                    "overlap_word_count": (dedup_analysis.overlap_words if dedup_analysis else 0),
+                    "trim_applied": dedup_analysis.trimmed if dedup_analysis else False,
+                    "combined_score": (
+                        round(dedup_analysis.combined_score, 4) if dedup_analysis else 0.0
+                    ),
+                    "char_score": round(dedup_analysis.char_score, 4) if dedup_analysis else 0.0,
+                    "token_score": round(dedup_analysis.token_score, 4) if dedup_analysis else 0.0,
+                    "skipped_too_small": (dedup_analysis.skipped if dedup_analysis else False),
+                },
             },
-        },
-        state,
-    )
-    update_summary(
-        session_id,
-        {
-            "total_chunks_received": sum(r.received_count for r in session.recordings.values()),
-            "total_decode_seconds": round(session.stt_time, 2),
-            "flags": {"dedup_trim_applied": (dedup_analysis.trimmed if dedup_analysis else False)},
-        },
-        state,
-    )
+            state,
+        )
+    if settings.streaming_telemetry_enabled:
+        update_summary(
+            session_id,
+            {
+                "total_chunks_received": sum(r.received_count for r in session.recordings.values()),
+                "total_decode_seconds": round(session.stt_time, 2),
+                "flags": {
+                    "dedup_trim_applied": (dedup_analysis.trimmed if dedup_analysis else False)
+                },
+            },
+            state,
+        )
 
     finalize_recording(session_id, rec_idx, state)
 
@@ -436,6 +442,7 @@ def _mark_session_closed(session_id: str, rec_idx: int, state: SessionStates) ->
     with state.lock:
         session = state.sessions.get(session_id)
         if session is None:
+            log.error(f"[Brain] Session {session_id} not found.")
             return
         rec = session.get_or_create_recording(rec_idx)
         rec.closed = True
@@ -510,11 +517,15 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
 
     try:
         audio_int16 = np.frombuffer(audio[: len(audio) // 2 * 2], dtype=np.int16)
-        audio = _normalize_audio(audio_int16)
+        norm_audio = _normalize_audio(audio_int16)
+
+        if norm_audio is None:
+            log.error("_normalize_audio return None ")
+            return
 
         log.info("[Brain] 🎙️  Final utterance decode")
         send_hud("process")
-        final_text = engine.transcribe_chunk(audio)
+        final_text = engine.transcribe_chunk(norm_audio)
         if not final_text:
             log.info("[Brain] 🔇 Nothing detected")
             send_hud("hide")
@@ -533,14 +544,13 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
 
     log.info(f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"')
 
+    send_hud("done")
     insert_transcripte(cleaned_text + " ")
     _show_summary_table("one-shot", final_text, cleaned_text, stt_time, refine_time)
 
-    send_hud("done")
-
 
 # ---------------------------------------------------------------------------
-# Paste
+# Paste Hello.
 # ---------------------------------------------------------------------------
 
 
@@ -598,8 +608,6 @@ def insert_transcripte(text: str) -> None:
 
             _copy_to_clipboard(text.encode("utf-8"))
             _insert_transcripte_to_clipboard()
-
-            time.sleep(0.05)
             _copy_to_clipboard(old)
 
             play = PlaySound("FINISH")
@@ -610,11 +618,11 @@ def insert_transcripte(text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Audio normalisation
+# Audio normalisation .
 # ---------------------------------------------------------------------------
 
 
-def _normalize_audio(int16_audio: np.ndarray) -> Optional[np.ndarray]:
+def _normalize_audio(int16_audio: np.ndarray) -> Optional[np.ndarray] | None:
     """Convert raw 16-bit PCM to a normalised ``float32`` array.
 
     The transcription engines expect audio in the range ``[-1.0, 1.0]``.
@@ -854,21 +862,24 @@ def start_server() -> None:
 
     except KeyboardInterrupt:
         log.info("\n[Brain] Shutting down...")
-        try:
-            with state.lock:
-                for session_id, session_state in state.sessions.items():
-                    update_summary(
-                        session_id,
-                        {
-                            "total_chunks_received": sum(
-                                r.received_count for r in session_state.recordings.values()
-                            ),
-                            "total_decode_seconds": round(session_state.stt_time, 2),
-                        },
-                        state,
-                    )
-        except (OSError, ValueError, TypeError) as e:
-            log.warning("Failed to write shutdown telemetry: %s", e)
+
+        if settings.streaming_telemetry_enabled:
+            try:
+                with state.lock:
+                    for session_id, session_state in state.sessions.items():
+                        update_summary(
+                            session_id,
+                            {
+                                "total_chunks_received": sum(
+                                    r.received_count for r in session_state.recordings.values()
+                                ),
+                                "total_decode_seconds": round(session_state.stt_time, 2),
+                            },
+                            state,
+                        )
+
+            except (OSError, ValueError, TypeError) as e:
+                log.warning("Failed to write shutdown telemetry: %s", e)
     finally:
         server.close()
         if os.path.exists(settings.ear_to_brain_socket_path):
@@ -876,9 +887,9 @@ def start_server() -> None:
 
         # Close the LLM router connection pool safely
         try:
-            from src.text_refiner.llm_router import global_http_client
+            from src.text_refiner.llm_router import http_client
 
-            global_http_client.close()
+            http_client.close()
             log.info("[Brain] 🌐 LLM Router connection pool closed")
         except (ImportError, AttributeError) as e:
             log.warning("Failed to close LLM router client: %s", e)

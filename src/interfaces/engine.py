@@ -1,5 +1,7 @@
 from typing import Protocol
+
 import numpy as np
+
 
 class TranscriptionEngine(Protocol):
     """The Rulebook for all AI transcription models."""
@@ -8,7 +10,7 @@ class TranscriptionEngine(Protocol):
         """Returns True if the model remembers previous audio chunks (like Nemotron)."""
         ...
 
-    def transcribe_chunk(self, audio_samples: np.ndarray | bytes) -> str:
+    def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
         """Takes raw audio and turns them into text."""
         ...
 

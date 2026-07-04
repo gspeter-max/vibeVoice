@@ -23,7 +23,7 @@ class ParakeetEngine:
         """Parakeet models do not remember insert_transcript audio chunks."""
         return False
 
-    def transcribe_chunk(self, audio_samples: np.ndarray | bytes) -> str:
+    def transcribe_chunk(self, audio_samples: np.ndarray) -> str:
         """
         Passes the audio to the Sherpa-ONNX backend and returns the text string.
         """

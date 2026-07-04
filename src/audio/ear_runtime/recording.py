@@ -181,6 +181,8 @@ def open_mic_stream(ear: EarProtocol, utr_gate: SileroUtteranceGate, log_state: 
         except OSError:
             pass
 
+    log.info(f"recording -> open_mic_stream :current time : {time.time()}")
+
     ear.stream = ear.pyaudio_inst.open(
         format=settings.audio_format,
         channels=settings.channels,
@@ -195,6 +197,7 @@ def open_mic_stream(ear: EarProtocol, utr_gate: SileroUtteranceGate, log_state: 
             ear, utr_gate, log_state, in_data
         ),
     )
+    log.info(f"recording -> open_mic_stream :current time : {time.time()}")
     log.info("[Ear] 🎤 Mic stream opened")
 
 

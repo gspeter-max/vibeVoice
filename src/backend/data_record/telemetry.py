@@ -213,6 +213,9 @@ def build_recorder(session_id: str, state: SessionStates) -> TelemetryRecording 
     ensuring that a session state object exists to hold the recorder. This acts
     as a centralized factory for managing logging objects during streaming.
     """
+    # from remote_pdb import RemotePdb
+
+    # RemotePdb(host="127.0.0.1", port=8888).set_trace()
     if not settings.streaming_telemetry_enabled:
         return None
 
@@ -240,6 +243,9 @@ def _update_chunk_telemetry_summary(
     session_id: str, recording_index: int, chunk_index: int, fields: dict, state: SessionStates
 ) -> None:
     """Updates the summary data for a specific chunk inside a given recording."""
+    if not settings.streaming_telemetry_enabled:
+        return
+
     recorder = build_recorder(session_id, state)
     if recorder:
         recorder.update_chunk_summary(recording_index, chunk_index, fields)
@@ -255,6 +261,9 @@ def update_summary(session_id: str, fields: dict, state: SessionStates) -> None:
     It provides a high-level overview of the entire session's performance and
     success rate without needing to dig into every individual audio chunk.
     """
+    if not settings.streaming_telemetry_enabled:
+        return
+
     recorder = build_recorder(session_id, state)
     if recorder:
         recorder.update_session_summary(fields)
@@ -268,6 +277,9 @@ def _handle_session_telemetry_event(session_id: str, payload: dict, state: Sessi
     Updates the session-wide 'summary' flags, such as flagging that a VAD warning
     was seen, so the final report highlights potential microphone sensitivity issues.
     """
+    if not settings.streaming_telemetry_enabled:
+        return
+
     event_type = str(payload.get("type", "session_event"))
     chunk_index = payload.get("chunk_index")
     recording_index = payload.get("recording_index", 0)

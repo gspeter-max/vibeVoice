@@ -13,10 +13,12 @@ import time
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
+from structlog import getLogger
 
 from src.ipc.client import SocketConfig
 from src.utils.settings import settings
 
+log = getLogger()
 # Global activation policy setup for macOS
 _HAS_APPKIT = False
 if platform.system() == "Darwin":
@@ -436,7 +438,8 @@ class OscillatingInterfaceController:
         elif cmd == "done":
             self.widget.update_interface_state(STATE_DONE)
             self._set_animation_speed(16)  # Keep smooth during fade-out
-            QTimer.singleShot(1500, self._return_to_idle)
+
+            QTimer.singleShot(100, self._return_to_idle)
         elif cmd == "hide":
             self._return_to_idle()
 
@@ -492,12 +495,14 @@ class HudServer(threading.Thread):
                 readable,
                 _,
                 _,
-            ) = select.select([sock_1, sock_2], [], [], 0.4)
+            ) = select.select([sock_1, sock_2], [], [], None)
 
             for ready_socket in readable:
                 conn, _ = ready_socket.accept()
+                log.info(f"[HUD] run func : {ready_socket}")
                 with conn:
                     data = conn.recv(1024)
+                    log.info(f"[HUD] run data printing: {data}")
                     if not data:
                         continue
                     command = data.decode().strip()
