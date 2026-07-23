@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.backend.backend_parakeet import load_model, transcribe
+from src.backend.parakeet import load_model, transcribe
 from src.interfaces import TranscriptionEngine
 
 

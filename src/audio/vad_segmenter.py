@@ -147,7 +147,6 @@ class SileroUtteranceGate:
         self._last_dynamic_threshold = energy_threshold
         self._noise_floor = 0.0
 
-    @property
     def reset(self):
         """Clear all buffered audio and reset speech detection timers."""
         self._buffer.clear()
@@ -170,7 +169,6 @@ class SileroUtteranceGate:
         self._finalize_armed = True
         self._finalize_time = now
 
-    @property
     def has_speech_started(self) -> bool:
         """Return True if speech has been detected in the current utterance."""
         return self._speech_started
@@ -276,9 +274,8 @@ class SileroUtteranceGate:
         """Return the current dynamic energy threshold adjusted for background noise."""
         return self._last_dynamic_threshold
 
-    @property
     def flush(self) -> bytes:
         """Return the entire buffered audio utterance as bytes and reset the gate."""
         audio = bytes(self._buffer)
-        self.reset
+        self.reset()
         return audio

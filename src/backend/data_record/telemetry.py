@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import wave
@@ -11,14 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from structlog import get_logger
-
 from src.backend.state import SessionStates
 from src.interfaces import TelemetryRecording
 from src.utils.env_utils import get_float_from_environment
 from src.utils.settings import settings
 
-log = get_logger()
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -213,9 +212,7 @@ def build_recorder(session_id: str, state: SessionStates) -> TelemetryRecording 
     ensuring that a session state object exists to hold the recorder. This acts
     as a centralized factory for managing logging objects during streaming.
     """
-    # from remote_pdb import RemotePdb
 
-    # RemotePdb(host="127.0.0.1", port=8888).set_trace()
     if not settings.streaming_telemetry_enabled:
         return None
 

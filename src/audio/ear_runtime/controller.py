@@ -18,7 +18,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 import pyaudio
-from structlog import get_logger
+import logging
 
 from src import log
 from src.audio.ear_runtime.devices import resolve_input_device_index
@@ -33,7 +33,7 @@ from src.streaming.session import should_split
 from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 try:
     from pynput import keyboard
 except ImportError:
@@ -113,7 +113,7 @@ class Ear:
         self.telemetry_enabled = os.environ.get("STREAMING_TELEMETRY_ENABLED", "0").strip() == "1"
         self.current_model = "parakeet-tdt-0.6b-v3"  # Default model
 
-        log.info(
+        log.debug(
             "[Ear] VAD config: "
             f"threshold={settings.vad_score_threshold:.2f}, "
             f"silence_timeout={settings.silence_timeout_seconds:.2f}s, "
@@ -123,7 +123,7 @@ class Ear:
 
         # ★ ALWAYS LISTENING MODE: Open stream once at startup
         self.stream = None
-        log.info(f"[Ear] Mic selected: {self.active_mic_name} ✓")
+        log.debug(f"[Ear] Mic selected: {self.active_mic_name} ✓")
 
     def stop_no_streaming(self) -> None:
         """Finalize a non-streaming recording and close its raw audio socket.
@@ -144,7 +144,7 @@ class Ear:
             self.last_rms = 0.0
 
         duration_seconds = (total_frames * settings.chunk) / settings.rate
-        log.info(
+        log.debug(
             f"\r\n⏹️  Streamed {duration_seconds:.1f}s ({total_frames} chunks) — Brain transcribing...\n"
         )
         change_ui_status("process")
@@ -179,6 +179,8 @@ class Ear:
         stop_session: bool = True,
     ) -> None:
         """Unified method to stop recording and transmit the final data."""
+        if stop_session:
+            print()  # Move cursor to the next line to avoid log overlap
         if settings.is_no_streaming_mode:
             self.stop_no_streaming()
         flush_current_chunk(
@@ -230,7 +232,7 @@ class Ear:
                 self.stop_and_send(session, utr_gate, log_state, stop_session=False)
             return
 
-        if utr_gate.has_speech_started and not log_state.silence_pending_logged:
+        if utr_gate.has_speech_started() and not log_state.silence_pending_logged:
             if utr_gate.silence_len(now_seconds) > 0.0:
                 log_state.silence_pending_logged = True
 

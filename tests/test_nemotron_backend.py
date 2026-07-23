@@ -1,5 +1,5 @@
 import numpy as np
-from src.streaming.nemotron import NemotronStreamingEngine
+from src.backend.nemotron import NemotronStreamingEngine
 
 def test_nemotron_engine_initialization():
     """Verify that the Nemotron engine can be initialized and finds its models."""

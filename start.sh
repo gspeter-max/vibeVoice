@@ -137,6 +137,8 @@ printf "  [1/3] ⚙️  Cleaning up stale processes..."
 kill_pid_file_process /tmp/parakeet-brain.pid
 kill_pid_file_process /tmp/parakeet-hud.pid
 kill_hud_processes
+# cleanup brian.log
+rm -rf logs/brain.log
 rm -f $EAR_TO_BRAIN_SCOKET_PATH
 mkdir -p logs
 printf "\r\033[K  [1/3] ⚙️  Cleaning up stale processes...  ${GREEN}✓ Done${NC}\n"
@@ -163,10 +165,10 @@ echo "════════════════════════�
 
 [ -d "$HOME/.cache/parakeet-flow/models/$MODEL_FOLDER" ] || log_warn "First run: Downloading model (~1.5 GB)..."
 printf "  [2/3] 🧠  Launching Brain server..."
-{
-    "$VENV_PYTHON" src/backend/brain.py 2>&1 &
-    echo $! >/tmp/parakeet-brain.pid
-} | tee logs/brain.log &
+
+"$VENV_PYTHON" src/backend/brain.py &
+echo $! >/tmp/parakeet-brain.pid
+
 sleep 0.2
 BRAIN_PID=$(cat /tmp/parakeet-brain.pid)
 WAIT=0
@@ -196,5 +198,4 @@ done
 printf "\r\033[K  [2/3] 🧠  Launching Brain server...       ${GREEN}✓ Online${NC}\n"
 
 # Start Ear
-printf "runtime.py is started now -------------------------> \n\n\n\n"
 "$VENV_PYTHON" src/audio/ear_runtime/runtime.py

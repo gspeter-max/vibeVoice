@@ -27,6 +27,8 @@ dependencies = [
     "rich>=13.0.0",
     "textual>=0.86.0",
     "remote-pdb>=2.1.0",
+    "pytest>=9.0.3",
+    "pytest-mock>=3.15.1",
 ]
 
 [project.optional-dependencies]

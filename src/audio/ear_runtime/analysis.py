@@ -81,5 +81,5 @@ def analyze_frequency_bands(
 
         return {"bass": 0.33, "mid": 0.33, "treble": 0.34}
     except (OSError, ValueError, RuntimeError) as error:
-        log.info("[Ear] Frequency analysis failed: %s", error)
+        log.debug("[Ear] Frequency analysis failed: %s", error)
         return {"bass": 0.33, "mid": 0.33, "treble": 0.34}

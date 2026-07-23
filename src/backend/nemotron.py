@@ -119,13 +119,13 @@ def download_nemotron_model(cache_directory_path):
     """
     from huggingface_hub import snapshot_download
 
-    log.info("⬇️ Downloading Nemotron-0.6B model (this may take a minute)...")
+    log.debug("⬇️ Downloading Nemotron-0.6B model (this may take a minute)...")
     snapshot_download(
         repo_id="danielbodart/nemotron-speech-600m-onnx",
         local_dir=cache_directory_path,
         allow_patterns=["int8-dynamic/*", "shared/*", "config.json"],
     )
-    log.info("✅ Download complete.")
+    log.debug("✅ Download complete.")
 
 
 class NemotronStreamingEngine:
@@ -145,10 +145,10 @@ class NemotronStreamingEngine:
 
         config_file_path = os.path.join(self.models_directory, "config.json")
         if not os.path.exists(config_file_path):
-            log.info(f"Model not found. Initiating auto-download to {self.models_directory}...")
+            log.debug(f"Model not found. Initiating auto-download to {self.models_directory}...")
             download_nemotron_model(self.models_directory)
 
-        log.info(f"[Nemotron] Loading from: {self.models_directory}")
+        log.debug(f"[Nemotron] Loading from: {self.models_directory}")
 
         with open(
             os.path.join(self.models_directory, "config.json"), "r", encoding="utf-8"

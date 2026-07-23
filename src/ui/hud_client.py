@@ -79,7 +79,7 @@ def ui_wave_input(
                 )
                 send_hud_command(message)
             except OSError as error:
-                log.info("[Ear] Failed to send volume: %s", error)
+                log.debug("[Ear] Failed to send volume: %s", error)
             time.sleep(send_interval_seconds)
 
     sender_thread = threading.Thread(target=_sender, daemon=True)

@@ -48,8 +48,8 @@ def select_mic(pyaudio_instance):
     Pressing Enter keeps the system default input device.
     """
 
-    log.info("\n🎤  SELECT YOUR MICROPHONE:")
-    log.info("─" * 30)
+    log.debug("\n🎤  SELECT YOUR MICROPHONE:")
+    log.debug("─" * 30)
     selectable_device_indexes: list[int] = []
     default_device_info = pyaudio_instance.get_default_input_device_info()
     default_device_index = default_device_info.get("index")
@@ -61,12 +61,12 @@ def select_mic(pyaudio_instance):
             device_name = device_info.get("name")
             visible_choice_index = len(selectable_device_indexes)
             is_default_device = " (DEFAULT)" if device_index == default_device_index else ""
-            log.info(f" [{visible_choice_index}] {device_name}{is_default_device}")
+            log.debug(f" [{visible_choice_index}] {device_name}{is_default_device}")
             selectable_device_indexes.append(device_index)
             if device_index == default_device_index:
                 default_choice_index = visible_choice_index
 
-    log.info("─" * 30)
+    log.debug("─" * 30)
     while True:
         try:
             chosen_text = input(
@@ -78,6 +78,6 @@ def select_mic(pyaudio_instance):
             visible_choice_index = int(chosen_text)
             if 0 <= visible_choice_index < len(selectable_device_indexes):
                 return selectable_device_indexes[visible_choice_index]
-            log.info("❌ Invalid index.")
+            log.debug("❌ Invalid index.")
         except ValueError:
-            log.info("❌ Please enter a valid number.")
+            log.debug("❌ Please enter a valid number.")

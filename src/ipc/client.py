@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterator, Optional
 
 from rich.console import Capture
-from scipy.constants import audio
 
 from src import log
 from src.ipc.protocol import (
@@ -137,10 +136,10 @@ def commit_stop(session: CaptureSession, cfg: SocketConfig | None = None):
     sent = send_message(fmt_msg, cfg)
 
     if sent:
-        log.info(
-            "✅ Session recording stop committed",
-            session=session.session_id[:8],
-            recording=session.rec_idx,
+        log.debug(
+            "✅ Session recording stop committed: session=%s, recording=%s",
+            session.session_id[:8],
+            session.rec_idx,
         )
         session.commit()
         return True
@@ -169,7 +168,7 @@ def send_event(
     )
     sent = send_message(message_bytes, SocketConfig(timeout=5.0))
     if not sent:
-        log.info(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
+        log.debug(f"[Ear] ❌ Failed to send telemetry event '{event_type}' to telemetry brain")
     return sent
 
 

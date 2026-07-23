@@ -1,5 +1,5 @@
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy
 import pytest
@@ -23,7 +23,7 @@ except (ModuleNotFoundError, ImportError, OSError) as exc:
     else:
         raise exc
 
-import src.backend.backend_parakeet as backend_parakeet
+import src.backend.parakeet as parakeet
 
 
 def test_transcribe():
@@ -37,39 +37,40 @@ def test_transcribe():
     stream_mock.result.text.strip.return_value = "hello_world"
     recognizer.create_stream.return_value = stream_mock
 
-    text = backend_parakeet.transcribe(recognizer, audio)
+    text = parakeet.transcribe(recognizer, audio)
     assert text == "hello_world"
 
 
-def test_download_and_extract(mocker):
-    mock_makedirs = mocker.patch("os.makedirs")
-    mock_retrieve = mocker.patch("urllib.request.urlretrieve")
-    mock_remove = mocker.patch("os.remove")
-    mocker.patch("os.path.exists", return_value=True)
-
-    mock_tar = mocker.MagicMock()
-    mock_tarfile_open = mocker.patch("tarfile.open", return_value=mock_tar)
+def test_download_and_extract():
+    mock_tar = MagicMock()
     mock_tar.__enter__.return_value = mock_tar
 
     url = "https://example.com/model.tar.bz2"
     dest_dir = "/dummy/dest"
-    backend_parakeet._download_and_extract(url, dest_dir)
 
-    mock_makedirs.assert_called_once_with(dest_dir, exist_ok=True)
-    mock_retrieve.assert_called_once_with(url, "/dummy/dest/model.tar.bz2")
-    mock_tarfile_open.assert_called_once_with("/dummy/dest/model.tar.bz2", "r:bz2")
-    mock_tar.extractall.assert_called_once_with(path=dest_dir)
-    mock_remove.assert_called_once_with("/dummy/dest/model.tar.bz2")
+    with patch("os.makedirs") as mock_makedirs, \
+         patch("urllib.request.urlretrieve") as mock_retrieve, \
+         patch("os.remove") as mock_remove, \
+         patch("os.path.exists", return_value=True), \
+         patch("tarfile.open", return_value=mock_tar) as mock_tarfile_open:
+
+        parakeet._download_and_extract(url, dest_dir)
+
+        mock_makedirs.assert_called_once_with(dest_dir, exist_ok=True)
+        mock_retrieve.assert_called_once_with(url, "/dummy/dest/model.tar.bz2")
+        mock_tarfile_open.assert_called_once_with("/dummy/dest/model.tar.bz2", "r:bz2")
+        mock_tar.extractall.assert_called_once_with(path=dest_dir)
+        mock_remove.assert_called_once_with("/dummy/dest/model.tar.bz2")
 
 
-def test_load_model_already_exists(mocker):
-    mocker.patch("os.path.exists", return_value=True)
-    mock_download = mocker.patch("src.backend.backend_parakeet._download_and_extract")
-    mocker.patch.object(sherpa_onnx.OfflineRecognizer, "from_moonshine", return_value="<mock_recognizer>")
+def test_load_model_already_exists():
+    with patch("os.path.exists", return_value=True), \
+         patch("src.backend.parakeet._download_and_extract") as mock_download, \
+         patch.object(sherpa_onnx.OfflineRecognizer, "from_moonshine", return_value="<mock_recognizer>"):
 
-    recognizer = backend_parakeet.load_model("moonshine-base")
-    assert recognizer == "<mock_recognizer>"
-    mock_download.assert_not_called()
+        recognizer = parakeet.load_model("moonshine-base")
+        assert recognizer == "<mock_recognizer>"
+        mock_download.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -132,23 +133,24 @@ def test_load_model_already_exists(mocker):
         ),
     ],
 )
-def test_load_model_types(mocker, monkeypatch, model_name, folder_name, factory_method, expected_kwargs):
-    monkeypatch.setattr(backend_parakeet.settings, "stt_model", model_name)
-    monkeypatch.setattr(backend_parakeet.settings, "rate", 16000)
-    mocker.patch("src.backend.backend_parakeet.get_integer_from_environment", return_value=6)
-    mock_download = mocker.patch("src.backend.backend_parakeet._download_and_extract")
-    mocker.patch("os.path.exists", return_value=False)
-    mock_factory = mocker.patch.object(sherpa_onnx.OfflineRecognizer, factory_method, return_value="<mock_recognizer>")
+def test_load_model_types(monkeypatch, model_name, folder_name, factory_method, expected_kwargs):
+    monkeypatch.setattr(parakeet.settings, "stt_model", model_name)
+    monkeypatch.setattr(parakeet.settings, "rate", 16000)
 
-    recognizer = backend_parakeet.load_model(model_name)
+    with patch("src.backend.parakeet.get_integer_from_environment", return_value=6), \
+         patch("src.backend.parakeet._download_and_extract") as mock_download, \
+         patch("os.path.exists", return_value=False), \
+         patch.object(sherpa_onnx.OfflineRecognizer, factory_method, return_value="<mock_recognizer>") as mock_factory:
 
-    assert recognizer == "<mock_recognizer>"
-    mock_download.assert_called_once()
+        recognizer = parakeet.load_model(model_name)
 
-    home = os.path.expanduser("~")
-    cache_path = f"{home}/.cache/parakeet-flow/models/{folder_name}"
-    formatted_kwargs = {
-        k: v.format(cache_path=cache_path) if isinstance(v, str) and "{cache_path}" in v else v
-        for k, v in expected_kwargs.items()
-    }
-    mock_factory.assert_called_once_with(**formatted_kwargs)
+        assert recognizer == "<mock_recognizer>"
+        mock_download.assert_called_once()
+
+        home = os.path.expanduser("~")
+        cache_path = f"{home}/.cache/parakeet-flow/models/{folder_name}"
+        formatted_kwargs = {
+            k: v.format(cache_path=cache_path) if isinstance(v, str) and "{cache_path}" in v else v
+            for k, v in expected_kwargs.items()
+        }
+        mock_factory.assert_called_once_with(**formatted_kwargs)

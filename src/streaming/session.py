@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 import os
 import pathlib
 import re
 import time
-from typing import Final, Tuple, List
 import wave
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+from typing import Final, List, Tuple
 
 import numpy as np
-import numpy.typing as npt
 
 from src import log
 from src.utils.settings import settings
@@ -126,8 +125,12 @@ def _equalize_energy(overlap_bytes: bytes, current_bytes: bytes) -> bytes:
     o_trimmed: bytes = overlap_bytes[: len(overlap_bytes) // 2 * 2]
     c_trimmed: bytes = current_bytes[: len(current_bytes) // 2 * 2]
 
-    overlap: npt.NDArray[np.float32] = np.frombuffer(o_trimmed, dtype=np.int16).astype(np.float32)
-    current: npt.NDArray[np.float32] = np.frombuffer(c_trimmed, dtype=np.int16).astype(np.float32)
+    overlap: np.typing.NDArray[np.float32] = np.frombuffer(o_trimmed, dtype=np.int16).astype(
+        np.float32
+    )
+    current: np.typing.NDArray[np.float32] = np.frombuffer(c_trimmed, dtype=np.int16).astype(
+        np.float32
+    )
 
     overlap_rms: float = float(np.sqrt(np.mean(overlap**2)))
     current_rms: float = float(np.sqrt(np.mean(current**2)))
@@ -136,7 +139,7 @@ def _equalize_energy(overlap_bytes: bytes, current_bytes: bytes) -> bytes:
         return overlap_bytes
 
     gain: float = min(current_rms / overlap_rms, 3.0)
-    boosted: npt.NDArray[np.float32] = overlap * gain
+    boosted: np.typing.NDArray[np.float32] = overlap * gain
     boosted = np.tanh(boosted / 32768) * 32768
     return boosted.astype(np.int16).tobytes()
 
@@ -182,9 +185,7 @@ def apply_overlap(
 
     equalized_overlap: bytes = _equalize_energy(tail, audio)
     overlapped_audio_bytes: bytes = equalized_overlap + audio
-    log.info(
-        "-----------------------------------------------------------testing---------------------------------------------------"
-    )
+
     next_chunk_tail_bytes: bytes
     if overlap_bytes > 0:
         speech_end: int = len(audio) - silence_bytes
@@ -194,23 +195,20 @@ def apply_overlap(
         next_chunk_tail_bytes = b""
 
     overlap_len: float = len(tail) / 2.0 / rate
-    testfile: pathlib.Path = pathlib.Path(os.getcwd()) / "equalized_overlap.wav"
-    with wave.open(str(testfile), "wb") as waveFile:
-        waveFile.setnchannels(1)
-        waveFile.setsampwidth(2)
-        waveFile.setframerate(settings.rate)
-        waveFile.writeframes(equalized_overlap)
-
-    testfile = pathlib.Path(os.getcwd()) / "overlapped_audio_bytes.wav"
-    with wave.open(str(testfile), "wb") as waveFile:
-        waveFile.setnchannels(1)
-        waveFile.setsampwidth(2)
-        waveFile.setframerate(settings.rate)
-        waveFile.writeframes(overlapped_audio_bytes)
-
-    log.info(
-        "-----------------------------------------------------------testing---------------------------------------------------"
-    )
+    # testfile: pathlib.Path = pathlib.Path(os.getcwd()) / "equalized_overlap.wav"
+    # with wave.open(str(testfile), "wb") as waveFile:
+    #     waveFile.setnchannels(1)
+    #     waveFile.setsampwidth(2)
+    #     waveFile.setframerate(settings.rate)
+    #     waveFile.writeframes(equalized_overlap)
+    #
+    # testfile = pathlib.Path(os.getcwd()) / "overlapped_audio_bytes.wav"
+    # with wave.open(str(testfile), "wb") as waveFile:
+    #     waveFile.setnchannels(1)
+    #     waveFile.setsampwidth(2)
+    #     waveFile.setframerate(settings.rate)
+    #     waveFile.writeframes(overlapped_audio_bytes)
+    #
     return OverlapResult(
         audio=overlapped_audio_bytes,
         tail=next_chunk_tail_bytes,
@@ -268,11 +266,7 @@ def should_skip_trim(
     3. Check if the original count equals the overlap count plus the trimmed count.
     4. Return True if all conditions are met, indicating the trim should be skipped.
     """
-    return (
-        len(trimmed) <= 1
-        and overlap_words >= 3
-        and len(orig) == overlap_words + len(trimmed)
-    )
+    return len(trimmed) <= 1 and overlap_words >= 3 and len(orig) == overlap_words + len(trimmed)
 
 
 def char_sim(words_a: list[str], words_b: list[str]) -> float:
@@ -293,10 +287,10 @@ def char_sim(words_a: list[str], words_b: list[str]) -> float:
 
     score: float = SequenceMatcher(None, str_a, str_b).ratio()
     log.debug(
-        "[Dedup] char_similarity",
-        str_a=str_a,
-        str_b=str_b,
-        score=round(score, 4),
+        "[Dedup] char_similarity: str_a=%s, str_b=%s, score=%s",
+        str_a,
+        str_b,
+        round(score, 4),
     )
     return score
 
@@ -323,13 +317,13 @@ def token_sim(words_a: list[str], words_b: list[str]) -> float:
 
     score: float = len(intersection) / len(union) if union else 0.0
     log.debug(
-        "[Dedup] token_overlap",
-        words_a=words_a,
-        words_b=words_b,
-        shared_words=sorted(intersection),
-        only_in_a=sorted(set_a - set_b),
-        only_in_b=sorted(set_b - set_a),
-        score=round(score, 4),
+        "[Dedup] token_overlap: words_a=%s, words_b=%s, shared_words=%s, only_in_a=%s, only_in_b=%s, score=%s",
+        words_a,
+        words_b,
+        sorted(intersection),
+        sorted(set_a - set_b),
+        sorted(set_b - set_a),
+        round(score, 4),
     )
     return score
 
@@ -401,9 +395,7 @@ def dedup_prefix(
             trimmed_words: list[str] = curr_original[overlap_words:]
             skipped: bool = should_skip_trim(curr_original, trimmed_words, overlap_words)
 
-            cleaned_text: str = (
-                curr_text.strip() if skipped else " ".join(trimmed_words).strip()
-            )
+            cleaned_text: str = curr_text.strip() if skipped else " ".join(trimmed_words).strip()
 
             return DedupResult(
                 text=cleaned_text,

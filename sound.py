@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from structlog import get_logger
+import logging
 
-log = get_logger(__file__)
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)

@@ -78,6 +78,7 @@ from src.backend.state import (
     SessionState,
     SessionStates,
 )
+from src.interfaces.socket import Conn
 from src.ipc.client import SocketConfig, create_socket, send_message
 from src.text_refiner.llm_router import (
     PROVIDERS,
@@ -249,10 +250,8 @@ def finalize_recording(session_id: str, rec_idx: int, state: SessionStates) -> N
         parts = (part for _, part in sorted(rec.transcript_parts.items()) if part)
         text = " ".join(parts).strip()
         rec.finalized = True
-
     if text:
         stt_time = rec.stt_time
-
         send_hud("process")
 
         t_refine_start = time.perf_counter()
@@ -272,6 +271,10 @@ def finalize_recording(session_id: str, rec_idx: int, state: SessionStates) -> N
         )
         send_hud("done")
         insert_transcripte(cleaned_text + " ")
+        llm_timing_str = f"{refine_time:.2f}s" if refine_time > 0 else "bypassed"
+        log.info(
+            f"[brain]  session {session_id[:8]} completed (STT: {stt_time:.2f}s | LLM: {llm_timing_str})"
+        )
         _show_summary_table(session_id, text, cleaned_text, stt_time, refine_time)
         update_summary(session_id, {"final_insert_transcripte_success": True}, state)
 
@@ -337,7 +340,7 @@ def handle_streaming_audio_chunk(
         rec.received_count += 1
 
         if seq == 0 and rec.received_count == 1:
-            log.info("[Brain] 🎙️  Recording started...")
+            log.info(f"[brain]  session {session_id[:8]} started")
 
     elapsed = 0.0
     audio_int16 = np.frombuffer(audio_bytes[: len(audio_bytes) // 2 * 2], dtype=np.int16)
@@ -351,7 +354,7 @@ def handle_streaming_audio_chunk(
     if audio is not None:
         try:
             if not engine:
-                log.info("[Brain] ⚠️  No engine loaded — skipping chunk")
+                log.debug("[Brain] ⚠️  No engine loaded — skipping chunk")
             else:
                 t_start = time.perf_counter()
 
@@ -374,14 +377,13 @@ def handle_streaming_audio_chunk(
                     session.stt_time += time_taken
 
         except (OSError, RuntimeError, ValueError) as e:
-            log.info("[Brain] Chunk decode error: %s", e, exc_info=True)
+            log.debug("[Brain] Chunk decode error: %s", e, exc_info=True)
 
     with state.lock:
         rec = session.get_or_create_recording(rec_idx)
         rec.done_count += 1
 
     audio_file_path = None
-    # recorder = build_recorder(session_id)
     recorder = session.telemetry_recorder
     if recorder:
         audio_file_path = recorder.save_chunk_audio(rec_idx, seq, audio_bytes)
@@ -483,15 +485,15 @@ def _handle_session_event(audio: bytes, state: SessionStates) -> None:
         # so _handle_session_telemetry_event routes it to the correct recording slot.
         payload["recording_index"] = int(rec_idx_str)
 
-        log.info(
-            "📡 Session event received",
-            session=session_id[:8],
-            recording=rec_idx_str,
-            kind=payload.get("type", "session_event"),
+        log.debug(
+            "📡 Session event received: session=%s, recording=%s, kind=%s",
+            session_id[:8],
+            rec_idx_str,
+            payload.get("type", "session_event"),
         )
         _handle_session_telemetry_event(session_id, payload, state)
     except (KeyError, ValueError, TypeError) as e:
-        log.warning("Bad session event command", error=str(e))
+        log.warning("Bad session event command: error=%s", str(e))
 
 
 def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: SessionStates) -> None:
@@ -511,7 +513,7 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
     engine = state.backend.get_engine()
 
     if not engine:
-        log.info("[Brain] ⚠️  No engine loaded — skipping")
+        log.debug("[Brain] ⚠️  No engine loaded — skipping")
         send_hud("hide")
         return
 
@@ -523,15 +525,15 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
             log.error("_normalize_audio return None ")
             return
 
-        log.info("[Brain] 🎙️  Final utterance decode")
+        log.debug("[Brain] 🎙️  Final utterance decode")
         send_hud("process")
         final_text = engine.transcribe_chunk(norm_audio)
         if not final_text:
-            log.info("[Brain] 🔇 Nothing detected")
+            log.debug("[Brain] 🔇 Nothing detected")
             send_hud("hide")
             return
     except (OSError, RuntimeError, ValueError) as e:
-        log.info("[Brain] Audio decode error: %s", e)
+        log.debug("[Brain] Audio decode error: %s", e)
         send_hud("hide")
         return
 
@@ -542,10 +544,10 @@ def _transcribe_raw_connection_audio(audio: bytes, t_connect: float, state: Sess
     refine_time = time.perf_counter() - t_refine_start
     llm_log_str = f"{refine_time:.2f}s"
 
-    log.info(f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"')
+    log.debug(f'[Brain] 📝 [STT: {stt_time:.2f}s | LLM: {llm_log_str}] → "{cleaned_text}"')
 
     send_hud("done")
-    insert_transcripte(cleaned_text + " ")
+    insert_transcripte(cleaned_text)
     _show_summary_table("one-shot", final_text, cleaned_text, stt_time, refine_time)
 
 
@@ -614,7 +616,7 @@ def insert_transcripte(text: str) -> None:
             play()
 
         except (subprocess.SubprocessError, OSError) as e:
-            log.info("[Brain] macOS Fast-insert_transcripte failed: %s", e)
+            log.debug("[Brain] macOS Fast-insert_transcripte failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -655,9 +657,10 @@ def _normalize_audio(int16_audio: np.ndarray) -> Optional[np.ndarray] | None:
 # ---------------------------------------------------------------------------
 # Connection handler
 # ---------------------------------------------------------------------------
+# 1. input --> func --> output --> assert
 
 
-def handle_connection(conn: socket.socket, state: SessionStates) -> None:
+def handle_connection(conn: Conn, state: SessionStates) -> None:
     """Read a full incoming message and dispatch it to the correct handler.
 
     Each connection from the Ear is handled on its own thread.  The function
@@ -692,7 +695,7 @@ def handle_connection(conn: socket.socket, state: SessionStates) -> None:
             except socket.timeout:
                 continue
     except OSError as e:
-        log.info("[Brain] Recv error: %s", e)
+        log.debug("[Brain] Recv error: %s", e)
     finally:
         conn.close()
 
@@ -734,7 +737,7 @@ def _handle_switch_model(audio: bytes, state: SessionStates) -> None:
     """
     try:
         new_model = audio.decode("utf-8").strip().split(":", 1)[1]
-        log.info("🔄 Switching model", model=new_model)
+        log.info(f"[brain]  switching to {new_model}")
         state.backend.set_engine(None)  # unload first to free memory
         gc.collect()
         state.backend.load_tts(new_model)
@@ -742,9 +745,9 @@ def _handle_switch_model(audio: bytes, state: SessionStates) -> None:
         with state.lock:
             state.sessions.clear()
 
-        log.info("✅ Model switched", model=new_model)
+        log.info(f"[brain]  switched to {new_model}")
     except (KeyError, ValueError, RuntimeError) as e:
-        log.error("Switching failed", error=str(e))
+        log.error("Switching failed: error=%s", str(e))
 
 
 def _handle_session_commit(audio: bytes, state: SessionStates) -> None:
@@ -755,7 +758,6 @@ def _handle_session_commit(audio: bytes, state: SessionStates) -> None:
     attempts to finalize the recording immediately if all chunks are done.
 
     Wire format::
-
         CMD_SESSION_COMMIT:<session_id>:<rec_idx>
 
     Args:
@@ -764,7 +766,7 @@ def _handle_session_commit(audio: bytes, state: SessionStates) -> None:
     try:
         _, session_id, rec_idx_str = audio.decode("utf-8").strip().split(":", 2)
         rec_idx = int(rec_idx_str)
-        log.info("✅ Session commit received", session=session_id[:8], recording=rec_idx)
+        log.debug("✅ Session commit received: session=%s, recording=%s", session_id[:8], rec_idx)
         _mark_session_closed(session_id, rec_idx, state)
     except (KeyError, ValueError, TypeError):
         log.warning("Bad commit command")
@@ -788,18 +790,18 @@ def _handle_chunk_command(audio: bytes, state: SessionStates) -> None:
     header, audio_bytes = audio.split(b"\n\n", 1)
     try:
         _, session_id, rec_idx_str, seq_text = header.decode("utf-8").strip().split(":", 3)
-        log.info(
-            "🎙️  Audio chunk received",
-            rec=rec_idx_str,
-            seq=seq_text,
-            size=len(audio_bytes),
-            session=session_id[:8],
+        log.debug(
+            "🎙️  Audio chunk received: rec=%s, seq=%s, size=%s, session=%s",
+            rec_idx_str,
+            seq_text,
+            len(audio_bytes),
+            session_id[:8],
         )
         handle_streaming_audio_chunk(
             session_id, int(rec_idx_str), int(seq_text), audio_bytes, state
         )
     except (ValueError, TypeError) as e:
-        log.warning("Bad chunk header", error=str(e))
+        log.warning("Bad chunk header: error=%s", str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -825,32 +827,39 @@ def start_server() -> None:
     ``KeyboardInterrupt`` (Ctrl-C) breaks the accept loop.  The server
     flushes telemetry for every open session, closes the Unix socket file,
     and shuts down the LLM router's HTTP connection pool before exiting.
+
     """
     # 1. Auto-fix environment issues (e.g., macOS library paths)
     fix_macos_library_paths()
-    log.info("something something here")
+    print()
+    print("[brain]  logs saved to logs/brain.log")
     safe_provider_index = min(settings.vibevoice_provider_index, len(PROVIDERS) - 1)
     set_provider(safe_provider_index)
-    log.info(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
+    log.debug(f"[Brain] Text refiner set to: {PROVIDERS[safe_provider_index]['name']}")
 
     state = SessionStates()
     backend = BackendState(model_name=settings.stt_model)
     state.backend = backend
 
-    log.info(f"[Brain] Warming up model: {settings.stt_model}...")
+    log.info(f"[system] warming up model {settings.stt_model}...")
+
     try:
-        state.backend.get_engine().transcribe_chunk(np.zeros(8000, dtype=np.float32))
+        engine = state.backend.get_engine()
+        if engine is None:
+            raise RuntimeError("Engine not initilized")
+
+        engine.transcribe_chunk(np.zeros(8000, dtype=np.float32))
     except (RuntimeError, OSError) as e:
         log.error("[Brain] Warm-up failed %s", e)
         sys.exit(1)
-    log.info("[Brain] Warm-up done ✓")
+    log.info("[system] model warm-up complete")
 
     if os.path.exists(settings.ear_to_brain_socket_path):
         os.remove(settings.ear_to_brain_socket_path)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(settings.ear_to_brain_socket_path)
     server.listen(10)
-    log.info(f"[Brain] ✅ Streaming server ready at {settings.ear_to_brain_socket_path}")
+    log.info(f"[brain]  ready on socket {settings.ear_to_brain_socket_path}")
 
     try:
         while True:
@@ -861,7 +870,7 @@ def start_server() -> None:
             continue
 
     except KeyboardInterrupt:
-        log.info("\n[Brain] Shutting down...")
+        log.info("[brain]  shutting down")
 
         if settings.streaming_telemetry_enabled:
             try:
@@ -890,7 +899,7 @@ def start_server() -> None:
             from src.text_refiner.llm_router import http_client
 
             http_client.close()
-            log.info("[Brain] 🌐 LLM Router connection pool closed")
+            log.debug("[Brain] 🌐 LLM Router connection pool closed")
         except (ImportError, AttributeError) as e:
             log.warning("Failed to close LLM router client: %s", e)
 

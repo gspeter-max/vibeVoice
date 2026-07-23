@@ -25,9 +25,9 @@ def is_rcmd(key: Any) -> bool:
 class RecordingCallbacks:
     """Holds all external callbacks that define what happens on recording events."""
 
-    on_start: Callable[[], None]
-    on_stop: Callable[[bool], None]
-    on_toggle: Callable[[], None]
+    on_start: Callable[[], None] | None
+    on_stop: Callable[[bool], None] | None
+    on_toggle: Callable[[], None] | None
 
 
 @dataclass

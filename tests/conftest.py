@@ -1,5 +1,6 @@
-import pytest
 import numpy as np
+import pytest
+
 
 @pytest.fixture
 def sample_audio_bytes():
@@ -12,54 +13,74 @@ def sample_audio_bytes():
     audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16)
     return audio_data.tobytes()
 
+
 @pytest.fixture
 def mock_ear_to_brain_socket_path(tmp_path):
     """Returns a temporary socket path for testing."""
     return str(tmp_path / "test_parakeet.sock")
 
+
 import sys
-sys.modules['pynput'] = type(sys)('pynput')
-sys.modules['pynput.keyboard'] = type(sys)('pynput.keyboard')
-sys.modules['pynput.mouse'] = type(sys)('pynput.mouse')
+
+sys.modules["pynput"] = type(sys)("pynput")
+sys.modules["pynput.keyboard"] = type(sys)("pynput.keyboard")
+sys.modules["pynput.mouse"] = type(sys)("pynput.mouse")
+
 
 class MockKey:
     cmd_r = "cmd_r"
     esc = "esc"
 
-sys.modules['pynput.keyboard'].Key = MockKey
-sys.modules['pynput.keyboard'].Listener = lambda *a, **kw: None
+
+sys.modules["pynput.keyboard"].Key = MockKey
+sys.modules["pynput.keyboard"].Listener = lambda *a, **kw: None
+
 
 class MockButton:
-    left = 'left'
-    right = 'right'
+    left = "left"
+    right = "right"
 
-sys.modules['pynput.mouse'].Button = MockButton
-sys.modules['pynput.mouse'].Listener = lambda *a, **kw: None
+
+sys.modules["pynput.mouse"].Button = MockButton
+sys.modules["pynput.mouse"].Listener = lambda *a, **kw: None
+
 
 class MockPyAudio:
     paInt16 = 16
     paContinue = 0
+
     class PyAudio:
         def get_default_input_device_info(self):
             return {"index": 0}
+
         def get_device_info_by_index(self, index):
             return {"name": "Test Device"}
 
-sys.modules['pyaudio'] = MockPyAudio()
+
+sys.modules["pyaudio"] = MockPyAudio()
+
 
 class MockConn:
     """
     A fake socket connection that returns pre-defined audio chunks
     and then returns an empty bytes object to signal the connection is closed.
     """
-    def __init__(self, *chunks):
-        self._chunks = list(chunks) + [b""]
 
-    def settimeout(self, _timeout):
+    def __init__(self, *chunks: bytes):
+        self._chunks = list(chunks) + [b""]
+        self.sent_data: list[bytes] = []
+
+    def settimeout(self, t: float | None) -> None:
         return None
 
-    def recv(self, _size):
+    def recv(self, size: int) -> bytes:
+        if not self._chunks:
+            return b""
         return self._chunks.pop(0)
 
-    def close(self):
+    def send(self, data: bytes) -> int:
+        self.sent_data.append(data)
+        return len(data)
+
+    def close(self) -> None:
         return None

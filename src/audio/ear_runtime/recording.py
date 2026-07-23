@@ -99,9 +99,6 @@ def flush_current_chunk(
     applies the volume gain boost, appends overlap data from the previous
     chunk, and transmits the resulting package over the IPC socket."""
 
-    # from remote_pdb import RemotePdb
-    #
-    # RemotePdb("127.0.0.1", 4444).set_trace()
     now_seconds = time.time()
     silence_len = utr_gate.silence_len(now_seconds)
 
@@ -115,11 +112,11 @@ def flush_current_chunk(
         ear.last_rms = 0.0
         reset_chunk_tracking(log_state)
 
-    audio_bytes = utr_gate.flush
+    audio_bytes = utr_gate.flush()
     if not audio_bytes:
         if stop_session:
             session.stop()
-            log.info("[Ear] 🔇 No speech captured; stopping recording")
+            log.info("[ear]    no speech captured")
             commit_stop(session=session)
         return False
 
@@ -132,22 +129,19 @@ def flush_current_chunk(
     duration_seconds = (total_frames * settings.chunk) / settings.rate
 
     if stop_session:
-        log.info(
+        log.debug(
             f"\r\n⏹️  Streamed {duration_seconds:.1f}s ({total_frames} chunks) — Brain transcribing...\n"
         )
         change_ui_status("process")
     else:
-        log.info(
+        log.debug(
             f"\r[Ear] ✂️  Silence boundary hit ({silence_len:.2f}s) — sending chunk "
             f"{duration_seconds:.1f}s ({total_frames} chunks)"
         )
-    # from remote_pdb import RemotePdb
-    #
-    # RemotePdb("localhost", 4444).set_trace()
+
     sent = send_audio(
         session=session, audio_bytes=overlapped_utterance_bytes, telemetry_enabled=telemetry_enabled
     )
-    log.info(f"------------------------------------  send_audo is sended {sent} \n\n\n\n\n\n ")
     if sent:
         send_event(
             session=session,
@@ -181,8 +175,6 @@ def open_mic_stream(ear: EarProtocol, utr_gate: SileroUtteranceGate, log_state: 
         except OSError:
             pass
 
-    log.info(f"recording -> open_mic_stream :current time : {time.time()}")
-
     ear.stream = ear.pyaudio_inst.open(
         format=settings.audio_format,
         channels=settings.channels,
@@ -197,8 +189,7 @@ def open_mic_stream(ear: EarProtocol, utr_gate: SileroUtteranceGate, log_state: 
             ear, utr_gate, log_state, in_data
         ),
     )
-    log.info(f"recording -> open_mic_stream :current time : {time.time()}")
-    log.info("[Ear] 🎤 Mic stream opened")
+    log.info("[ear]    microphone opened")
 
 
 def start_recording_state(
@@ -231,7 +222,7 @@ def start_recording_state(
 
     session.clear_tail()
     if settings.is_silence_streaming_mode:
-        utr_gate.reset
+        utr_gate.reset()
         begin_recording_session(session, telemetry_enabled)
 
 
@@ -286,18 +277,18 @@ def process_audio_callback(
         if speech_now and not log_state.chunk_speech_logged:
             log_state.chunk_speech_logged = True
             log_state.silence_pending_logged = False
-            log.info("[Ear] 🗣️  VAD speech detected")
+            log.debug("[Ear] 🗣️  VAD speech detected")
 
         if now_seconds - log_state.vad_state_log_time >= settings.vad_status_log_interval:
             try:
                 silence_len = (
-                    utr_gate.silence_len(now_seconds) if utr_gate.has_speech_started else 0.0
+                    utr_gate.silence_len(now_seconds) if utr_gate.has_speech_started() else 0.0
                 )
                 log.debug(
                     "[Ear] 🔎 "
                     f"VAD score={utr_gate.last_score:.3f} "
                     f"threshold={settings.vad_score_threshold:.2f} "
-                    f"started={utr_gate.has_speech_started} silence={silence_len:.2f}s "
+                    f"started={utr_gate.has_speech_started()} silence={silence_len:.2f}s "
                     f"rms={ear.last_rms:.4f} "
                     f"energy={utr_gate.last_score:.4f} energy_threshold={utr_gate.last_dynamic_threshold:.4f}",
                 )

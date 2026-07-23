@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.interfaces import TranscriptionEngine
-from src.streaming.nemotron import NemotronStreamingEngine
+from src.backend.nemotron import NemotronStreamingEngine
 
 
 @dataclass

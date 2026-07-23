@@ -43,7 +43,7 @@ def set_provider(idx: int) -> None:
     if 0 <= idx < len(PROVIDERS):
         with provider_lock:
             provider_idx = idx
-        log.info(f"LLM Router: Primary provider set to {PROVIDERS[idx]['name']}")
+        log.debug(f"LLM Router: Primary provider set to {PROVIDERS[idx]['name']}")
 
 
 def refine(text: str) -> str:
@@ -60,7 +60,7 @@ def refine(text: str) -> str:
 
     try:
         check_and_ask_for_api_key(name, env_var)
-        log.info(f"LLM Router: Using {name} for cleanup.")
+        log.debug(f"LLM Router: Using {name} for cleanup.")
         key = os.environ.get(env_var, "")
 
         return call_api(

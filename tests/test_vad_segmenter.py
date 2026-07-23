@@ -32,7 +32,6 @@ def test_gate_flushes_only_after_voice_then_silence():
 
     gate.push(b"\x01\x00" * 4, now=0.0)
     gate.push(b"\x02\x00" * 4, now=0.1)
-
     assert gate.should_finalize(now=0.2) is False
     assert gate.should_finalize(now=0.31) is True
     assert gate.flush() == (b"\x01\x00" * 4) + (b"\x02\x00" * 4)
@@ -142,9 +141,7 @@ def test_silero_v5_wrapper_prepends_64_sample_context_for_onnx_input(monkeypatch
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros(
-                (2, 1, 128), dtype=np.float32
-            )
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
@@ -178,9 +175,7 @@ def test_silero_v5_wrapper_updates_context_after_each_call(monkeypatch):
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros(
-                (2, 1, 128), dtype=np.float32
-            )
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
@@ -216,15 +211,13 @@ def test_silero_v5_wrapper_reset_clears_context(monkeypatch):
 
         def run(self, _output_names, ort_inputs):
             seen_inputs.append(ort_inputs["input"].copy())
-            return np.array([[0.9]], dtype=np.float32), np.zeros(
-                (2, 1, 128), dtype=np.float32
-            )
+            return np.array([[0.9]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)
 
     monkeypatch.setattr("onnxruntime.InferenceSession", FakeSession)
 
     vad = SileroVAD("fake.onnx")
     vad.is_speech(np.ones(512, dtype=np.float32) * 0.10, sample_rate=16000)
-    vad.reset
+    vad.reset()
     vad.is_speech(np.ones(512, dtype=np.float32) * 0.20, sample_rate=16000)
 
     assert np.allclose(seen_inputs[1][0, :64], 0.0)

@@ -1,8 +1,11 @@
+import logging
 import threading
 from dataclasses import dataclass, field
 from threading import Lock
 
 from src.interfaces import TelemetryRecording, TranscriptionEngine
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -11,32 +14,39 @@ class BackendState:
 
     _lock: Lock = field(default_factory=threading.Lock)
     engine: TranscriptionEngine | None = None
-    model_name: str = "parakeet-tdt-0.6b-v3"
+    model_name: str | None = None
 
-    def get_engine(self) -> TranscriptionEngine:
+    def get_engine(self) -> TranscriptionEngine | None:
         with self._lock:
-            if self.engine is None:
-                self.load_tts(self.model_name)
+            if self.engine is not None:
+                return self.engine
 
             if self.engine is None:
-                raise RuntimeError("Failed to load the transcription engine.")
-            return self.engine
+                if self.model_name is not None:
+                    self.load_tts(self.model_name)
+                    return self.engine
+                else:
+                    log.error("Failed to load the transcription engine. model_name is None")
+                    return None
 
     def set_engine(self, engine: TranscriptionEngine | None) -> None:
         with self._lock:
             self.engine = engine
 
     def load_tts(self, model_name):
+        if model_name is None:
+            return None
         if "nemotron" in model_name.lower():
             from src.engines.nemotron import NemotronEngine
 
             engine = NemotronEngine()
             self.engine = engine
 
-        from src.engines.parakeet import ParakeetEngine
+        else:
+            from src.engines.parakeet import ParakeetEngine
 
-        engine = ParakeetEngine(model_name)
-        self.engine = engine
+            engine = ParakeetEngine(model_name)
+            self.engine = engine
 
 
 @dataclass

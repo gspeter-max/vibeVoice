@@ -32,7 +32,7 @@ DEFAULT_OUTPUT_JSON_FILE_PATH = "evaluation/result/streaming_evaluation_last_run
 
 
 def load_evaluation_model():
-    from src.backend.backend_parakeet import tts_from_disk
+    from src.backend.parakeet import tts_from_disk
 
     return tts_from_disk(PARAKEET_V2_MODEL_NAME)
 
@@ -224,7 +224,7 @@ def transcribe_one_audio_chunk(
     parakeet_v2_model,
     chunk_audio_bytes: bytes,
 ) -> str:
-    from src.backend.backend_parakeet import convert_audio_to_text
+    from src.backend.parakeet import convert_audio_to_text
 
     chunk_audio_array = np.frombuffer(chunk_audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     return convert_audio_to_text(parakeet_v2_model, chunk_audio_array).strip()
@@ -317,16 +317,16 @@ def build_single_example_result_row(
 
 
 def print_single_example_result_matrix(single_example_result_rows: list[dict[str, Any]]) -> None:
-    log.info(
+    log.debug(
         "example_index | chunk_count | total_audio_seconds | final_word_error_rate | final_streaming_text",
     )
-    log.info("-" * 96)
+    log.debug("-" * 96)
     for single_example_result_row in single_example_result_rows:
         final_streaming_text = single_example_result_row["final_streaming_text"]
         shortened_final_streaming_text = (
             final_streaming_text[:57] + "..." if len(final_streaming_text) > 60 else final_streaming_text
         )
-        log.info(
+        log.debug(
             f"{single_example_result_row['example_index']:>13} | "
             f"{single_example_result_row['chunk_count']:>11} | "
             f"{single_example_result_row['total_audio_seconds']:>19.3f} | "
@@ -337,9 +337,9 @@ def print_single_example_result_matrix(single_example_result_rows: list[dict[str
 
 def print_multi_sample_summary(single_example_result_rows: list[dict[str, Any]]) -> None:
     if not single_example_result_rows:
-        log.info("average_final_word_error_rate: 0.0")
-        log.info("average_chunk_count: 0.0")
-        log.info("average_total_audio_seconds: 0.0")
+        log.debug("average_final_word_error_rate: 0.0")
+        log.debug("average_chunk_count: 0.0")
+        log.debug("average_total_audio_seconds: 0.0")
         return
 
     sample_count = len(single_example_result_rows)
@@ -347,11 +347,11 @@ def print_multi_sample_summary(single_example_result_rows: list[dict[str, Any]])
     average_chunk_count = sum(row["chunk_count"] for row in single_example_result_rows) / sample_count
     average_total_audio_seconds = sum(row["total_audio_seconds"] for row in single_example_result_rows) / sample_count
 
-    log.info("Summary")
-    log.info(f"sample_count: {sample_count}")
-    log.info(f"average_final_word_error_rate: {average_final_word_error_rate:.4f}")
-    log.info(f"average_chunk_count: {average_chunk_count:.2f}")
-    log.info(f"average_total_audio_seconds: {average_total_audio_seconds:.3f}")
+    log.debug("Summary")
+    log.debug(f"sample_count: {sample_count}")
+    log.debug(f"average_final_word_error_rate: {average_final_word_error_rate:.4f}")
+    log.debug(f"average_chunk_count: {average_chunk_count:.2f}")
+    log.debug(f"average_total_audio_seconds: {average_total_audio_seconds:.3f}")
 
 
 def run_fake_microphone_stream_for_one_dataset_item(
@@ -370,9 +370,9 @@ def run_fake_microphone_stream_for_one_dataset_item(
 ) -> dict[str, Any]:
     from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 
-    log.info(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...")
+    log.debug(f"[Evaluation] Loading {PARAKEET_V2_MODEL_NAME} model...")
     parakeet_v2_model = load_evaluation_model()
-    log.info("[Evaluation] Loading Silero VAD model...")
+    log.debug("[Evaluation] Loading Silero VAD model...")
     vad_engine = SileroVAD(vad_model_path)
     utterance_gate = SileroUtteranceGate(
         vad_engine,
@@ -585,13 +585,13 @@ def main(command_line_arguments: list[str] | None = None):
 
     for selected_dataset_item in selected_dataset_items:
         example_index = selected_dataset_item["example_index"]
-        log.info(f"[Evaluation] Loading dataset item {example_index}...")
+        log.debug(f"[Evaluation] Loading dataset item {example_index}...")
         audio_array = selected_dataset_item["audio_array"]
         reference_text = selected_dataset_item["reference_text"]
-        log.info("[Evaluation] Converting audio to PCM16 bytes...")
+        log.debug("[Evaluation] Converting audio to PCM16 bytes...")
         pcm16_audio_bytes = convert_audio_array_to_pcm16_audio_bytes(audio_array)
 
-        log.info("[Evaluation] Running fake microphone stream...")
+        log.debug("[Evaluation] Running fake microphone stream...")
         streaming_result = run_fake_microphone_stream_for_one_dataset_item(
             pcm16_audio_bytes=pcm16_audio_bytes,
             reference_text=reference_text,
@@ -608,8 +608,8 @@ def main(command_line_arguments: list[str] | None = None):
             ),
         )
 
-        log.info(f"[Evaluation] Final result for example {example_index}:")
-        log.info(streaming_result)
+        log.debug(f"[Evaluation] Final result for example {example_index}:")
+        log.debug(streaming_result)
         sample_results.append(
             {
                 "example_index": example_index,

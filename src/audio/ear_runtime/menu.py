@@ -25,7 +25,7 @@ def send_switch_command(model_name, ear_instance=None):
         model_name: The name of the speech-to-text model to switch to.
         ear_instance: Optional Ear runtime instance to sync the local model state.
     """
-    log.info(f"\n🔄 Switching Brain to use: {model_name}...\n")
+    log.debug(f"\n🔄 Switching Brain to use: {model_name}...\n")
     if ear_instance:
         ear_instance.current_model = model_name
 
@@ -33,7 +33,7 @@ def send_switch_command(model_name, ear_instance=None):
         fmt_switch(model_name),
     )
     if not sent:
-        log.info("\n❌ Failed to send switch command\n")
+        log.debug("\n❌ Failed to send switch command\n")
 
 
 def self_test(sample_rate: int = settings.rate):
@@ -45,7 +45,7 @@ def self_test(sample_rate: int = settings.rate):
     Args:
         sample_rate: Audio sample rate in Hz. Defaults to settings.rate.
     """
-    log.info("\n🧪 Running SELF-TEST (synthetic audio)...\n")
+    log.info("[system] running self-test")
     duration_seconds = 1.0
     frequency_hz = 440.0
     time_axis = np.linspace(
@@ -65,33 +65,27 @@ def self_test(sample_rate: int = settings.rate):
     for attempt_index in range(max_retries):
         if not os.path.exists(settings.ear_to_brain_socket_path):
             if attempt_index < max_retries - 1:
-                log.info(
+                log.debug(
                     f"\r⏳ Socket not ready, retrying in {retry_delay_seconds}s... "
                     f"(attempt {attempt_index + 1}/{max_retries})\n"
                 )
                 time.sleep(retry_delay_seconds)
                 continue
-            log.info(
-                f"\r❌ Self-test failed: Socket not found at {settings.ear_to_brain_socket_path}\n"
-            )
-            log.info("   Is Brain running? Check this terminal for Brain output.\n")
+            log.warning("[system] self-test failed: brain socket not found")
             return
 
         if send_message(audio_data):
-            log.info("\r✅ Self-test audio sent to Brain\n")
+            log.info("[system] self-test audio sent to brain")
             return
 
         if attempt_index < max_retries - 1:
-            log.info(
+            log.debug(
                 f"\r⏳ Brain busy, retrying in {retry_delay_seconds}s... "
                 f"(attempt {attempt_index + 1}/{max_retries})\n"
             )
             time.sleep(retry_delay_seconds)
         else:
-            log.info("\r❌ Self-test failed: Brain not accepting connections\n")
-            log.info(
-                "   Brain might be loading model. Check this terminal for Brain output.\n"
-            )
+            log.warning("[system] self-test failed: brain not responding")
 
 
 class TerminalMenu(threading.Thread):

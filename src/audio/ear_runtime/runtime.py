@@ -29,7 +29,7 @@ def start_ear():
     if env_mic_index is not None:
         try:
             selected_mic_index = int(env_mic_index)
-            log.info(f"[Ear] Using microphone index {selected_mic_index} from .env")
+            log.debug(f"[Ear] Using microphone index {selected_mic_index} from .env")
         except ValueError:
             temporary_pyaudio = pyaudio.PyAudio()
             selected_mic_index = select_mic(temporary_pyaudio)
@@ -48,7 +48,7 @@ def start_ear():
 
     try:
         vad_engine = SileroVAD(settings.vad_model_path)
-        log.info("[Ear] Silero VAD loaded ✓")
+        log.info("[system] VAD initialized")
     except Exception as e:
         vad_engine = None
         log.warning(f"[Ear] VAD load failed: {e}")
@@ -77,7 +77,7 @@ def start_ear():
 
     def _toggle_recording_wrapper():
         ear.toggle_active = True
-        log.info("\r\n⏸️  Toggle mode — tap Right CMD again to stop")
+        log.info("[ear]    toggle mode active")
         _start_recording_wrapper()
 
     input_trigger = InputTrigger(
@@ -89,25 +89,21 @@ def start_ear():
     )
     input_trigger.start()
 
-    log.info("[Ear] 🖱️  Mouse listener started - Hold RIGHT button for 1s to record")
+    log.info("[ear]    mouse listener started")
 
     backend_label = {
         "parakeet": "Parakeet TDT v3",
         "nemotron": "Nemotron",
     }.get(settings.backend, settings.backend)
 
-    log.info("─" * 60)
-    log.info(f"🎙️  VIBEVOICE PRO | {backend_label} | {ear.active_mic_name}")
-    log.info("Hotkey: RIGHT CMD (hold) | Mouse: RIGHT BUTTON (hold)")
-    log.info("─" * 60)
-    log.info("Ready. Press hotkey to record.")
+    log.info(f"[ear]    ready using {backend_label} on {ear.active_mic_name}")
 
     try:
         ear.record_loop(
             input_trigger=input_trigger, utr_gate=utr_gate, session=session, log_state=log_state
         )
     except KeyboardInterrupt:
-        log.info("\r\n\nShutting down Ear...")
+        log.info("[ear]    shutting down")
     finally:
         menu.stop()
         ear.cleanup()

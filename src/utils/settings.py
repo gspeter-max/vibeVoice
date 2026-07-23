@@ -39,6 +39,7 @@ class VibeVoiceSettings(BaseSettings):
         default_factory=lambda: [
             "fast-conformer-ctc-en-24500",
             "moonshine-base",
+            "SenseVoice",
             "parakeet-tdt-0.6b-v2",
             "parakeet-tdt-0.6b-v3",
         ]

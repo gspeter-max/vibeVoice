@@ -35,7 +35,7 @@ def fix_macos_library_paths():
     if not library_folder_path.exists():
         return
 
-    log.info(f"Bootstrap: Verifying library paths for {file_to_patch.name}...")
+    log.debug(f"Bootstrap: Verifying library paths for {file_to_patch.name}...")
 
     # 3. Add the folder path to the file's internal search list using a Mac system tool
     try:
@@ -45,7 +45,7 @@ def fix_macos_library_paths():
             "-add_rpath", str(library_folder_path),
             str(file_to_patch)
         ], check=True, capture_output=True)
-        log.info(f"Bootstrap: ✅ Added library path: {library_folder_path}")
+        log.debug(f"Bootstrap: ✅ Added library path: {library_folder_path}")
     except subprocess.CalledProcessError as error_message:
         # If the path is already there, we don't need to do anything
         error_text = error_message.stderr.decode().lower()
