@@ -38,6 +38,9 @@ dev = [
     "pytest-mock>=3.12.0",
 ]
 
+[too.pyright] 
+extraPaths = ["."]
+
 # TTS specific libraries (if not used by Nemotron)
 tts = [
     "psutil>=5.9.0",          # System monitoring

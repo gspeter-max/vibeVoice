@@ -195,20 +195,7 @@ def apply_overlap(
         next_chunk_tail_bytes = b""
 
     overlap_len: float = len(tail) / 2.0 / rate
-    # testfile: pathlib.Path = pathlib.Path(os.getcwd()) / "equalized_overlap.wav"
-    # with wave.open(str(testfile), "wb") as waveFile:
-    #     waveFile.setnchannels(1)
-    #     waveFile.setsampwidth(2)
-    #     waveFile.setframerate(settings.rate)
-    #     waveFile.writeframes(equalized_overlap)
-    #
-    # testfile = pathlib.Path(os.getcwd()) / "overlapped_audio_bytes.wav"
-    # with wave.open(str(testfile), "wb") as waveFile:
-    #     waveFile.setnchannels(1)
-    #     waveFile.setsampwidth(2)
-    #     waveFile.setframerate(settings.rate)
-    #     waveFile.writeframes(overlapped_audio_bytes)
-    #
+
     return OverlapResult(
         audio=overlapped_audio_bytes,
         tail=next_chunk_tail_bytes,
