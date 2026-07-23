@@ -28,8 +28,8 @@ from src.audio.ear_runtime.recording import (
 )
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 from src.input.hotkeys import is_rcmd
-from src.streaming.capture_session import CaptureSession
-from src.streaming.session import should_split
+from src.audio.capture_session import CaptureSession
+from src.audio.session import should_split
 from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
 

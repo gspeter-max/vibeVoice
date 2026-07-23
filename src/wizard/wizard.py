@@ -16,7 +16,7 @@ sys.path.append(os.getcwd())
 load_dotenv()
 
 from src.utils.env_manager import is_interactive
-from src.utils.wizard_tui import WizardApp
+from src.wizard.wizard_tui import WizardApp
 
 
 def run_wizard():

@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import time
 import socket
-from src.utils.socket_utils import create_socket
+from src.ipc.socket_utils import create_socket
 import signal
 import subprocess
 

@@ -25,7 +25,7 @@ from src.ipc.protocol import (
     fmt_commit,
     fmt_event,
 )
-from src.streaming.capture_session import CaptureSession
+from src.audio.capture_session import CaptureSession
 from src.utils.settings import settings
 
 

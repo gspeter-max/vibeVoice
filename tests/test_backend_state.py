@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.backend.state import BackendState, SessionState
-from src.engines.nemotron import NemotronEngine
-from src.engines.parakeet import ParakeetEngine
+from src.models.nemotron_engine import NemotronEngine
+from src.models.parakeet_engine import ParakeetEngine
 
 
 def test_backend_state_lazy_loading_success():
@@ -17,7 +17,7 @@ def test_backend_state_lazy_loading_success():
     """
     mock_engine = MagicMock()
     with patch(
-        "src.engines.parakeet.ParakeetEngine", return_value=mock_engine
+        "src.models.parakeet_engine.ParakeetEngine", return_value=mock_engine
     ) as mock_parakeet_engine:
         backend_state = BackendState(model_name="parakeet")
         engine = backend_state.get_engine()
@@ -51,7 +51,7 @@ def test_backend_state_thread_safety():
     verifying no race conditions occur.
     """
     mock_engine = MagicMock()
-    with patch("src.engines.parakeet.ParakeetEngine", return_value=mock_engine) as mock_parakeet:
+    with patch("src.models.parakeet_engine.ParakeetEngine", return_value=mock_engine) as mock_parakeet:
         backend_state = BackendState(model_name="parakeet")
         with concurrent.futures.ThreadPoolExecutor() as pool:
             task = []
@@ -72,8 +72,8 @@ def test_backend_state_engine_selection():
     mock_engine_parakeet = MagicMock()
     mock_engine_nemotron = MagicMock()
     with (
-        patch("src.engines.parakeet.ParakeetEngine", return_value=mock_engine_parakeet),
-        patch("src.engines.nemotron.NemotronEngine", return_value=mock_engine_nemotron),
+        patch("src.models.parakeet_engine.ParakeetEngine", return_value=mock_engine_parakeet),
+        patch("src.models.nemotron_engine.NemotronEngine", return_value=mock_engine_nemotron),
     ):
         backend_state = BackendState()
         backend_state.load_tts("Nemotron")

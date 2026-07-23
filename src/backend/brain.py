@@ -65,7 +65,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from sound import PlaySound
+from src.audio.sound import PlaySound
 from src import log
 from src.backend.data_record.telemetry import (
     _handle_session_telemetry_event,
@@ -368,7 +368,7 @@ def handle_streaming_audio_chunk(
                         rec.transcript_parts = {0: text}
                     else:
                         last_chunk_text = rec.transcript_parts.get(seq - 1, "")
-                        from src.streaming.session import dedup_prefix
+                        from src.audio.session import dedup_prefix
 
                         dedup_analysis = dedup_prefix(last_chunk_text, text)
                         rec.transcript_parts[seq] = dedup_analysis.text

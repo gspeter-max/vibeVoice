@@ -23,7 +23,7 @@ except (ModuleNotFoundError, ImportError, OSError) as exc:
     else:
         raise exc
 
-import src.backend.parakeet as parakeet
+import src.models.parakeet as parakeet
 
 
 def test_transcribe():
@@ -65,7 +65,7 @@ def test_download_and_extract():
 
 def test_load_model_already_exists():
     with patch("os.path.exists", return_value=True), \
-         patch("src.backend.parakeet._download_and_extract") as mock_download, \
+         patch("src.models.parakeet._download_and_extract") as mock_download, \
          patch.object(sherpa_onnx.OfflineRecognizer, "from_moonshine", return_value="<mock_recognizer>"):
 
         recognizer = parakeet.load_model("moonshine-base")
@@ -137,8 +137,8 @@ def test_load_model_types(monkeypatch, model_name, folder_name, factory_method, 
     monkeypatch.setattr(parakeet.settings, "stt_model", model_name)
     monkeypatch.setattr(parakeet.settings, "rate", 16000)
 
-    with patch("src.backend.parakeet.get_integer_from_environment", return_value=6), \
-         patch("src.backend.parakeet._download_and_extract") as mock_download, \
+    with patch("src.models.parakeet.get_integer_from_environment", return_value=6), \
+         patch("src.models.parakeet._download_and_extract") as mock_download, \
          patch("os.path.exists", return_value=False), \
          patch.object(sherpa_onnx.OfflineRecognizer, factory_method, return_value="<mock_recognizer>") as mock_factory:
 

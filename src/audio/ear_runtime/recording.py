@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from src.audio.vad_segmenter import SileroUtteranceGate
 from src.interfaces import EarProtocol
-from src.streaming.capture_session import CaptureSession
+from src.audio.capture_session import CaptureSession
 
 
 @dataclass
@@ -41,7 +41,7 @@ class LogState:
 import numpy as np
 import pyaudio
 
-from sound import PlaySound
+from src.audio.sound import PlaySound
 from src import log
 from src.audio.ear_runtime.analysis import (
     analyze_frequency_bands,

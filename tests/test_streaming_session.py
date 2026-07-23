@@ -1,5 +1,5 @@
 # tests/test_streaming_session.py
-from src.streaming.session import StreamingSession
+from src.audio.session import StreamingSession
 
 def test_session_tracks_tail_bytes_for_audio_overlap():
     session = StreamingSession(overlap_secs=0.1, rate=16000)

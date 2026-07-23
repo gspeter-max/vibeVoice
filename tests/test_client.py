@@ -11,7 +11,7 @@ from src.ipc.client import (
     send_event,
     send_message,
 )
-from src.streaming.capture_session import CaptureSession
+from src.audio.capture_session import CaptureSession
 
 
 class FakeSocket:

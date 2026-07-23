@@ -87,7 +87,7 @@ fi
 
 # 1. Run the Setup Wizard (Foreground)
 # This handles Provider selection, API keys, Mode, and Telemetry using Rich.
-"$VENV_PYTHON" src/utils/wizard.py
+"$VENV_PYTHON" src/wizard/wizard.py
 
 # 2. Load the UPDATED environment
 [ -f .env ] && {

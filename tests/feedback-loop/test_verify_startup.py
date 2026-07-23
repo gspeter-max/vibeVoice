@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 # We will import the module under test after we write it
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../feedback-loop')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../tools/feedback_loop')))
 
 # -----------------------------------------------------------------------------
 # Tests for Task 2: stop_all_programs_and_exit_script

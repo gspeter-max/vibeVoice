@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from src.streaming.session import apply_overlap
+from src.audio.session import apply_overlap
 
 
 @dataclass

@@ -13,7 +13,7 @@ import time
 from src import log
 from src.ipc.client import SocketConfig, send_message
 from src.utils.settings import settings
-from src.utils.socket_utils import create_socket
+from src.ipc.socket_utils import create_socket
 
 
 def send_hud_command(

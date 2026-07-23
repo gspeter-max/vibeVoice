@@ -1,6 +1,6 @@
 import numpy as np
 from unittest.mock import MagicMock
-from src.engines.nemotron import NemotronEngine
+from src.models.nemotron_engine import NemotronEngine
 
 def test_nemotron_engine_is_stateful():
     engine = NemotronEngine()

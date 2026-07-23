@@ -8,7 +8,7 @@ import pyaudio
 if TYPE_CHECKING:
     from src.audio.ear_runtime.recording import LogState
     from src.audio.vad_segmenter import SileroUtteranceGate
-    from src.streaming.capture_session import CaptureSession
+    from src.audio.capture_session import CaptureSession
 
 
 class EarProtocol(Protocol):

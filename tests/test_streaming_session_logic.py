@@ -1,4 +1,4 @@
-from src.streaming.session import (
+from src.audio.session import (
     _equalize_energy,
     apply_overlap,
     dedup_prefix,

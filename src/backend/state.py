@@ -37,13 +37,13 @@ class BackendState:
         if model_name is None:
             return None
         if "nemotron" in model_name.lower():
-            from src.engines.nemotron import NemotronEngine
+            from src.models.nemotron_engine import NemotronEngine
 
             engine = NemotronEngine()
             self.engine = engine
 
         else:
-            from src.engines.parakeet import ParakeetEngine
+            from src.models.parakeet_engine import ParakeetEngine
 
             engine = ParakeetEngine(model_name)
             self.engine = engine

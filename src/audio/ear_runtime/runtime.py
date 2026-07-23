@@ -17,7 +17,7 @@ from src.audio.ear_runtime.menu import TerminalMenu
 from src.audio.ear_runtime.recording import LogState, start_recording_state
 from src.audio.vad_segmenter import SileroUtteranceGate, SileroVAD
 from src.input.hotkeys import InputTrigger, RecordingCallbacks
-from src.streaming.capture_session import CaptureSession
+from src.audio.capture_session import CaptureSession
 from src.ui.hud_client import change_ui_status, ui_wave_input
 from src.utils.settings import settings
 
